@@ -26,6 +26,8 @@ export default function LoginPage() {
       const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
       const endpoint = mode === 'login' ? '/auth/login' : '/auth/register';
       
+      console.log('Attempting to connect to:', `${API_BASE}${endpoint}`);
+      
       const response = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: {
@@ -34,7 +36,10 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
+      console.log('Response status:', response.status);
+      
       const data = await response.json();
+      console.log('Response data:', data);
 
       if (!response.ok) {
         throw new Error(data.error || `${mode === 'login' ? 'Login' : 'Registration'} failed`);
@@ -43,7 +48,12 @@ export default function LoginPage() {
       setToken(data.token);
       navigate('/dashboard');
     } catch (err) {
-      setError((err as Error).message);
+      console.error('Auth error:', err);
+      const errorMessage = (err as Error).message;
+      setError(errorMessage.includes('Failed to fetch') 
+        ? 'Cannot connect to server. Please check if the backend is running.' 
+        : errorMessage
+      );
     } finally {
       setLoading(false);
     }
@@ -240,6 +250,19 @@ export default function LoginPage() {
             </p>
           </div>
         )}
+
+        <div style={{ 
+          marginTop: '16px', 
+          padding: '12px', 
+          background: '#0f172a',
+          borderRadius: '8px',
+          fontSize: '12px',
+          color: '#64748b'
+        }}>
+          <p style={{ margin: 0 }}>
+            API: {import.meta.env.VITE_API_URL || 'http://localhost:3000'}
+          </p>
+        </div>
       </div>
     </div>
   );
