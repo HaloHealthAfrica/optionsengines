@@ -1,30 +1,10 @@
 // Authentication routes
 import { Router, Request, Response } from 'express';
-import bcrypt from 'bcrypt';
 import { authService } from '../services/auth.service.js';
+import { userService } from '../services/user.service.js';
 import { logger } from '../utils/logger.js';
 
 const router = Router();
-
-// In-memory user store (replace with database in production)
-const users = new Map<string, { email: string; passwordHash: string; role: string }>();
-
-// Initialize with a default admin user
-const initDefaultUser = async () => {
-  const defaultEmail = 'admin@optionagents.com';
-  const defaultPassword = 'admin123'; // Change this in production!
-  const passwordHash = await bcrypt.hash(defaultPassword, 10);
-  
-  users.set(defaultEmail, {
-    email: defaultEmail,
-    passwordHash,
-    role: 'admin',
-  });
-  
-  logger.info('Default admin user initialized', { email: defaultEmail });
-};
-
-initDefaultUser();
 
 // Login endpoint
 router.post('/login', async (req: Request, res: Response) => {
@@ -38,7 +18,7 @@ router.post('/login', async (req: Request, res: Response) => {
       });
     }
 
-    const user = users.get(email);
+    const user = await userService.verifyPassword(email, password);
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -46,30 +26,19 @@ router.post('/login', async (req: Request, res: Response) => {
       });
     }
 
-    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
-    if (!isValidPassword) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid credentials',
-      });
-    }
-
     const result = authService.generateToken({
-      userId: email,
+      userId: user.user_id,
       email: user.email,
       role: user.role,
     });
 
-    logger.info('User logged in', { email: user.email });
+    logger.info('User logged in', { email: user.email, userId: user.user_id });
 
     res.json({
       success: true,
       token: result.token,
       expiresAt: result.expiresAt,
-      user: {
-        email: user.email,
-        role: user.role,
-      },
+      user: userService.toPublic(user),
     });
   } catch (error) {
     logger.error('Login failed', error as Error);
@@ -80,7 +49,7 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
-// Register endpoint (optional - for creating new users)
+// Register endpoint
 router.post('/register', async (req: Request, res: Response) => {
   try {
     const { email, password, role = 'user' } = req.body;
@@ -92,49 +61,33 @@ router.post('/register', async (req: Request, res: Response) => {
       });
     }
 
-    if (users.has(email)) {
-      return res.status(409).json({
-        success: false,
-        error: 'User already exists',
-      });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        error: 'Password must be at least 6 characters',
-      });
-    }
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    users.set(email, {
-      email,
-      passwordHash,
-      role,
-    });
+    const user = await userService.createUser({ email, password, role });
 
     const result = authService.generateToken({
-      userId: email,
-      email,
-      role,
+      userId: user.user_id,
+      email: user.email,
+      role: user.role,
     });
 
-    logger.info('User registered', { email, role });
+    logger.info('User registered', { email, userId: user.user_id });
 
     res.json({
       success: true,
       token: result.token,
       expiresAt: result.expiresAt,
-      user: {
-        email,
-        role,
-      },
+      user,
     });
   } catch (error) {
+    const errorMessage = (error as Error).message;
+    const statusCode = 
+      errorMessage.includes('already exists') ? 409 :
+      errorMessage.includes('Invalid email') || errorMessage.includes('Password must') ? 400 :
+      500;
+
     logger.error('Registration failed', error as Error);
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
-      error: 'Registration failed',
+      error: errorMessage,
     });
   }
 });
@@ -221,6 +174,48 @@ router.post('/logout', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Logout failed',
+    });
+  }
+});
+
+// Get current user info
+router.get('/me', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'No token provided',
+      });
+    }
+
+    const token = authHeader.substring(7);
+    const result = authService.verifyToken(token);
+
+    if (!result.valid || !result.payload) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid token',
+      });
+    }
+
+    const user = await userService.findById(result.payload.userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
+    res.json({
+      success: true,
+      user: userService.toPublic(user),
+    });
+  } catch (error) {
+    logger.error('Get user info failed', error as Error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get user info',
     });
   }
 });

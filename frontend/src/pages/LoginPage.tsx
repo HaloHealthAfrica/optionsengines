@@ -2,21 +2,31 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { setToken } from '../services/apiClient';
 
+type Mode = 'login' | 'register';
+
 export default function LoginPage() {
+  const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
     try {
+      if (mode === 'register' && password !== confirmPassword) {
+        throw new Error('Passwords do not match');
+      }
+
       const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-      const response = await fetch(`${API_BASE}/auth/login`, {
+      const endpoint = mode === 'login' ? '/auth/login' : '/auth/register';
+      
+      const response = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -27,7 +37,7 @@ export default function LoginPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Login failed');
+        throw new Error(data.error || `${mode === 'login' ? 'Login' : 'Registration'} failed`);
       }
 
       setToken(data.token);
@@ -71,6 +81,12 @@ export default function LoginPage() {
     }
   };
 
+  const toggleMode = () => {
+    setMode(mode === 'login' ? 'register' : 'login');
+    setError(null);
+    setConfirmPassword('');
+  };
+
   return (
     <div style={{ 
       display: 'flex', 
@@ -93,7 +109,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleLogin}>
+        <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '16px' }}>
             <label htmlFor="email" style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>
               Email
@@ -103,14 +119,14 @@ export default function LoginPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@optionagents.com"
+              placeholder={mode === 'login' ? 'admin@optionagents.com' : 'your@email.com'}
               required
               disabled={loading}
               style={{ width: '100%', padding: '10px', fontSize: '14px' }}
             />
           </div>
 
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: mode === 'register' ? '16px' : '24px' }}>
             <label htmlFor="password" style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>
               Password
             </label>
@@ -126,14 +142,48 @@ export default function LoginPage() {
             />
           </div>
 
+          {mode === 'register' && (
+            <div style={{ marginBottom: '24px' }}>
+              <label htmlFor="confirmPassword" style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>
+                Confirm Password
+              </label>
+              <input
+                id="confirmPassword"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm your password"
+                required
+                disabled={loading}
+                style={{ width: '100%', padding: '10px', fontSize: '14px' }}
+              />
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={loading}
             style={{ width: '100%', marginBottom: '12px' }}
           >
-            {loading ? 'Logging in...' : 'Login'}
+            {loading ? (mode === 'login' ? 'Logging in...' : 'Creating account...') : (mode === 'login' ? 'Login' : 'Sign Up')}
           </button>
         </form>
+
+        <button
+          onClick={toggleMode}
+          disabled={loading}
+          style={{ 
+            width: '100%', 
+            background: 'transparent',
+            border: 'none',
+            color: '#60a5fa',
+            padding: '8px',
+            cursor: 'pointer',
+            fontSize: '14px'
+          }}
+        >
+          {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Login'}
+        </button>
 
         <div style={{ 
           margin: '24px 0', 
@@ -173,21 +223,23 @@ export default function LoginPage() {
           {loading ? 'Generating...' : 'Use Demo Token'}
         </button>
 
-        <div style={{ 
-          marginTop: '24px', 
-          padding: '16px', 
-          background: '#0f172a',
-          borderRadius: '8px',
-          fontSize: '13px'
-        }}>
-          <p style={{ margin: '0 0 8px 0', fontWeight: 500, color: '#94a3b8' }}>
-            Default Credentials:
-          </p>
-          <p style={{ margin: '0', color: '#64748b', fontFamily: 'monospace' }}>
-            Email: admin@optionagents.com<br />
-            Password: admin123
-          </p>
-        </div>
+        {mode === 'login' && (
+          <div style={{ 
+            marginTop: '24px', 
+            padding: '16px', 
+            background: '#0f172a',
+            borderRadius: '8px',
+            fontSize: '13px'
+          }}>
+            <p style={{ margin: '0 0 8px 0', fontWeight: 500, color: '#94a3b8' }}>
+              Default Credentials:
+            </p>
+            <p style={{ margin: '0', color: '#64748b', fontFamily: 'monospace' }}>
+              Email: admin@optionagents.com<br />
+              Password: admin123
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
