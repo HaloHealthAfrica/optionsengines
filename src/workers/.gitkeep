@@ -1,0 +1,2 @@
+# Workers directory
+# Background workers: signal-processor, order-creator, paper-executor, position-refresher, exit-monitor

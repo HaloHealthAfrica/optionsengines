@@ -1,0 +1,92 @@
+{
+  "test": {
+    "description": "Local test environment with full isolation and mocking",
+    "isolatedEnvironment": true,
+    "mockExternalAPIs": true,
+    "captureAllLogs": true,
+    "timeout": 30000,
+    "database": {
+      "url": "postgresql://test:test@localhost:5432/test_db",
+      "resetBetweenTests": true
+    },
+    "apis": {
+      "twelvedata": {
+        "mock": true,
+        "baseUrl": "https://api.twelvedata.com"
+      },
+      "alpaca": {
+        "mock": true,
+        "baseUrl": "https://api.alpaca.markets"
+      },
+      "marketdata": {
+        "mock": true,
+        "baseUrl": "https://api.marketdata.app"
+      },
+      "broker": {
+        "mock": true,
+        "blockLiveCalls": true
+      }
+    }
+  },
+  "development": {
+    "description": "Development environment with optional real API calls",
+    "isolatedEnvironment": true,
+    "mockExternalAPIs": true,
+    "captureAllLogs": true,
+    "timeout": 60000,
+    "database": {
+      "url": "postgresql://dev:dev@localhost:5432/dev_db",
+      "resetBetweenTests": false
+    },
+    "apis": {
+      "twelvedata": {
+        "mock": false,
+        "baseUrl": "https://api.twelvedata.com",
+        "rateLimit": true
+      },
+      "alpaca": {
+        "mock": false,
+        "baseUrl": "https://paper-api.alpaca.markets"
+      },
+      "marketdata": {
+        "mock": false,
+        "baseUrl": "https://api.marketdata.app"
+      },
+      "broker": {
+        "mock": true,
+        "blockLiveCalls": true
+      }
+    }
+  },
+  "staging": {
+    "description": "Staging environment with real APIs but isolated trading",
+    "isolatedEnvironment": true,
+    "mockExternalAPIs": false,
+    "captureAllLogs": true,
+    "timeout": 60000,
+    "database": {
+      "url": "postgresql://staging:staging@staging-db:5432/staging_db",
+      "resetBetweenTests": false
+    },
+    "apis": {
+      "twelvedata": {
+        "mock": false,
+        "baseUrl": "https://api.twelvedata.com",
+        "rateLimit": true
+      },
+      "alpaca": {
+        "mock": false,
+        "baseUrl": "https://paper-api.alpaca.markets"
+      },
+      "marketdata": {
+        "mock": false,
+        "baseUrl": "https://api.marketdata.app"
+      },
+      "broker": {
+        "mock": false,
+        "baseUrl": "https://paper-api.broker.com",
+        "blockLiveCalls": true
+      }
+    }
+  }
+}
