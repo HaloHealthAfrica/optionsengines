@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc && powershell -Command \"Copy-Item -Path 'src/migrations/*.sql' -Destination 'dist/migrations/' -Force\"",
+    "build": "node build.js",
+    "build:windows": "tsc && powershell -Command \"Copy-Item -Path 'src/migrations/*.sql' -Destination 'dist/migrations/' -Force\"",
     "start": "node dist/server.js",
     "start:server": "node dist/server.js",
     "test": "jest",

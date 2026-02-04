@@ -5,6 +5,7 @@ app = "dual-engine-options-trading"
 primary_region = "iad"
 
 [build]
+  builder = "heroku/buildpacks:20"
 
 [env]
   PORT = "8080"
@@ -33,3 +34,4 @@ primary_region = "iad"
 
 [deploy]
   strategy = "rolling"
+  release_command = "node dist/migrations/runner.js up"
