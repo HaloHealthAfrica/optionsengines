@@ -10,3 +10,7 @@ README.md
 dist
 *.md
 .kiro
+
+# Explicitly include these
+!package-lock.json
+!package.json
