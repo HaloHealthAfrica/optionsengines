@@ -15,7 +15,17 @@ const app: Express = express();
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://optionsengines.vercel.app',
+    /^https:\/\/optionsengines-.*\.vercel\.app$/, // Allow preview deployments
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(
   express.json({
     verify: (req, _res, buf) => {
