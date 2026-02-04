@@ -10,6 +10,7 @@ import featureFlagRoutes from './routes/feature-flags.js';
 import engine2Routes from './routes/engine2.js';
 import positioningRoutes from './routes/positioning.js';
 import optionsEnginesRoutes from './routes/options-engines.js';
+import authRoutes from './routes/auth.js';
 
 const app: Express = express();
 
@@ -37,6 +38,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined'));
 
 // Routes
+app.use('/auth', authRoutes);
 app.use('/webhook', webhookRoutes);
 app.use('/feature-flags', featureFlagRoutes);
 app.use('/positioning', positioningRoutes);
