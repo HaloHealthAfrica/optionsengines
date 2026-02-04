@@ -11,9 +11,9 @@ CREATE TABLE IF NOT EXISTS experiments (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_experiments_variant ON experiments(variant);
-CREATE INDEX idx_experiments_signal_id ON experiments(signal_id);
-CREATE INDEX idx_experiments_created_at ON experiments(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_experiments_variant ON experiments(variant);
+CREATE INDEX IF NOT EXISTS idx_experiments_signal_id ON experiments(signal_id);
+CREATE INDEX IF NOT EXISTS idx_experiments_created_at ON experiments(created_at DESC);
 
 -- agent_decisions: Individual agent outputs per signal
 CREATE TABLE IF NOT EXISTS agent_decisions (
@@ -30,10 +30,10 @@ CREATE TABLE IF NOT EXISTS agent_decisions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_agent_decisions_experiment_id ON agent_decisions(experiment_id);
-CREATE INDEX idx_agent_decisions_signal_id ON agent_decisions(signal_id);
-CREATE INDEX idx_agent_decisions_agent_name ON agent_decisions(agent_name);
-CREATE INDEX idx_agent_decisions_agent_type ON agent_decisions(agent_type);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_experiment_id ON agent_decisions(experiment_id);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_signal_id ON agent_decisions(signal_id);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_agent_name ON agent_decisions(agent_name);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_agent_type ON agent_decisions(agent_type);
 
 -- shadow_trades: Simulated trades from Engine 2
 CREATE TABLE IF NOT EXISTS shadow_trades (
@@ -53,10 +53,10 @@ CREATE TABLE IF NOT EXISTS shadow_trades (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_shadow_trades_experiment_id ON shadow_trades(experiment_id);
-CREATE INDEX idx_shadow_trades_signal_id ON shadow_trades(signal_id);
-CREATE INDEX idx_shadow_trades_symbol ON shadow_trades(symbol);
-CREATE INDEX idx_shadow_trades_entry_timestamp ON shadow_trades(entry_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_shadow_trades_experiment_id ON shadow_trades(experiment_id);
+CREATE INDEX IF NOT EXISTS idx_shadow_trades_signal_id ON shadow_trades(signal_id);
+CREATE INDEX IF NOT EXISTS idx_shadow_trades_symbol ON shadow_trades(symbol);
+CREATE INDEX IF NOT EXISTS idx_shadow_trades_entry_timestamp ON shadow_trades(entry_timestamp DESC);
 
 -- shadow_positions: Simulated positions from Engine 2
 CREATE TABLE IF NOT EXISTS shadow_positions (
@@ -80,10 +80,10 @@ CREATE TABLE IF NOT EXISTS shadow_positions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_shadow_positions_status ON shadow_positions(status);
-CREATE INDEX idx_shadow_positions_shadow_trade_id ON shadow_positions(shadow_trade_id);
-CREATE INDEX idx_shadow_positions_symbol ON shadow_positions(symbol);
-CREATE INDEX idx_shadow_positions_expiration ON shadow_positions(expiration);
+CREATE INDEX IF NOT EXISTS idx_shadow_positions_status ON shadow_positions(status);
+CREATE INDEX IF NOT EXISTS idx_shadow_positions_shadow_trade_id ON shadow_positions(shadow_trade_id);
+CREATE INDEX IF NOT EXISTS idx_shadow_positions_symbol ON shadow_positions(symbol);
+CREATE INDEX IF NOT EXISTS idx_shadow_positions_expiration ON shadow_positions(expiration);
 
 -- agent_performance: Performance metrics per agent
 CREATE TABLE IF NOT EXISTS agent_performance (
@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS agent_performance (
   last_updated TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_agent_performance_agent_name ON agent_performance(agent_name);
+CREATE INDEX IF NOT EXISTS idx_agent_performance_agent_name ON agent_performance(agent_name);
 
 -- feature_flags: System-wide feature flag configuration
 CREATE TABLE IF NOT EXISTS feature_flags (
@@ -112,8 +112,8 @@ CREATE TABLE IF NOT EXISTS feature_flags (
   updated_by VARCHAR(100)
 );
 
-CREATE INDEX idx_feature_flags_name ON feature_flags(name);
-CREATE INDEX idx_feature_flags_enabled ON feature_flags(enabled);
+CREATE INDEX IF NOT EXISTS idx_feature_flags_name ON feature_flags(name);
+CREATE INDEX IF NOT EXISTS idx_feature_flags_enabled ON feature_flags(enabled);
 
 -- Insert default feature flags (all disabled by default)
 INSERT INTO feature_flags (name, enabled, description) VALUES

@@ -13,10 +13,10 @@ CREATE TABLE IF NOT EXISTS signals (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_signals_status ON signals(status);
-CREATE INDEX idx_signals_created_at ON signals(created_at DESC);
-CREATE INDEX idx_signals_symbol ON signals(symbol);
-CREATE INDEX idx_signals_timestamp ON signals(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status);
+CREATE INDEX IF NOT EXISTS idx_signals_created_at ON signals(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol);
+CREATE INDEX IF NOT EXISTS idx_signals_timestamp ON signals(timestamp DESC);
 
 -- refactored_signals: Enhanced signal tracking with validation results
 CREATE TABLE IF NOT EXISTS refactored_signals (
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS refactored_signals (
   processed_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_refactored_signals_signal_id ON refactored_signals(signal_id);
+CREATE INDEX IF NOT EXISTS idx_refactored_signals_signal_id ON refactored_signals(signal_id);
 
 -- orders: Tracks all orders (paper and live)
 CREATE TABLE IF NOT EXISTS orders (
@@ -45,10 +45,10 @@ CREATE TABLE IF NOT EXISTS orders (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_orders_status ON orders(status);
-CREATE INDEX idx_orders_signal_id ON orders(signal_id);
-CREATE INDEX idx_orders_symbol ON orders(symbol);
-CREATE INDEX idx_orders_order_type ON orders(order_type);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_signal_id ON orders(signal_id);
+CREATE INDEX IF NOT EXISTS idx_orders_symbol ON orders(symbol);
+CREATE INDEX IF NOT EXISTS idx_orders_order_type ON orders(order_type);
 
 -- trades: Records of executed trades
 CREATE TABLE IF NOT EXISTS trades (
@@ -61,8 +61,8 @@ CREATE TABLE IF NOT EXISTS trades (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_trades_order_id ON trades(order_id);
-CREATE INDEX idx_trades_fill_timestamp ON trades(fill_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_order_id ON trades(order_id);
+CREATE INDEX IF NOT EXISTS idx_trades_fill_timestamp ON trades(fill_timestamp DESC);
 
 -- refactored_positions: Tracks open and closed positions
 CREATE TABLE IF NOT EXISTS refactored_positions (
@@ -85,9 +85,9 @@ CREATE TABLE IF NOT EXISTS refactored_positions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_positions_status ON refactored_positions(status);
-CREATE INDEX idx_positions_symbol ON refactored_positions(symbol);
-CREATE INDEX idx_positions_expiration ON refactored_positions(expiration);
+CREATE INDEX IF NOT EXISTS idx_positions_status ON refactored_positions(status);
+CREATE INDEX IF NOT EXISTS idx_positions_symbol ON refactored_positions(symbol);
+CREATE INDEX IF NOT EXISTS idx_positions_expiration ON refactored_positions(expiration);
 
 -- exit_rules: Configuration for exit conditions
 CREATE TABLE IF NOT EXISTS exit_rules (
