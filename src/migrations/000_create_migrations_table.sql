@@ -7,6 +7,6 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
   applied_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_schema_migrations_applied_at ON schema_migrations(applied_at DESC);
+CREATE INDEX IF NOT EXISTS idx_schema_migrations_applied_at ON schema_migrations(applied_at DESC);
 
 COMMENT ON TABLE schema_migrations IS 'Tracks applied database migrations';
