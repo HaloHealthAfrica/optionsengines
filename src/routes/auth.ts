@@ -7,29 +7,31 @@ import { logger } from '../utils/logger.js';
 const router = Router();
 
 // Login endpoint
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'Email and password are required',
       });
+      return;
     }
 
     const user = await userService.verifyPassword(email, password);
     if (!user) {
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         error: 'Invalid credentials',
       });
+      return;
     }
 
     const result = authService.generateToken({
       userId: user.user_id,
       email: user.email,
-      role: user.role,
+      role: user.role as 'admin' | 'researcher' | 'user',
     });
 
     logger.info('User logged in', { email: user.email, userId: user.user_id });
@@ -50,15 +52,16 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 // Register endpoint
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password, role = 'user' } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'Email and password are required',
       });
+      return;
     }
 
     const user = await userService.createUser({ email, password, role });
@@ -66,7 +69,7 @@ router.post('/register', async (req: Request, res: Response) => {
     const result = authService.generateToken({
       userId: user.user_id,
       email: user.email,
-      role: user.role,
+      role: user.role as 'admin' | 'researcher' | 'user',
     });
 
     logger.info('User registered', { email, userId: user.user_id });
@@ -93,14 +96,14 @@ router.post('/register', async (req: Request, res: Response) => {
 });
 
 // Simple token generation endpoint for development/demo
-router.post('/generate-token', async (req: Request, res: Response) => {
+router.post('/generate-token', async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId = 'demo-user', email = 'demo@example.com', role = 'admin' } = req.body;
 
     const result = authService.generateToken({
       userId,
       email,
-      role,
+      role: role as 'admin' | 'researcher' | 'user',
     });
 
     logger.info('Token generated', { userId, email, role });
@@ -120,29 +123,31 @@ router.post('/generate-token', async (req: Request, res: Response) => {
 });
 
 // Verify token endpoint
-router.post('/verify-token', async (req: Request, res: Response) => {
+router.post('/verify-token', async (req: Request, res: Response): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         error: 'No token provided',
       });
+      return;
     }
 
     const token = authHeader.substring(7);
-    const result = authService.verifyToken(token);
+    const payload = authService.verifyToken(token);
 
-    if (!result.valid) {
-      return res.status(401).json({
+    if (!payload) {
+      res.status(401).json({
         success: false,
-        error: result.error || 'Invalid token',
+        error: 'Invalid token',
       });
+      return;
     }
 
     res.json({
       success: true,
-      payload: result.payload,
+      payload,
     });
   } catch (error) {
     logger.error('Token verification failed', error as Error);
@@ -154,14 +159,14 @@ router.post('/verify-token', async (req: Request, res: Response) => {
 });
 
 // Logout endpoint (client-side token removal, but useful for logging)
-router.post('/logout', async (req: Request, res: Response) => {
+router.post('/logout', async (req: Request, res: Response): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
-      const result = authService.verifyToken(token);
-      if (result.valid && result.payload) {
-        logger.info('User logged out', { email: result.payload.email });
+      const payload = authService.verifyToken(token);
+      if (payload) {
+        logger.info('User logged out', { email: payload.email });
       }
     }
 
@@ -179,32 +184,35 @@ router.post('/logout', async (req: Request, res: Response) => {
 });
 
 // Get current user info
-router.get('/me', async (req: Request, res: Response) => {
+router.get('/me', async (req: Request, res: Response): Promise<void> => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         error: 'No token provided',
       });
+      return;
     }
 
     const token = authHeader.substring(7);
-    const result = authService.verifyToken(token);
+    const payload = authService.verifyToken(token);
 
-    if (!result.valid || !result.payload) {
-      return res.status(401).json({
+    if (!payload) {
+      res.status(401).json({
         success: false,
         error: 'Invalid token',
       });
+      return;
     }
 
-    const user = await userService.findById(result.payload.userId);
+    const user = await userService.findById(payload.userId);
     if (!user) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         error: 'User not found',
       });
+      return;
     }
 
     res.json({
