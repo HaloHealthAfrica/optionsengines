@@ -1,6 +1,26 @@
-const API_BASE =
-  (import.meta as any).env?.VITE_API_URL ??
-  (typeof window !== 'undefined' ? 'http://localhost:3000' : '');
+function resolveApiBase(): string {
+  const envBase = (import.meta as any).env?.VITE_API_URL as string | undefined;
+  if (envBase) {
+    return envBase;
+  }
+
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  const host = window.location.hostname;
+  if (host.endsWith('vercel.app')) {
+    return 'https://optionsengines.fly.dev';
+  }
+
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return 'http://localhost:3000';
+  }
+
+  return window.location.origin;
+}
+
+const API_BASE = resolveApiBase();
 const TOKEN_KEY = 'oa_token';
 
 export function getToken(): string | null {
@@ -56,4 +76,8 @@ export function apiPost<T>(path: string, payload: unknown): Promise<T> {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export function getApiBase(): string {
+  return API_BASE;
 }

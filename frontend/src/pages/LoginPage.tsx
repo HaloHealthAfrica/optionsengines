@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getToken, setToken } from '../services/apiClient';
+import { getApiBase, getToken, setToken } from '../services/apiClient';
 
 type Mode = 'login' | 'register';
 
@@ -25,7 +25,7 @@ export default function LoginPage() {
     }
   }, [from, navigate]);
 
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+  const API_BASE = getApiBase();
 
   const authRequest = async <T,>(endpoint: string, payload?: Record<string, unknown>) => {
     const response = await fetch(`${API_BASE}${endpoint}`, {
