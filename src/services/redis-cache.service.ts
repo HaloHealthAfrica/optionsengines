@@ -47,6 +47,7 @@ export class RedisCacheService {
 
       this.client = new Redis(url, {
         maxRetriesPerRequest: 3,
+        tls: url.includes('upstash.io') ? {} : undefined, // Enable TLS for Upstash
         retryStrategy: (times: number) => {
           const delay = Math.min(times * 1000, 5000);
           logger.warn('Redis connection retry', { attempt: times, delayMs: delay });

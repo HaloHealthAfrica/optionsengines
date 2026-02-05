@@ -15,15 +15,15 @@ This implementation plan converts the dashboard performance optimization design 
   - Add connection error handling and reconnection logic
   - _Requirements: 1.1, 1.2_
 
-  - [ ] 1.1 Write property test for cache storage with TTL
+  - [x] 1.1 Write property test for cache storage with TTL
     - **Property 1: Cache Storage with TTL**
     - **Validates: Requirements 1.2, 1.5**
   
-  - [ ] 1.2 Write property test for cache hit behavior
+  - [x] 1.2 Write property test for cache hit behavior
     - **Property 2: Cache Hit Returns Cached Data**
     - **Validates: Requirements 1.3, 3.2, 4.2**
   
-  - [ ] 1.3 Write property test for cache miss behavior
+  - [x] 1.3 Write property test for cache miss behavior
     - **Property 3: Cache Miss Triggers Fresh Fetch**
     - **Validates: Requirements 1.4, 3.3**
   
