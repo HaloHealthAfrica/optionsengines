@@ -5,6 +5,8 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { config } from './config/index.js';
 import { logger } from './utils/logger.js';
+import { performanceMonitor } from './services/performance-monitor.service.js';
+import { cacheInvalidation } from './services/cache-invalidation.service.js';
 import webhookRoutes from './routes/webhook.js';
 import featureFlagRoutes from './routes/feature-flags.js';
 import engine2Routes from './routes/engine2.js';
@@ -38,12 +40,16 @@ app.use(
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined'));
 
+// Performance monitoring middleware
+app.use(performanceMonitor.middleware());
+
 // Routes
 app.use('/auth', authRoutes);
 app.use('/webhook', webhookRoutes);
 app.use('/feature-flags', featureFlagRoutes);
 app.use('/positioning', positioningRoutes);
 app.use('/dashboard', dashboardRoutes);
+app.use('/admin/cache', cacheInvalidation.createAdminRoutes());
 app.use('/api', optionsEnginesRoutes);
 app.use('/', engine2Routes);
 
@@ -56,6 +62,15 @@ app.get('/', (_req: Request, res: Response) => {
       engine1: 'Traditional Signal Processing (Production)',
       engine2: 'Multi-Agent Swarm Decision System (Shadow)',
     },
+  });
+});
+
+// Metrics endpoint
+app.get('/metrics', (_req: Request, res: Response) => {
+  const stats = performanceMonitor.getStats();
+  res.json({
+    performance: stats,
+    timestamp: new Date().toISOString(),
   });
 });
 

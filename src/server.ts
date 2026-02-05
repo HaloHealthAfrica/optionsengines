@@ -7,6 +7,7 @@ import { db } from './services/database.service.js';
 import { featureFlags } from './services/feature-flag.service.js';
 import { cache } from './services/cache.service.js';
 import { redisCache } from './services/redis-cache.service.js';
+import { cacheWarmer } from './services/cache-warmer.service.js';
 import { createShutdownHandler } from './utils/shutdown.js';
 import { MigrationRunner } from './migrations/runner.js';
 import { logConfigSummary } from './utils/config-log.js';
@@ -34,6 +35,8 @@ async function bootstrap(): Promise<void> {
   // Initialize Redis cache
   if (config.redisUrl) {
     await redisCache.connect(config.redisUrl);
+    // Start cache warmer after Redis is connected
+    await cacheWarmer.start();
   } else {
     logger.warn('Redis not configured, caching disabled');
   }
@@ -54,6 +57,7 @@ async function bootstrap(): Promise<void> {
     db,
     cache,
     redisCache,
+    cacheWarmer,
     logger,
   });
 

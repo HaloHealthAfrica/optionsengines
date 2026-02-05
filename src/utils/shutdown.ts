@@ -11,6 +11,7 @@ type ShutdownDeps = {
   db: { close: () => Promise<void> };
   cache: { close: () => void };
   redisCache?: { disconnect: () => Promise<void> };
+  cacheWarmer?: { stop: () => Promise<void> };
   logger?: typeof defaultLogger;
   exit?: (code: number) => void;
   timeoutMs?: number;
@@ -46,6 +47,9 @@ export function createShutdownHandler(deps: ShutdownDeps) {
     try {
       await deps.stopWorkers(workerTimeoutMs);
       deps.featureFlags.stop();
+      if (deps.cacheWarmer) {
+        await deps.cacheWarmer.stop();
+      }
       await deps.db.close();
       deps.cache.close();
       if (deps.redisCache) {
