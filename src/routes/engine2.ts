@@ -6,6 +6,7 @@ import { marketData } from '../services/market-data.js';
 import { cache } from '../services/cache.service.js';
 import { logger } from '../utils/logger.js';
 import { errorTracker } from '../services/error-tracker.service.js';
+import { redisCache } from '../services/redis-cache.service.js';
 
 const router = Router();
 
@@ -249,6 +250,22 @@ router.get('/signals', requireAuth, async (req: Request, res: Response) => {
 });
 
 router.get('/signals/sources/performance', requireAuth, async (_req: Request, res: Response) => {
+  // Check cache first (10-minute TTL)
+  const cacheKey = redisCache.buildKey('performance', { type: 'sources' });
+  const cached = await redisCache.getCached<any[]>(cacheKey);
+  
+  if (cached.hit && cached.data) {
+    logger.debug('Source performance cache hit', { cacheKey });
+    return res.json({ 
+      data: cached.data,
+      cached: true,
+      ttl_remaining: cached.ttl_remaining,
+    });
+  }
+
+  // Cache miss - fetch from database
+  logger.debug('Source performance cache miss', { cacheKey });
+  
   const result = await db.query(
     `SELECT
       COALESCE(raw_payload->>'source', raw_payload->>'strategy', raw_payload->>'indicator', 'unknown') AS source,
@@ -275,24 +292,81 @@ router.get('/signals/sources/performance', requireAuth, async (_req: Request, re
     };
   });
 
-  return res.json({ data });
+  // Store in cache with 10-minute TTL
+  const ttl = redisCache.getTTLForType('performance');
+  await redisCache.setCached(cacheKey, data, ttl);
+
+  return res.json({ 
+    data,
+    cached: false,
+  });
 });
 
 router.get('/analytics/pnl-curve', requireAuth, async (req: Request, res: Response) => {
   const days = req.query.days ? Number(req.query.days) : 30;
+  
+  // Check cache first (15-minute TTL)
+  const cacheKey = redisCache.buildKey('analytics', { type: 'pnl', days: days.toString() });
+  const cached = await redisCache.getCached<any[]>(cacheKey);
+  
+  if (cached.hit && cached.data) {
+    logger.debug('PnL curve cache hit', { cacheKey, days });
+    return res.json({ 
+      data: cached.data,
+      cached: true,
+      ttl_remaining: cached.ttl_remaining,
+    });
+  }
+
+  // Cache miss - fetch from database
+  logger.debug('PnL curve cache miss', { cacheKey, days });
+  
   const series = await getDailyPnlSeries(days);
   let cumulative = 0;
   const data = series.map((point) => {
     cumulative += point.value;
     return { date: point.date, value: cumulative };
   });
-  return res.json({ data });
+
+  // Store in cache with 15-minute TTL
+  const ttl = redisCache.getTTLForType('analytics');
+  await redisCache.setCached(cacheKey, data, ttl);
+
+  return res.json({ 
+    data,
+    cached: false,
+  });
 });
 
 router.get('/analytics/daily-returns', requireAuth, async (req: Request, res: Response) => {
   const days = req.query.days ? Number(req.query.days) : 14;
+  
+  // Check cache first (15-minute TTL)
+  const cacheKey = redisCache.buildKey('analytics', { type: 'returns', days: days.toString() });
+  const cached = await redisCache.getCached<any[]>(cacheKey);
+  
+  if (cached.hit && cached.data) {
+    logger.debug('Daily returns cache hit', { cacheKey, days });
+    return res.json({ 
+      data: cached.data,
+      cached: true,
+      ttl_remaining: cached.ttl_remaining,
+    });
+  }
+
+  // Cache miss - fetch from database
+  logger.debug('Daily returns cache miss', { cacheKey, days });
+  
   const data = await getDailyPnlSeries(days);
-  return res.json({ data });
+
+  // Store in cache with 15-minute TTL
+  const ttl = redisCache.getTTLForType('analytics');
+  await redisCache.setCached(cacheKey, data, ttl);
+
+  return res.json({ 
+    data,
+    cached: false,
+  });
 });
 
 router.get('/experiments', requireAuth, async (req: Request, res: Response) => {

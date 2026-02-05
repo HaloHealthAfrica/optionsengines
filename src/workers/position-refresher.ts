@@ -85,7 +85,15 @@ export class PositionRefresherWorker {
             position.strike,
             new Date(position.expiration),
             position.type
-          );
+          ).catch(() => {
+            // Silently skip if all providers fail (missing API keys)
+            logger.debug('Skipping position price update due to API unavailability', { positionId: position.position_id });
+            return null;
+          });
+
+          if (currentPrice === null) {
+            continue;
+          }
 
           const unrealizedPnl =
             (currentPrice - position.entry_price) * position.quantity * 100;

@@ -13,6 +13,9 @@ interface Config {
   databaseUrl: string;
   dbPoolMax: number;
 
+  // Redis Cache
+  redisUrl: string;
+
   // Authentication
   jwtSecret: string;
   hmacSecret: string;
@@ -97,6 +100,9 @@ export const config: Config = {
   // Database
   databaseUrl: getEnvVar('DATABASE_URL'),
   dbPoolMax: getEnvVarNumber('DB_POOL_MAX', 20),
+
+  // Redis Cache
+  redisUrl: getEnvVar('REDIS_URL', ''),
 
   // Authentication
   jwtSecret: getEnvVar('JWT_SECRET'),

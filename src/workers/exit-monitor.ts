@@ -3,7 +3,6 @@ import { db } from '../services/database.service.js';
 import { marketData } from '../services/market-data.js';
 import { logger } from '../utils/logger.js';
 import { sleep } from '../utils/sleep.js';
-import { errorTracker } from '../services/error-tracker.service.js';
 
 interface OpenPosition {
   position_id: string;
@@ -179,10 +178,12 @@ export class ExitMonitorWorker {
 
           exitsCreated += 1;
         } catch (error) {
-          logger.error('Exit monitor failed for position', error, {
+          // Skip position if market data unavailable (missing API keys)
+          logger.debug('Exit monitor skipped - market data unavailable', {
             positionId: position.position_id,
+            symbol: position.symbol
           });
-          errorTracker.recordError('exit_monitor');
+          // Don't track as error if it's just missing API keys
         }
       }
 

@@ -6,6 +6,7 @@ import { startWorkers, stopWorkers } from './workers/index.js';
 import { db } from './services/database.service.js';
 import { featureFlags } from './services/feature-flag.service.js';
 import { cache } from './services/cache.service.js';
+import { redisCache } from './services/redis-cache.service.js';
 import { createShutdownHandler } from './utils/shutdown.js';
 import { MigrationRunner } from './migrations/runner.js';
 import { logConfigSummary } from './utils/config-log.js';
@@ -30,6 +31,13 @@ async function bootstrap(): Promise<void> {
     }
   }
 
+  // Initialize Redis cache
+  if (config.redisUrl) {
+    await redisCache.connect(config.redisUrl);
+  } else {
+    logger.warn('Redis not configured, caching disabled');
+  }
+
   const server = app.listen(config.port, () => {
     logger.info(`Server started`, {
       port: config.port,
@@ -45,6 +53,7 @@ async function bootstrap(): Promise<void> {
     featureFlags,
     db,
     cache,
+    redisCache,
     logger,
   });
 

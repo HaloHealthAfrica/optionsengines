@@ -2,6 +2,7 @@ import { db } from './database.service.js';
 import { marketData } from './market-data.js';
 import { logger } from '../utils/logger.js';
 import { GexData, OptionsFlowSummary } from '../types/index.js';
+import { redisCache } from './redis-cache.service.js';
 
 type MaxPainResult = {
   symbol: string;
@@ -21,7 +22,54 @@ type SignalCorrelationResult = {
 };
 
 export class PositioningService {
-  async getGexSnapshot(symbol: string): Promise<GexData> {
+  async getGexSnapshot(symbol: string): Promise<GexData & { cached?: boolean; cache_age_seconds?: number; ttl_remaining?: number; stale?: boolean }> {
+    // Check cache first
+    const cacheKey = redisCache.buildKey('gex', { symbol, date: new Date().toISOString().split('T')[0] });
+    const cached = await redisCache.getCached<GexData>(cacheKey);
+    
+    if (cached.hit && cached.data) {
+      logger.debug('GEX cache hit', { symbol, cacheKey });
+      return {
+        ...cached.data,
+        cached: true,
+        ttl_remaining: cached.ttl_remaining,
+      };
+    }
+
+    // Cache miss - fetch from external API with fallback
+    logger.debug('GEX cache miss', { symbol, cacheKey });
+    
+    try {
+      const gex = await this.fetchGexFromExternalAPI(symbol);
+
+      // Store in cache with 5-minute TTL
+      const ttl = redisCache.getTTLForType('gex');
+      await redisCache.setCached(cacheKey, gex, ttl);
+
+      return {
+        ...gex,
+        cached: false,
+      };
+    } catch (error) {
+      logger.error('External GEX API failed', { symbol, error });
+      
+      // Try to get stale cached data (even if expired)
+      const staleData = await redisCache.get<GexData>(cacheKey);
+      if (staleData) {
+        logger.warn('Returning stale GEX data due to API failure', { symbol });
+        return {
+          ...staleData,
+          cached: true,
+          stale: true,
+        };
+      }
+      
+      // No stale data available, re-throw error
+      throw error;
+    }
+  }
+
+  private async fetchGexFromExternalAPI(symbol: string): Promise<GexData> {
     const gex = await marketData.getGex(symbol);
 
     try {

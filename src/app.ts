@@ -11,6 +11,7 @@ import engine2Routes from './routes/engine2.js';
 import positioningRoutes from './routes/positioning.js';
 import optionsEnginesRoutes from './routes/options-engines.js';
 import authRoutes from './routes/auth.js';
+import dashboardRoutes from './routes/dashboard.js';
 
 const app: Express = express();
 
@@ -42,6 +43,7 @@ app.use('/auth', authRoutes);
 app.use('/webhook', webhookRoutes);
 app.use('/feature-flags', featureFlagRoutes);
 app.use('/positioning', positioningRoutes);
+app.use('/dashboard', dashboardRoutes);
 app.use('/api', optionsEnginesRoutes);
 app.use('/', engine2Routes);
 

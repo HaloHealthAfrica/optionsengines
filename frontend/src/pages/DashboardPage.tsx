@@ -112,39 +112,49 @@ export default function DashboardPage() {
     const load = async () => {
       try {
         setLoading(true);
-        const results = await Promise.allSettled([
-          apiGet<{ data: Position[] }>('/positions?status=open'),
-          apiGet<{ data: ShadowPosition[] }>('/shadow-positions?status=open'),
-          apiGet<HealthResponse>('/health'),
-          apiGet<{ data: ExitSignal[] }>('/exit-signals?status=active'),
-          apiGet<{ data: QueuedSignal[] }>('/signals?status=queued'),
-          apiGet<{ data: SourcePerformance[] }>('/signals/sources/performance'),
-          apiGet<{ data: GexData }>('/positioning/gex?symbol=SPY'),
-          apiGet<{ data: PnlPoint[] }>('/analytics/pnl-curve'),
-          apiGet<{ data: PnlPoint[] }>('/analytics/daily-returns'),
-        ]);
-
-        const positions = results[0].status === 'fulfilled' ? results[0].value.data : [];
-        const shadowPositions = results[1].status === 'fulfilled' ? results[1].value.data : [];
-        const healthResponse = results[2].status === 'fulfilled' ? results[2].value : null;
-
-        const exitResponse = results[3].status === 'fulfilled' ? results[3].value.data : [];
-        const queueResponse = results[4].status === 'fulfilled' ? results[4].value.data : [];
-        const sourceResponse = results[5].status === 'fulfilled' ? results[5].value.data : [];
-        const gexResponse = results[6].status === 'fulfilled' ? results[6].value.data : null;
-        const pnlResponse = results[7].status === 'fulfilled' ? results[7].value.data : [];
-        const dailyResponse = results[8].status === 'fulfilled' ? results[8].value.data : [];
-
-        const map: DataMapItem[] = [
-          { label: 'Exit Signals', endpoint: '/exit-signals?status=active', status: results[3].status === 'fulfilled' ? 'live' : 'error' },
-          { label: 'Signal Queue', endpoint: '/signals?status=queued', status: results[4].status === 'fulfilled' ? 'live' : 'error' },
-          { label: 'Source Performance', endpoint: '/signals/sources/performance', status: results[5].status === 'fulfilled' ? 'live' : 'error' },
-          { label: 'GEX', endpoint: '/positioning/gex?symbol=SPY', status: results[6].status === 'fulfilled' ? 'live' : 'error' },
-          { label: 'P&L Curve', endpoint: '/analytics/pnl-curve', status: results[7].status === 'fulfilled' ? 'live' : 'error' },
-          { label: 'Daily Returns', endpoint: '/analytics/daily-returns', status: results[8].status === 'fulfilled' ? 'live' : 'error' },
-        ];
+        
+        // Use aggregated dashboard endpoint for better performance
+        const response = await apiGet<{
+          positions: Position[];
+          shadow_positions: ShadowPosition[];
+          health: HealthResponse;
+          exit_signals: ExitSignal[];
+          queued_signals: QueuedSignal[];
+          source_performance: SourcePerformance[];
+          gex: GexData | null;
+          pnl_curve: PnlPoint[];
+          daily_returns: PnlPoint[];
+          metadata: {
+            response_time_ms: number;
+            cache_hits: string[];
+            cache_misses: string[];
+            timestamp: string;
+          };
+          errors?: Record<string, string>;
+        }>('/dashboard');
 
         if (!active) return;
+
+        const positions = response.positions || [];
+        const shadowPositions = response.shadow_positions || [];
+        const healthResponse = response.health || null;
+        const exitResponse = response.exit_signals || [];
+        const queueResponse = response.queued_signals || [];
+        const sourceResponse = response.source_performance || [];
+        const gexResponse = response.gex || null;
+        const pnlResponse = response.pnl_curve || [];
+        const dailyResponse = response.daily_returns || [];
+
+        const errors = response.errors || {};
+        const map: DataMapItem[] = [
+          { label: 'Exit Signals', endpoint: '/exit-signals', status: errors.exit_signals ? 'error' : 'live' },
+          { label: 'Signal Queue', endpoint: '/signals?status=queued', status: errors.queued_signals ? 'error' : 'live' },
+          { label: 'Source Performance', endpoint: '/signals/sources/performance', status: errors.source_performance ? 'error' : 'live' },
+          { label: 'GEX', endpoint: '/positioning/gex?symbol=SPY', status: errors.gex ? 'error' : 'live' },
+          { label: 'P&L Curve', endpoint: '/analytics/pnl-curve', status: errors.pnl_curve ? 'error' : 'live' },
+          { label: 'Daily Returns', endpoint: '/analytics/daily-returns', status: errors.daily_returns ? 'error' : 'live' },
+        ];
+
         setData({ positions, shadowPositions });
         setHealth(healthResponse);
         setExitSignals(exitResponse);
@@ -155,8 +165,17 @@ export default function DashboardPage() {
         setDailyReturns(dailyResponse);
         setDataMap(map);
 
-        const hasErrors = results.some((result) => result.status === 'rejected');
-        setError(hasErrors ? 'Some endpoints are unavailable. Check the data map.' : null);
+        const hasErrors = Object.keys(errors).length > 0;
+        setError(hasErrors ? 'Some data sections are unavailable. Check the data map.' : null);
+
+        // Log performance metrics in development
+        if (import.meta.env.DEV) {
+          console.log('Dashboard loaded:', {
+            responseTime: `${response.metadata.response_time_ms}ms`,
+            cacheHits: response.metadata.cache_hits,
+            cacheMisses: response.metadata.cache_misses,
+          });
+        }
       } catch (err) {
         if (!active) return;
         setError((err as Error).message);

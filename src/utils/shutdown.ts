@@ -10,6 +10,7 @@ type ShutdownDeps = {
   featureFlags: { stop: () => void };
   db: { close: () => Promise<void> };
   cache: { close: () => void };
+  redisCache?: { disconnect: () => Promise<void> };
   logger?: typeof defaultLogger;
   exit?: (code: number) => void;
   timeoutMs?: number;
@@ -47,6 +48,9 @@ export function createShutdownHandler(deps: ShutdownDeps) {
       deps.featureFlags.stop();
       await deps.db.close();
       deps.cache.close();
+      if (deps.redisCache) {
+        await deps.redisCache.disconnect();
+      }
       clearTimeout(shutdownTimeout);
       logger.info('Graceful shutdown completed');
       exit(0);
