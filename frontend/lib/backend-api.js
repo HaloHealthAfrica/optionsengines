@@ -29,7 +29,7 @@ export async function backendFetch(endpoint, options = {}) {
 export async function backendLogin(email, password) {
   console.log('[Backend API] Attempting login for:', email);
   
-  const response = await backendFetch('/api/auth/login', {
+  const response = await backendFetch('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
@@ -48,7 +48,7 @@ export async function backendLogin(email, password) {
 export async function backendGetDashboard(token) {
   console.log('[Backend API] Fetching dashboard data');
   
-  const response = await backendFetch('/api/dashboard', {
+  const response = await backendFetch('/dashboard', {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -67,7 +67,7 @@ export async function backendGetDashboard(token) {
 export async function backendGetPositioning(token, symbol = 'SPY') {
   console.log('[Backend API] Fetching positioning data for:', symbol);
   
-  const response = await backendFetch(`/api/positioning/gex?symbol=${symbol}`, {
+  const response = await backendFetch(`/positioning/gex?symbol=${symbol}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },

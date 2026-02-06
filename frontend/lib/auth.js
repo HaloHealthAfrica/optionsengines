@@ -15,25 +15,38 @@ function getJwtSecret() {
   return encoder.encode(secret);
 }
 
+const BACKEND_JWT_ISSUER = process.env.JWT_ISSUER || 'dual-engine-trading-platform';
+const BACKEND_JWT_AUDIENCE = process.env.JWT_AUDIENCE || 'trading-platform-users';
+const LEGACY_JWT_ISSUER = 'optionagents';
+const LEGACY_JWT_AUDIENCE = 'optionagents-users';
+
 export async function signToken(payload) {
   const secret = getJwtSecret();
   return new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('1d')
-    .setIssuer('optionagents')
-    .setAudience('optionagents-users')
+    .setIssuer(BACKEND_JWT_ISSUER)
+    .setAudience(BACKEND_JWT_AUDIENCE)
     .sign(secret);
 }
 
 export async function verifyToken(token) {
   try {
     const secret = getJwtSecret();
-    const { payload } = await jwtVerify(token, secret, {
-      issuer: 'optionagents',
-      audience: 'optionagents-users',
-    });
-    return payload;
+    try {
+      const { payload } = await jwtVerify(token, secret, {
+        issuer: BACKEND_JWT_ISSUER,
+        audience: BACKEND_JWT_AUDIENCE,
+      });
+      return payload;
+    } catch (error) {
+      const { payload } = await jwtVerify(token, secret, {
+        issuer: LEGACY_JWT_ISSUER,
+        audience: LEGACY_JWT_AUDIENCE,
+      });
+      return payload;
+    }
   } catch (error) {
     return null;
   }
