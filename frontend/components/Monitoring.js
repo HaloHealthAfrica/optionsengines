@@ -190,9 +190,23 @@ export default function Monitoring() {
                     <td className="py-3">{item.timeframe || '--'}</td>
                     <td className="py-3">{item.variant || '--'}</td>
                     <td className="py-3">
-                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusBadge(item.status)}`}>
-                        {item.status}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`rounded-full px-2 py-1 text-xs font-semibold ${statusBadge(item.status)}`}
+                        >
+                          {item.status}
+                        </span>
+                        {item.signal_id && (
+                          <span className="rounded-full bg-sky-100 px-2 py-1 text-[10px] font-semibold text-sky-700 dark:bg-sky-500/20 dark:text-sky-200">
+                            signal
+                          </span>
+                        )}
+                        {item.variant && (
+                          <span className="rounded-full bg-indigo-100 px-2 py-1 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200">
+                            Engine {item.variant}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-3 text-right text-xs">{item.processing_time_ms ?? '--'}</td>
                   </tr>

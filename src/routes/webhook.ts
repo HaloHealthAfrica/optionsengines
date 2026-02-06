@@ -43,10 +43,23 @@ export const webhookSchema = z
     direction: z
       .enum(['long', 'short', 'LONG', 'SHORT', 'CALL', 'PUT', 'BUY', 'SELL'])
       .optional(),
-    timeframe: z.string().min(1).max(10),
+    side: z.string().min(1).max(20).optional(),
+    trend: z.string().min(1).max(20).optional(),
+    bias: z.string().min(1).max(20).optional(),
+    signal: z
+      .object({
+        type: z.string().min(1).max(20).optional(),
+        direction: z.string().min(1).max(20).optional(),
+      })
+      .optional(),
+    timeframe: z.union([z.string().min(1).max(20), z.number()]).optional(),
+    tf: z.union([z.string().min(1).max(20), z.number()]).optional(),
+    interval: z.union([z.string().min(1).max(20), z.number()]).optional(),
+    trigger_timeframe: z.union([z.string().min(1).max(20), z.number()]).optional(),
+    triggerTimeframe: z.union([z.string().min(1).max(20), z.number()]).optional(),
     strike: z.number().optional(),
     expiration: z.string().optional(), // ISO date string
-    timestamp: z.string(),
+    timestamp: z.union([z.string(), z.number()]).optional(),
     secret: z.string().min(1).max(128).optional(),
   })
   .refine((data) => Boolean(data.symbol || data.ticker), {
@@ -94,23 +107,97 @@ export async function isDuplicate(
 }
 
 export function normalizeDirection(payload: WebhookPayload): 'long' | 'short' | null {
-  const rawDirection = payload.direction?.toLowerCase();
-  if (rawDirection === 'long' || rawDirection === 'short') {
-    return rawDirection;
+  const rawDirection =
+    payload.direction ??
+    payload.side ??
+    payload.trend ??
+    payload.bias ??
+    payload.signal?.type ??
+    payload.signal?.direction;
+  const normalized = rawDirection?.toString().toLowerCase();
+
+  if (!normalized) {
+    if (payload.action === 'BUY') return 'long';
+    if (payload.action === 'SELL') return 'short';
+    return null;
   }
-  if (rawDirection === 'call' || rawDirection === 'buy') {
+
+  if (normalized === 'long' || normalized === 'bull' || normalized === 'bullish' || normalized === 'up') {
     return 'long';
   }
-  if (rawDirection === 'put' || rawDirection === 'sell') {
+  if (normalized === 'short' || normalized === 'bear' || normalized === 'bearish' || normalized === 'down') {
     return 'short';
   }
-  if (payload.action === 'BUY') {
+  if (normalized === 'call' || normalized === 'buy' || normalized === 'longs') {
     return 'long';
   }
-  if (payload.action === 'SELL') {
+  if (normalized === 'put' || normalized === 'sell' || normalized === 'shorts') {
     return 'short';
   }
   return null;
+}
+
+function normalizeTimeframe(payload: WebhookPayload): string | null {
+  const raw =
+    payload.timeframe ??
+    payload.tf ??
+    payload.interval ??
+    payload.trigger_timeframe ??
+    payload.triggerTimeframe;
+
+  if (raw === undefined || raw === null) {
+    return null;
+  }
+
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return `${Math.max(1, Math.round(raw))}m`;
+  }
+
+  const value = raw.toString().trim().toLowerCase();
+  if (!value) return null;
+
+  if (/^\d+$/.test(value)) {
+    return `${value}m`;
+  }
+
+  const normalized = value
+    .replace(/minutes?|mins?/g, 'm')
+    .replace(/hours?|hrs?/g, 'h')
+    .replace(/days?/g, 'd')
+    .replace(/weeks?/g, 'w');
+
+  if (/^\d+[mhdw]$/.test(normalized)) {
+    return normalized;
+  }
+
+  return value;
+}
+
+function normalizeTimestamp(raw: WebhookPayload['timestamp']): Date {
+  if (raw === undefined || raw === null) {
+    return new Date();
+  }
+
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    const ms = raw < 1_000_000_000_000 ? raw * 1000 : raw;
+    return new Date(ms);
+  }
+
+  const value = raw.toString().trim();
+  if (!value) return new Date();
+
+  if (/^\d+$/.test(value)) {
+    const numeric = Number(value);
+    const ms = numeric < 1_000_000_000_000 ? numeric * 1000 : numeric;
+    return new Date(ms);
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return new Date();
+  }
+
+  return parsed;
 }
 
 export async function handleWebhook(req: Request, res: Response): Promise<Response> {
@@ -218,12 +305,22 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     const { secret: _secret, ...payloadForStorage } = payload;
     const symbol = payload.symbol ?? payload.ticker;
     symbolForLog = symbol;
-    timeframeForLog = payload.timeframe;
+    const normalizedTimeframe = normalizeTimeframe(payload);
+    timeframeForLog = normalizedTimeframe ?? undefined;
     if (!symbol) {
       await logWebhookEvent({ status: 'invalid_payload', errorMessage: 'Missing symbol' });
       return res.status(400).json({
         status: 'REJECTED',
         error: 'Missing symbol',
+        request_id: requestId,
+      });
+    }
+
+    if (!normalizedTimeframe) {
+      await logWebhookEvent({ status: 'invalid_payload', errorMessage: 'Missing or invalid timeframe' });
+      return res.status(400).json({
+        status: 'REJECTED',
+        error: 'Missing or invalid timeframe',
         request_id: requestId,
       });
     }
@@ -241,7 +338,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     directionForLog = normalizedDirection;
 
     // Check for duplicates
-    const duplicate = await isDuplicate(symbol, normalizedDirection, payload.timeframe, 60);
+    const duplicate = await isDuplicate(symbol, normalizedDirection, normalizedTimeframe, 60);
 
     if (duplicate) {
       logger.info('Duplicate signal detected', {
@@ -260,11 +357,12 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     }
 
     // Generate signal hash
+    const signalTimestamp = normalizeTimestamp(payload.timestamp);
     const signalHash = generateSignalHash(
       symbol,
       normalizedDirection,
-      payload.timeframe,
-      payload.timestamp
+      normalizedTimeframe,
+      signalTimestamp.toISOString()
     );
 
     // Store signal in database
@@ -282,8 +380,8 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
       [
         symbol,
         normalizedDirection,
-        payload.timeframe,
-        payload.timestamp ? new Date(payload.timestamp) : new Date(),
+        normalizedTimeframe,
+        signalTimestamp,
         'pending',
         JSON.stringify(payloadForStorage),
         signalHash,
@@ -292,8 +390,6 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
 
     const signalId = result.rows[0].signal_id;
     signalIdForLog = signalId;
-    const signalTimestamp = payload.timestamp ? new Date(payload.timestamp) : new Date();
-
     logger.info('Signal stored successfully', {
       requestId,
       signalId,
@@ -305,8 +401,8 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     const routingDecision = await strategyRouter.route({
       signalId,
       symbol,
-      timeframe: payload.timeframe,
-      sessionId: payload.timestamp,
+      timeframe: normalizedTimeframe,
+      sessionId: signalTimestamp.toISOString(),
     });
     experimentIdForLog = routingDecision.experimentId;
     variantForLog = routingDecision.variant;
