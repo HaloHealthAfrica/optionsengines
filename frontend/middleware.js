@@ -3,16 +3,29 @@ import { jwtVerify } from 'jose';
 
 const encoder = new TextEncoder();
 
+const BACKEND_JWT_ISSUER = process.env.JWT_ISSUER || 'dual-engine-trading-platform';
+const BACKEND_JWT_AUDIENCE = process.env.JWT_AUDIENCE || 'trading-platform-users';
+const LEGACY_JWT_ISSUER = 'optionagents';
+const LEGACY_JWT_AUDIENCE = 'optionagents-users';
+
 async function verifyAuth(token) {
   if (!process.env.JWT_SECRET) return false;
   try {
     await jwtVerify(token, encoder.encode(process.env.JWT_SECRET), {
-      issuer: 'optionagents',
-      audience: 'optionagents-users',
+      issuer: BACKEND_JWT_ISSUER,
+      audience: BACKEND_JWT_AUDIENCE,
     });
     return true;
   } catch (error) {
-    return false;
+    try {
+      await jwtVerify(token, encoder.encode(process.env.JWT_SECRET), {
+        issuer: LEGACY_JWT_ISSUER,
+        audience: LEGACY_JWT_AUDIENCE,
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
