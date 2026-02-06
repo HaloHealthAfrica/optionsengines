@@ -1,8 +1,7 @@
-import crypto from 'crypto';
 import { cookies } from 'next/headers';
 
 export function createCsrfToken() {
-  const token = crypto.randomUUID();
+  const token = globalThis.crypto.randomUUID();
   const cookieStore = cookies();
   cookieStore.set('csrf_token', token, {
     httpOnly: false,
