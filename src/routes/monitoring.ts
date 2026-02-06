@@ -32,6 +32,8 @@ function requireAuth(req: Request, res: Response, next: NextFunction): Response 
 router.get('/status', requireAuth, async (req: Request, res: Response) => {
   const limitParam = Number(req.query.limit);
   const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 25) : 10;
+  const windowHoursParam = Number(req.query.windowHours);
+  const windowHours = Number.isFinite(windowHoursParam) && windowHoursParam > 0 ? windowHoursParam : 24;
 
   let recentEvents = { rows: [] as any[] };
   let summaryRows = { rows: [] as any[] };
@@ -43,23 +45,24 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
         `SELECT event_id, request_id, signal_id, experiment_id, variant, status, error_message,
                 symbol, direction, timeframe, processing_time_ms, created_at
          FROM webhook_events
+       WHERE created_at > NOW() - ($2::int || ' hours')::interval
          ORDER BY created_at DESC
-         LIMIT $1`,
-        [limit]
+       LIMIT $1`,
+        [limit, windowHours]
       ),
       db.query(
         `SELECT status, COUNT(*)::int AS count
          FROM webhook_events
-         WHERE created_at > NOW() - INTERVAL '24 hours'
+       WHERE created_at > NOW() - ($1::int || ' hours')::interval
          GROUP BY status`,
-        []
+        [windowHours]
       ),
       db.query(
         `SELECT variant, COUNT(*)::int AS count
          FROM experiments
-         WHERE created_at > NOW() - INTERVAL '24 hours'
+       WHERE created_at > NOW() - ($1::int || ' hours')::interval
          GROUP BY variant`,
-        []
+        [windowHours]
       ),
     ]);
   } catch (error) {
