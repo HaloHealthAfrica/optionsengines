@@ -45,6 +45,7 @@
     "morgan": "^1.10.0",
     "node-cache": "^5.1.2",
     "pg": "^8.11.3",
+    "ws": "^8.19.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {
@@ -58,6 +59,7 @@
     "@types/node": "^20.10.6",
     "@types/pg": "^8.10.9",
     "@types/supertest": "^6.0.3",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^6.17.0",
     "@typescript-eslint/parser": "^6.17.0",
     "eslint": "^8.56.0",

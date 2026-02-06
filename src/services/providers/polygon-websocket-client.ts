@@ -1,5 +1,6 @@
 // Polygon.io WebSocket Client - Real-time streaming data
 import WebSocket from 'ws';
+import type { Data } from 'ws';
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 import { EventEmitter } from 'events';
@@ -113,18 +114,18 @@ export class PolygonWebSocketClient extends EventEmitter {
           resolve();
         });
 
-        this.ws.on('message', (data: WebSocket.Data) => {
+        this.ws.on('message', (data: Data) => {
           this.handleMessage(data);
         });
 
-        this.ws.on('error', (error) => {
+        this.ws.on('error', (error: any) => {
           logger.error('Polygon WebSocket error', error);
           this.isConnecting = false;
           this.emit('error', error);
           reject(error);
         });
 
-        this.ws.on('close', (code, reason) => {
+        this.ws.on('close', (code: any, reason: any) => {
           logger.warn('Polygon WebSocket closed', { code, reason: reason.toString() });
           this.isConnecting = false;
           this.isAuthenticated = false;
@@ -164,7 +165,7 @@ export class PolygonWebSocketClient extends EventEmitter {
   /**
    * Handle incoming WebSocket messages
    */
-  private handleMessage(data: WebSocket.Data): void {
+  private handleMessage(data: Data): void {
     try {
       const messages: PolygonWSMessage[] = JSON.parse(data.toString());
 
