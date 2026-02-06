@@ -116,7 +116,8 @@ export const config: Config = {
   alpacaBaseUrl: getEnvVar('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets'),
   polygonApiKey: getEnvVar('POLYGON_API_KEY', ''),
   twelveDataApiKey: getEnvVar('TWELVE_DATA_API_KEY', ''),
-  marketDataApiKey: getEnvVar('MARKET_DATA_API_KEY', ''),
+  marketDataApiKey:
+    getEnvVar('MARKET_DATA_API_KEY', '') || getEnvVar('MARKETDATA_API_KEY', ''),
 
   // Performance
   slowRequestMs: getEnvVarNumber('SLOW_REQUEST_MS', 2000),

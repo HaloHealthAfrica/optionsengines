@@ -21,13 +21,13 @@ export interface AlpacaQuote {
 }
 
 export interface AlpacaOptionQuote {
-  symbol: string;
-  bid: number;
-  ask: number;
-  last: number;
-  volume: number;
-  open_interest: number;
-  timestamp: string;
+  S: string;
+  t: string;
+  bp: number;
+  bs: number;
+  ap: number;
+  as: number;
+  c?: string;
 }
 
 export class AlpacaClient {
@@ -175,19 +175,29 @@ export class AlpacaClient {
       // Format option symbol: SPY240119C00450000
       const optionSymbol = this.formatOptionSymbol(symbol, strike, expiration, optionType);
 
-      // Use latest quote endpoint for options
-      const endpoint = `/v2/stocks/${optionSymbol}/quotes/latest`;
+      // Use options quotes endpoint (latest)
+      const endpoint = `/v1beta1/options/quotes/latest?symbols=${optionSymbol}`;
 
-      interface AlpacaQuoteResponse {
-        quote: AlpacaQuote;
-        symbol: string;
+      type AlpacaOptionQuoteResponse =
+        | { quote: AlpacaOptionQuote }
+        | { quotes: Record<string, AlpacaOptionQuote> }
+        | AlpacaOptionQuote;
+
+      const response = await this.request<AlpacaOptionQuoteResponse>(endpoint);
+      const quote =
+        'quote' in response
+          ? response.quote
+          : 'quotes' in response
+            ? response.quotes?.[optionSymbol]
+            : response;
+
+      if (!quote || typeof quote.bp !== 'number' || typeof quote.ap !== 'number') {
+        throw new Error(`No option quote returned for ${optionSymbol}`);
       }
 
-      const response = await this.request<AlpacaQuoteResponse>(endpoint);
-
       // Use mid price (average of bid and ask)
-      const bid = response.quote.bp;
-      const ask = response.quote.ap;
+      const bid = quote.bp;
+      const ask = quote.ap;
       const mid = (bid + ask) / 2;
 
       logger.debug('Alpaca option price fetched', {
