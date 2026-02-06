@@ -12,16 +12,19 @@ const tabs = [
 const statusColors = {
   filled: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
   pending: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
-  cancelled: 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200',
+  failed: 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200',
+  closed: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
 };
 
 export default function Orders() {
   const [activeTab, setActiveTab] = useState('active');
   const [orders, setOrders] = useState([]);
+  const [trades, setTrades] = useState([]);
+  const [positions, setPositions] = useState([]);
   const [status, setStatus] = useState('idle');
   const [sortKey, setSortKey] = useState('time');
   const [filter, setFilter] = useState('all');
-  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [dataSource, setDataSource] = useState('unknown');
 
   useEffect(() => {
@@ -33,6 +36,8 @@ export default function Orders() {
         setDataSource(response.headers.get('x-data-source') || 'unknown');
         const payload = await response.json();
         setOrders(payload.orders || []);
+        setTrades(payload.trades || []);
+        setPositions(payload.positions || []);
         setStatus('success');
       } catch (error) {
         setStatus('error');
@@ -41,22 +46,24 @@ export default function Orders() {
     loadOrders();
   }, []);
 
-  const filteredOrders = useMemo(() => {
-    const scoped = orders.filter((order) => {
-      if (activeTab === 'active') return order.status === 'pending';
-      if (activeTab === 'filled') return order.status === 'filled';
-      return order.status === 'cancelled';
-    });
-
+  const rows = useMemo(() => {
+    const source = activeTab === 'active' ? orders : activeTab === 'filled' ? trades : positions;
     const filtered =
-      filter === 'all' ? scoped : scoped.filter((order) => order.type.toLowerCase() === filter);
+      filter === 'all'
+        ? source
+        : source.filter((item) => String(item.type || '').toLowerCase() === filter);
 
     return filtered.sort((a, b) => {
-      if (sortKey === 'price') return Number(b.price || 0) - Number(a.price || 0);
-      if (sortKey === 'qty') return b.qty - a.qty;
-      return String(a.time || '').localeCompare(String(b.time || ''));
+      if (sortKey === 'price') return Number(b.price || b.entry_price || 0) - Number(a.price || a.entry_price || 0);
+      if (sortKey === 'qty') return Number(b.qty || 0) - Number(a.qty || 0);
+      return String(b.time || '').localeCompare(String(a.time || ''));
     });
-  }, [orders, activeTab, filter, sortKey]);
+  }, [orders, trades, positions, activeTab, filter, sortKey]);
+
+  const columns =
+    activeTab === 'closed'
+      ? ['Symbol', 'Type', 'Strike', 'Expiry', 'Qty', 'Entry', 'Realized P&L', 'Time']
+      : ['Symbol', 'Type', 'Strike', 'Expiry', 'Qty', 'Price', 'Status', 'Time'];
 
   return (
     <section className="flex flex-col gap-6">
@@ -120,61 +127,74 @@ export default function Orders() {
           <table className="min-w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500 dark:bg-slate-900/70 dark:text-slate-400">
               <tr>
-                <th className="px-4 py-3">Symbol</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Strike</th>
-                <th className="px-4 py-3">Expiry</th>
-                <th className="px-4 py-3">Qty</th>
-                <th className="px-4 py-3">Price</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Time</th>
+                {columns.map((col) => (
+                  <th key={col} className="px-4 py-3">
+                    {col}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {status === 'loading' &&
                 Array.from({ length: 6 }).map((_, idx) => (
                   <tr key={`loading-${idx}`} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="px-4 py-4" colSpan={8}>
+                    <td className="px-4 py-4" colSpan={columns.length}>
                       <div className="h-6 animate-pulse rounded-full bg-slate-100 dark:bg-slate-800/40" />
                     </td>
                   </tr>
                 ))}
-              {status !== 'loading' && filteredOrders.length === 0 && (
+              {status !== 'loading' && rows.length === 0 && (
                 <tr>
-                  <td className="px-4 py-6 text-center text-sm text-slate-500" colSpan={8}>
+                  <td className="px-4 py-6 text-center text-sm text-slate-500" colSpan={columns.length}>
                     No orders found for this filter.
                   </td>
                 </tr>
               )}
-              {filteredOrders.map((order) => (
+              {rows.map((item) => (
                 <tr
-                  key={order.id}
+                  key={item.id}
                   className="cursor-pointer border-t border-slate-100 transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/40"
-                  onClick={() => setSelectedOrder(order)}
+                  onClick={() => setSelectedItem({ item, type: activeTab })}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
-                      setSelectedOrder(order);
+                      setSelectedItem({ item, type: activeTab });
                     }
                   }}
                   tabIndex={0}
                   role="button"
                 >
-                  <td className="px-4 py-4 font-medium">{order.symbol}</td>
-                  <td className="px-4 py-4">{order.type}</td>
-                  <td className="px-4 py-4">{order.strike}</td>
-                  <td className="px-4 py-4">{order.expiry}</td>
-                  <td className="px-4 py-4">{order.qty}</td>
-                  <td className="px-4 py-4">
-                    {order.price !== null && order.price !== undefined ? `$${Number(order.price).toFixed(2)}` : '--'}
-                  </td>
-                  <td className="px-4 py-4">
-                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusColors[order.status]}`}>
-                      {order.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4">
-                    {order.time ? new Date(order.time).toLocaleString() : '--'}
-                  </td>
+                  <td className="px-4 py-4 font-medium">{item.symbol}</td>
+                  <td className="px-4 py-4">{item.type}</td>
+                  <td className="px-4 py-4">{item.strike}</td>
+                  <td className="px-4 py-4">{item.expiry}</td>
+                  <td className="px-4 py-4">{item.qty}</td>
+                  {activeTab === 'closed' ? (
+                    <>
+                      <td className="px-4 py-4">
+                        {item.entry_price !== null && item.entry_price !== undefined
+                          ? `$${Number(item.entry_price).toFixed(2)}`
+                          : '--'}
+                      </td>
+                      <td className="px-4 py-4">
+                        {item.realized_pnl !== null && item.realized_pnl !== undefined
+                          ? `$${Number(item.realized_pnl).toFixed(2)}`
+                          : '--'}
+                      </td>
+                      <td className="px-4 py-4">{item.time ? new Date(item.time).toLocaleString() : '--'}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-4 py-4">
+                        {item.price !== null && item.price !== undefined ? `$${Number(item.price).toFixed(2)}` : '--'}
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusColors[item.status]}`}>
+                          {item.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">{item.time ? new Date(item.time).toLocaleString() : '--'}</td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -182,7 +202,7 @@ export default function Orders() {
         </div>
       </div>
 
-      {selectedOrder && (
+      {selectedItem && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-6"
           role="dialog"
@@ -194,7 +214,7 @@ export default function Orders() {
               <button
                 type="button"
                 className="text-sm text-slate-500"
-                onClick={() => setSelectedOrder(null)}
+                onClick={() => setSelectedItem(null)}
               >
                 Close
               </button>
@@ -202,37 +222,88 @@ export default function Orders() {
             <div className="mt-4 grid gap-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="muted">Symbol</span>
-                <span>{selectedOrder.symbol}</span>
+                <span>{selectedItem.item.symbol}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="muted">Type</span>
-                <span>{selectedOrder.type}</span>
+                <span>{selectedItem.item.type}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="muted">Strike</span>
-                <span>{selectedOrder.strike}</span>
+                <span>{selectedItem.item.strike}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="muted">Expiry</span>
-                <span>{selectedOrder.expiry}</span>
+                <span>{selectedItem.item.expiry}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="muted">Quantity</span>
-                <span>{selectedOrder.qty}</span>
+                <span>{selectedItem.item.qty}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="muted">Status</span>
-                <span className="capitalize">{selectedOrder.status}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="muted">P&L</span>
-                <span>{selectedOrder.pnl}</span>
-              </div>
+              {selectedItem.type !== 'closed' && (
+                <div className="flex items-center justify-between">
+                  <span className="muted">Status</span>
+                  <span className="capitalize">{selectedItem.item.status}</span>
+                </div>
+              )}
+              {selectedItem.type === 'closed' && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="muted">Entry</span>
+                    <span>
+                      {selectedItem.item.entry_price !== null && selectedItem.item.entry_price !== undefined
+                        ? `$${Number(selectedItem.item.entry_price).toFixed(2)}`
+                        : '--'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="muted">Realized P&L</span>
+                    <span>
+                      {selectedItem.item.realized_pnl !== null && selectedItem.item.realized_pnl !== undefined
+                        ? `$${Number(selectedItem.item.realized_pnl).toFixed(2)}`
+                        : '--'}
+                    </span>
+                  </div>
+                </>
+              )}
+              {selectedItem.type === 'filled' && selectedItem.item.decision && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="muted">Decision</span>
+                    <span className="capitalize">
+                      {selectedItem.item.decision.engine} · {selectedItem.item.decision.source.replace('_', ' ')}
+                    </span>
+                  </div>
+                  {selectedItem.item.decision.bias && (
+                    <div className="flex items-center justify-between">
+                      <span className="muted">Bias</span>
+                      <span className="capitalize">{selectedItem.item.decision.bias}</span>
+                    </div>
+                  )}
+                  {typeof selectedItem.item.decision.confidence === 'number' && (
+                    <div className="flex items-center justify-between">
+                      <span className="muted">Confidence</span>
+                      <span>{selectedItem.item.decision.confidence}</span>
+                    </div>
+                  )}
+                  {Array.isArray(selectedItem.item.decision.reasons) &&
+                    selectedItem.item.decision.reasons.length > 0 && (
+                      <div className="rounded-2xl border border-slate-100 bg-white/60 p-3 text-xs dark:border-slate-800 dark:bg-slate-900/40">
+                        <p className="mb-2 text-[11px] font-semibold uppercase text-slate-500">Reasons</p>
+                        <ul className="space-y-1">
+                          {selectedItem.item.decision.reasons.slice(0, 5).map((reason, idx) => (
+                            <li key={`reason-${idx}`}>{String(reason)}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                </>
+              )}
             </div>
             <button
               type="button"
               className="gradient-button mt-6 w-full rounded-full px-4 py-2 text-sm font-semibold"
-              onClick={() => setSelectedOrder(null)}
+              onClick={() => setSelectedItem(null)}
             >
               Done
             </button>
