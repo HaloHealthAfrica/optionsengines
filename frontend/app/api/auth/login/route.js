@@ -1,4 +1,5 @@
 import { backendLogin } from '@/lib/backend-api';
+import { signToken, validateCredentials } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
@@ -40,26 +41,47 @@ export async function POST(request) {
       return Response.json({ error: 'Email and password are required' }, { status: 400 });
     }
 
-    // Authenticate with backend
-    const result = await backendLogin(email, password);
-    
-    if (!result.success || !result.token) {
-      return Response.json({ error: 'Invalid credentials' }, { status: 401 });
+    // Try to authenticate with backend first
+    try {
+      const result = await backendLogin(email, password);
+      
+      if (result.success && result.token) {
+        const response = Response.json({ success: true });
+        response.headers.set('Cache-Control', 'no-store');
+        response.headers.set(
+          'Set-Cookie',
+          `auth_token=${result.token}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24}; SameSite=Strict;${
+            process.env.NODE_ENV === 'production' ? ' Secure;' : ''
+          }`
+        );
+        return response;
+      }
+    } catch (backendError) {
+      console.warn('Backend authentication failed, falling back to local auth:', backendError.message);
+      
+      // Fallback to local authentication if backend is unavailable
+      if (!validateCredentials(email, password)) {
+        return Response.json({ error: 'Invalid credentials' }, { status: 401 });
+      }
+
+      const token = await signToken({ email, role: 'admin' });
+
+      const response = Response.json({ success: true });
+      response.headers.set('Cache-Control', 'no-store');
+      response.headers.set(
+        'Set-Cookie',
+        `auth_token=${token}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24}; SameSite=Strict;${
+          process.env.NODE_ENV === 'production' ? ' Secure;' : ''
+        }`
+      );
+      return response;
     }
 
-    const response = Response.json({ success: true });
-    response.headers.set('Cache-Control', 'no-store');
-    response.headers.set(
-      'Set-Cookie',
-      `auth_token=${result.token}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24}; SameSite=Strict;${
-        process.env.NODE_ENV === 'production' ? ' Secure;' : ''
-      }`
-    );
-    return response;
+    return Response.json({ error: 'Invalid credentials' }, { status: 401 });
   } catch (error) {
     console.error('Login error:', error);
     return Response.json(
-      { error: error.message || 'Login failed. Backend may be unavailable.' },
+      { error: error.message || 'Login failed. Please try again.' },
       { status: 500 }
     );
   }
