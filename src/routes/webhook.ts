@@ -116,6 +116,48 @@ export function normalizeDirection(payload: WebhookPayload): 'long' | 'short' | 
 export async function handleWebhook(req: Request, res: Response): Promise<Response> {
   const startTime = Date.now();
   const requestId = crypto.randomUUID();
+  let symbolForLog: string | undefined;
+  let directionForLog: 'long' | 'short' | undefined;
+  let timeframeForLog: string | undefined;
+  let signalIdForLog: string | undefined;
+  let experimentIdForLog: string | undefined;
+  let variantForLog: 'A' | 'B' | undefined;
+
+  const logWebhookEvent = async (input: {
+    status: 'accepted' | 'duplicate' | 'invalid_signature' | 'invalid_payload' | 'error';
+    errorMessage?: string;
+  }): Promise<void> => {
+    try {
+      await db.query(
+        `INSERT INTO webhook_events (
+          request_id,
+          signal_id,
+          experiment_id,
+          variant,
+          status,
+          error_message,
+          symbol,
+          direction,
+          timeframe,
+          processing_time_ms
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          requestId,
+          signalIdForLog || null,
+          experimentIdForLog || null,
+          variantForLog || null,
+          input.status,
+          input.errorMessage || null,
+          symbolForLog || null,
+          directionForLog || null,
+          timeframeForLog || null,
+          Date.now() - startTime,
+        ]
+      );
+    } catch (error) {
+      logger.warn('Failed to log webhook event', { requestId, error });
+    }
+  };
 
   try {
     // Log incoming request
@@ -142,6 +184,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
 
       if (!isValid) {
         logger.warn('Invalid webhook signature', { requestId });
+        await logWebhookEvent({ status: 'invalid_signature', errorMessage: 'Invalid signature' });
         return res.status(401).json({
           status: 'REJECTED',
           error: 'Invalid signature',
@@ -158,6 +201,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
         requestId,
         errors: parseResult.error.errors,
       });
+      await logWebhookEvent({ status: 'invalid_payload', errorMessage: 'Invalid payload' });
 
       return res.status(400).json({
         status: 'REJECTED',
@@ -173,7 +217,10 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     const payload = parseResult.data;
     const { secret: _secret, ...payloadForStorage } = payload;
     const symbol = payload.symbol ?? payload.ticker;
+    symbolForLog = symbol;
+    timeframeForLog = payload.timeframe;
     if (!symbol) {
+      await logWebhookEvent({ status: 'invalid_payload', errorMessage: 'Missing symbol' });
       return res.status(400).json({
         status: 'REJECTED',
         error: 'Missing symbol',
@@ -184,12 +231,14 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     const normalizedDirection = normalizeDirection(payload);
 
     if (!normalizedDirection) {
+      await logWebhookEvent({ status: 'invalid_payload', errorMessage: 'Missing or invalid direction' });
       return res.status(400).json({
         status: 'REJECTED',
         error: 'Missing or invalid direction',
         request_id: requestId,
       });
     }
+    directionForLog = normalizedDirection;
 
     // Check for duplicates
     const duplicate = await isDuplicate(symbol, normalizedDirection, payload.timeframe, 60);
@@ -201,6 +250,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
         direction: normalizedDirection,
       });
 
+      await logWebhookEvent({ status: 'duplicate' });
       return res.status(200).json({
         status: 'DUPLICATE',
         message: 'Signal already received',
@@ -241,6 +291,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     );
 
     const signalId = result.rows[0].signal_id;
+    signalIdForLog = signalId;
     const signalTimestamp = payload.timestamp ? new Date(payload.timestamp) : new Date();
 
     logger.info('Signal stored successfully', {
@@ -257,6 +308,8 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
       timeframe: payload.timeframe,
       sessionId: payload.timestamp,
     });
+    experimentIdForLog = routingDecision.experimentId;
+    variantForLog = routingDecision.variant;
 
     if (routingDecision.variant === 'B') {
       const marketHours = await marketData.getMarketHours();
@@ -359,6 +412,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     }
 
     // Return success response
+    await logWebhookEvent({ status: 'accepted' });
     return res.status(201).json({
       status: 'ACCEPTED',
       signal_id: signalId,
@@ -369,6 +423,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     });
   } catch (error: any) {
     logger.error('Webhook processing failed', error, { requestId });
+    await logWebhookEvent({ status: 'error', errorMessage: error?.message || 'Internal server error' });
 
     return res.status(500).json({
       status: 'ERROR',

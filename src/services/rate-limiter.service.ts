@@ -27,6 +27,8 @@ export class RateLimiter {
     // Initialize rate limiters for different providers
     this.createBucket('alpaca', config.alpacaRateLimit, 60000); // 200 req/min
     this.createBucket('twelvedata', config.twelveDataRateLimit, 86400000); // 800 req/day
+    this.createBucket('polygon', config.polygonRateLimit, 60000); // Free tier: 5 req/min
+    this.createBucket('marketdata', 100, 86400000); // Estimate: 100 req/day for free tier
   }
 
   private createBucket(

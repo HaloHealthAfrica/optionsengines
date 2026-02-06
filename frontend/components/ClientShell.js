@@ -7,12 +7,14 @@ import Positioning from './Positioning';
 import Orders from './Orders';
 import History from './History';
 import Settings from './Settings';
+import Monitoring from './Monitoring';
 
 const tabs = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'positioning', label: 'Positioning' },
   { id: 'orders', label: 'Orders' },
   { id: 'history', label: 'History' },
+  { id: 'monitoring', label: 'Monitoring' },
   { id: 'settings', label: 'Settings' },
 ];
 
@@ -45,6 +47,8 @@ export default function ClientShell() {
         return <Orders />;
       case 'history':
         return <History />;
+      case 'monitoring':
+        return <Monitoring />;
       case 'settings':
         return <Settings />;
       default:

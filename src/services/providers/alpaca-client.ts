@@ -34,17 +34,24 @@ export class AlpacaClient {
   private readonly apiKey: string;
   private readonly secretKey: string;
   private readonly dataUrl: string;
+  private readonly tradingUrl: string;
 
   constructor() {
     this.apiKey = config.alpacaApiKey;
     this.secretKey = config.alpacaSecretKey;
-    this.dataUrl = config.alpacaPaper
-      ? 'https://data.alpaca.markets'
-      : 'https://data.alpaca.markets';
+    this.dataUrl = 'https://data.alpaca.markets';
+    this.tradingUrl = this.normalizeBaseUrl(
+      config.alpacaBaseUrl ||
+        (config.alpacaPaper ? 'https://paper-api.alpaca.markets' : 'https://api.alpaca.markets')
+    );
 
     if (!this.apiKey || !this.secretKey) {
       logger.warn('Alpaca API credentials not configured');
     }
+  }
+
+  private normalizeBaseUrl(url: string): string {
+    return url.replace(/\/+$/, '');
   }
 
   /**
@@ -273,6 +280,43 @@ export class AlpacaClient {
   }
 
   /**
+   * Make request to Alpaca Trading API (for clock, account, orders)
+   */
+  private async tradingRequest<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const url = `${this.tradingUrl}${endpoint}`;
+
+    const headers = {
+      'APCA-API-KEY-ID': this.apiKey,
+      'APCA-API-SECRET-KEY': this.secretKey,
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Alpaca API error: ${response.status} ${response.statusText} - ${errorText}`
+        );
+      }
+
+      const data = await response.json();
+      return data as T;
+    } catch (error: any) {
+      logger.error('Alpaca Trading API request failed', error, { endpoint });
+      throw error;
+    }
+  }
+
+  /**
    * Check if market is open
    */
   async isMarketOpen(): Promise<boolean> {
@@ -286,7 +330,7 @@ export class AlpacaClient {
         next_close: string;
       }
 
-      const response = await this.request<ClockResponse>(endpoint);
+      const response = await this.tradingRequest<ClockResponse>(endpoint);
       return response.is_open;
     } catch (error) {
       logger.error('Failed to check market hours', error);
@@ -313,7 +357,7 @@ export class AlpacaClient {
         next_close: string;
       }
 
-      const response = await this.request<ClockResponse>(endpoint);
+      const response = await this.tradingRequest<ClockResponse>(endpoint);
 
       return {
         isOpen: response.is_open,

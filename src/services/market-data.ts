@@ -7,9 +7,11 @@ import { cache } from './cache.service.js';
 import { rateLimiter } from './rate-limiter.service.js';
 import { indicators as indicatorService } from './indicators.js';
 import { logger } from '../utils/logger.js';
+import { config } from '../config/index.js';
 import { retry } from '../utils/retry.js';
 import { CircuitBreaker } from './circuit-breaker.service.js';
 import { Candle, GexData, GexStrikeLevel, Indicators, OptionsFlowEntry, OptionsFlowSummary } from '../types/index.js';
+import { marketDataStream } from './market-data-stream.service.js';
 
 type Provider = 'alpaca' | 'polygon' | 'marketdata' | 'twelvedata';
 
@@ -22,7 +24,8 @@ export class MarketDataService {
   private readonly maxFailures: number = 5;
   private readonly resetTimeout: number = 60000; // 60 seconds
   private readonly maxRetries: number = 2;
-  private readonly providerPriority: Provider[] = ['alpaca', 'polygon', 'marketdata', 'twelvedata'];
+  private readonly providerPriority: Provider[] = ['marketdata', 'twelvedata', 'alpaca', 'polygon'];
+  private readonly streamEnabled: boolean = config.polygonWsEnabled;
 
   constructor() {
     this.alpaca = new AlpacaClient();
@@ -44,6 +47,11 @@ export class MarketDataService {
     logger.info('Market Data Service initialized with providers', {
       providers: this.providerPriority,
     });
+
+    if (this.streamEnabled) {
+      marketDataStream.start();
+      logger.info('Market data WebSocket streaming enabled');
+    }
   }
 
   /**
@@ -108,7 +116,9 @@ export class MarketDataService {
       try {
         const candles = await retry(
           async () => {
-            await rateLimiter.waitForToken(providerName === 'marketdata' ? 'twelvedata' : providerName);
+            // Use correct rate limiter for each provider
+            const rateLimiterKey = providerName === 'marketdata' ? 'marketdata' : providerName;
+            await rateLimiter.waitForToken(rateLimiterKey);
             switch (providerName) {
               case 'alpaca':
                 return this.alpaca.getCandles(symbol, timeframe, limit);
@@ -154,6 +164,15 @@ export class MarketDataService {
     if (cached) {
       logger.debug('Price retrieved from cache', { symbol, price: cached });
       return cached;
+    }
+
+    if (this.streamEnabled) {
+      const streamQuote = marketDataStream.getLatestQuote(symbol);
+      if (streamQuote) {
+        logger.debug('Price retrieved from WebSocket cache', { symbol, price: streamQuote.mid });
+        return streamQuote.mid;
+      }
+      marketDataStream.ensureSubscribed(symbol);
     }
 
     // Try providers in priority order

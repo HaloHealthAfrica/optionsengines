@@ -1,4 +1,4 @@
-// Polygon.io API Client - Premium market data provider
+// Massive.com API Client (formerly Polygon.io) - Premium market data provider
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 import { Candle } from '../../types/index.js';
@@ -58,18 +58,19 @@ export interface PolygonSnapshot {
 
 export class PolygonClient {
   private readonly apiKey: string;
-  private readonly baseUrl: string = 'https://api.polygon.io';
+  private readonly baseUrl: string;
 
   constructor() {
     this.apiKey = config.polygonApiKey || '';
+    this.baseUrl = this.normalizeBaseUrl(config.polygonBaseUrl || 'https://api.massive.com');
 
     if (!this.apiKey) {
-      logger.warn('Polygon API key not configured');
+      logger.warn('Massive.com (Polygon) API key not configured');
     }
   }
 
   /**
-   * Make request to Polygon API
+   * Make request to Massive.com API (formerly Polygon)
    */
   private async request<T>(endpoint: string): Promise<T> {
     const separator = endpoint.includes('?') ? '&' : '?';
@@ -81,7 +82,7 @@ export class PolygonClient {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          `Polygon API error: ${response.status} ${response.statusText} - ${errorText}`
+          `Massive.com API error: ${response.status} ${response.statusText} - ${errorText}`
         );
       }
 
@@ -89,14 +90,18 @@ export class PolygonClient {
 
       // Check for API error in response
       if (data.status === 'ERROR') {
-        throw new Error(`Polygon API error: ${data.error || 'Unknown error'}`);
+        throw new Error(`Massive.com API error: ${data.error || 'Unknown error'}`);
       }
 
       return data as T;
     } catch (error: any) {
-      logger.error('Polygon API request failed', error, { endpoint });
+      logger.error('Massive.com API request failed', error, { endpoint });
       throw error;
     }
+  }
+
+  private normalizeBaseUrl(url: string): string {
+    return url.replace(/\/+$/, '');
   }
 
   /**
@@ -132,7 +137,7 @@ export class PolygonClient {
       const response = await this.request<PolygonResponse>(endpoint);
 
       if (!response.results || response.results.length === 0) {
-        logger.warn('No bars returned from Polygon', { symbol, timeframe });
+        logger.warn('No bars returned from Massive.com', { symbol, timeframe });
         return [];
       }
 
@@ -145,7 +150,7 @@ export class PolygonClient {
         volume: bar.v,
       }));
 
-      logger.debug('Polygon candles fetched', {
+      logger.debug('Massive.com candles fetched', {
         symbol,
         timeframe,
         count: candles.length,
@@ -153,7 +158,7 @@ export class PolygonClient {
 
       return candles;
     } catch (error) {
-      logger.error('Failed to fetch Polygon candles', error, { symbol, timeframe });
+      logger.error('Failed to fetch Massive.com candles', error, { symbol, timeframe });
       throw error;
     }
   }
@@ -180,11 +185,11 @@ export class PolygonClient {
       const ask = last + spread / 2;
       const mid = last;
 
-      logger.debug('Polygon quote fetched', { symbol, bid, ask, mid });
+      logger.debug('Massive.com quote fetched', { symbol, bid, ask, mid });
 
       return { bid, ask, mid };
     } catch (error) {
-      logger.error('Failed to fetch Polygon quote', error, { symbol });
+      logger.error('Failed to fetch Massive.com quote', error, { symbol });
       throw error;
     }
   }
@@ -213,14 +218,14 @@ export class PolygonClient {
 
       const price = response.ticker.day.c;
 
-      logger.debug('Polygon option price fetched', {
+      logger.debug('Massive.com option price fetched', {
         optionSymbol,
         price,
       });
 
       return price;
     } catch (error) {
-      logger.error('Failed to fetch Polygon option price', error, {
+      logger.error('Failed to fetch Massive.com option price', error, {
         symbol,
         strike,
         expiration,
@@ -231,7 +236,7 @@ export class PolygonClient {
   }
 
   /**
-   * Format option symbol in Polygon format
+   * Format option symbol in Massive.com format (same as Polygon)
    * Example: O:SPY240119C00450000
    */
   private formatOptionSymbol(

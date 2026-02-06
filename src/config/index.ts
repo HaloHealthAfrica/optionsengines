@@ -27,6 +27,9 @@ interface Config {
   alpacaPaper: boolean;
   alpacaBaseUrl: string;
   polygonApiKey: string;
+  polygonBaseUrl: string;
+  polygonRateLimit: number;
+  polygonWsEnabled: boolean;
   twelveDataApiKey: string;
   marketDataApiKey: string;
 
@@ -115,6 +118,9 @@ export const config: Config = {
   alpacaPaper: getEnvVarBoolean('ALPACA_PAPER', true),
   alpacaBaseUrl: getEnvVar('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets'),
   polygonApiKey: getEnvVar('POLYGON_API_KEY', ''),
+  polygonBaseUrl: getEnvVar('POLYGON_BASE_URL', 'https://api.massive.com'),
+  polygonRateLimit: getEnvVarNumber('POLYGON_RATE_LIMIT', 5),
+  polygonWsEnabled: getEnvVarBoolean('POLYGON_WS_ENABLED', false),
   twelveDataApiKey: getEnvVar('TWELVE_DATA_API_KEY', ''),
   marketDataApiKey:
     getEnvVar('MARKET_DATA_API_KEY', '') || getEnvVar('MARKETDATA_API_KEY', ''),

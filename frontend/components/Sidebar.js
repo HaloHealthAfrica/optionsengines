@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LogOut,
   Moon,
+  RadioTower,
   Settings as SettingsIcon,
   Sun,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ const iconMap = {
   positioning: BarChart3,
   orders: Activity,
   history: Activity,
+  monitoring: RadioTower,
   settings: SettingsIcon,
 };
 

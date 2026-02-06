@@ -14,6 +14,7 @@ import positioningRoutes from './routes/positioning.js';
 import optionsEnginesRoutes from './routes/options-engines.js';
 import authRoutes from './routes/auth.js';
 import dashboardRoutes from './routes/dashboard.js';
+import monitoringRoutes from './routes/monitoring.js';
 
 const app: Express = express();
 
@@ -49,6 +50,7 @@ app.use('/webhook', webhookRoutes);
 app.use('/feature-flags', featureFlagRoutes);
 app.use('/positioning', positioningRoutes);
 app.use('/dashboard', dashboardRoutes);
+app.use('/monitoring', monitoringRoutes);
 app.use('/admin/cache', cacheInvalidation.createAdminRoutes());
 app.use('/api', optionsEnginesRoutes);
 app.use('/', engine2Routes);

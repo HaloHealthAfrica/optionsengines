@@ -82,3 +82,17 @@ export async function backendGetPositioning(token, symbol = 'SPY') {
   console.log('[Backend API] Positioning data received');
   return data;
 }
+
+export async function backendGetMonitoringStatus(token, limit = 25) {
+  const response = await backendFetch(`/monitoring/status?limit=${limit}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch monitoring status');
+  }
+
+  return response.json();
+}

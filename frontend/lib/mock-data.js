@@ -112,6 +112,66 @@ export const systemStatus = {
   mode: 'Paper',
 };
 
+export const monitoringStatus = {
+  timestamp: new Date().toISOString(),
+  webhooks: {
+    recent: [
+      {
+        event_id: 'evt-1',
+        status: 'accepted',
+        symbol: 'SPY',
+        direction: 'long',
+        timeframe: '5m',
+        variant: 'A',
+        processing_time_ms: 412,
+        created_at: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
+      },
+      {
+        event_id: 'evt-2',
+        status: 'duplicate',
+        symbol: 'QQQ',
+        direction: 'short',
+        timeframe: '15m',
+        variant: 'B',
+        processing_time_ms: 120,
+        created_at: new Date(Date.now() - 1000 * 60 * 22).toISOString(),
+      },
+    ],
+    summary_24h: {
+      total: 42,
+      accepted: 35,
+      duplicate: 5,
+      invalid_signature: 1,
+      invalid_payload: 0,
+      error: 1,
+    },
+  },
+  engines: {
+    by_variant_24h: { A: 28, B: 14 },
+  },
+  websocket: {
+    enabled: false,
+    connected: false,
+    subscribedSymbols: [],
+    lastQuoteAt: null,
+  },
+  providers: {
+    circuit_breakers: {
+      alpaca: { state: 'closed', failures: 0 },
+      polygon: { state: 'closed', failures: 0 },
+      marketdata: { state: 'closed', failures: 0 },
+      twelvedata: { state: 'half-open', failures: 2 },
+    },
+    down: ['twelvedata'],
+    rate_limits: [
+      { provider: 'alpaca', capacity: 200, currentTokens: 150, utilizationPercent: '25.00%', requestsAllowed: 120, requestsBlocked: 0 },
+      { provider: 'polygon', capacity: 5, currentTokens: 4, utilizationPercent: '20.00%', requestsAllowed: 8, requestsBlocked: 0 },
+      { provider: 'marketdata', capacity: 100, currentTokens: 96, utilizationPercent: '4.00%', requestsAllowed: 4, requestsBlocked: 0 },
+      { provider: 'twelvedata', capacity: 800, currentTokens: 780, utilizationPercent: '2.50%', requestsAllowed: 10, requestsBlocked: 0 },
+    ],
+  },
+};
+
 export const winLossDistribution = [
   { name: 'Wins', value: 68 },
   { name: 'Losses', value: 32 },
