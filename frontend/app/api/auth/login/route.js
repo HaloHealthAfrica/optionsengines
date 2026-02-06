@@ -1,4 +1,4 @@
-import { signToken, validateCredentials } from '@/lib/auth';
+import { backendLogin } from '@/lib/backend-api';
 import { rateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
@@ -40,17 +40,18 @@ export async function POST(request) {
       return Response.json({ error: 'Email and password are required' }, { status: 400 });
     }
 
-    if (!validateCredentials(email, password)) {
+    // Authenticate with backend
+    const result = await backendLogin(email, password);
+    
+    if (!result.success || !result.token) {
       return Response.json({ error: 'Invalid credentials' }, { status: 401 });
     }
-
-    const token = await signToken({ email, role: 'admin' });
 
     const response = Response.json({ success: true });
     response.headers.set('Cache-Control', 'no-store');
     response.headers.set(
       'Set-Cookie',
-      `auth_token=${token}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24}; SameSite=Strict;${
+      `auth_token=${result.token}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24}; SameSite=Strict;${
         process.env.NODE_ENV === 'production' ? ' Secure;' : ''
       }`
     );
@@ -58,7 +59,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('Login error:', error);
     return Response.json(
-      { error: error.message || 'Login failed. Please check server configuration.' },
+      { error: error.message || 'Login failed. Backend may be unavailable.' },
       { status: 500 }
     );
   }
