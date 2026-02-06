@@ -43,10 +43,12 @@ export async function POST(request) {
 
     // Try to authenticate with backend first
     try {
+      console.log('[Login] Attempting backend authentication');
       const result = await backendLogin(email, password);
       
       if (result.success && result.token) {
-        const response = Response.json({ success: true });
+        console.log('[Login] Backend authentication successful');
+        const response = Response.json({ success: true, mode: 'backend' });
         response.headers.set('Cache-Control', 'no-store');
         response.headers.set(
           'Set-Cookie',
@@ -57,16 +59,17 @@ export async function POST(request) {
         return response;
       }
     } catch (backendError) {
-      console.warn('Backend authentication failed, falling back to local auth:', backendError.message);
+      console.warn('[Login] Backend authentication failed, falling back to local auth:', backendError.message);
       
       // Fallback to local authentication if backend is unavailable
       if (!validateCredentials(email, password)) {
         return Response.json({ error: 'Invalid credentials' }, { status: 401 });
       }
 
+      console.log('[Login] Local authentication successful (fallback mode)');
       const token = await signToken({ email, role: 'admin' });
 
-      const response = Response.json({ success: true });
+      const response = Response.json({ success: true, mode: 'local' });
       response.headers.set('Cache-Control', 'no-store');
       response.headers.set(
         'Set-Cookie',
@@ -79,7 +82,7 @@ export async function POST(request) {
 
     return Response.json({ error: 'Invalid credentials' }, { status: 401 });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('[Login] Error:', error);
     return Response.json(
       { error: error.message || 'Login failed. Please try again.' },
       { status: 500 }
