@@ -22,7 +22,15 @@ export async function backendFetch(endpoint, options = {}) {
     return response;
   } catch (error) {
     console.error('[Backend API] Fetch error:', error.message);
-    throw error;
+    throw new Error(`Backend fetch failed: ${error.message} (${url})`);
+  }
+}
+
+async function safeJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
   }
 }
 
@@ -35,12 +43,15 @@ export async function backendLogin(email, password) {
   });
   
   if (!response.ok) {
-    const error = await response.json();
-    console.error('[Backend API] Login failed:', error);
-    throw new Error(error.error || 'Login failed');
+    const errorBody = await safeJson(response);
+    console.error('[Backend API] Login failed:', errorBody || response.status);
+    const err = new Error(errorBody?.error || `Login failed (${response.status})`);
+    err.status = response.status;
+    err.payload = errorBody;
+    throw err;
   }
   
-  const result = await response.json();
+  const result = await safeJson(response);
   console.log('[Backend API] Login successful');
   return result;
 }
@@ -52,11 +63,14 @@ export async function backendRegister(email, password) {
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Registration failed');
+    const errorBody = await safeJson(response);
+    const err = new Error(errorBody?.error || `Registration failed (${response.status})`);
+    err.status = response.status;
+    err.payload = errorBody;
+    throw err;
   }
 
-  return response.json();
+  return safeJson(response);
 }
 
 export async function backendGetDashboard(token) {

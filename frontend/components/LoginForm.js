@@ -49,7 +49,9 @@ export default function LoginForm() {
 
       if (!response.ok) {
         const payload = await response.json();
-        throw new Error(payload.error || (mode === 'register' ? 'Registration failed' : 'Login failed'));
+        const message = payload.error || (mode === 'register' ? 'Registration failed' : 'Login failed');
+        const hint = payload.hint ? ` ${payload.hint}` : '';
+        throw new Error(`${message}${hint}`);
       }
 
       router.push('/');

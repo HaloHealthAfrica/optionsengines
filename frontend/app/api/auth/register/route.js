@@ -41,7 +41,7 @@ export async function POST(request) {
     }
 
     const result = await backendRegister(email, password);
-    if (result.success && result.token) {
+    if (result?.success && result?.token) {
       const response = Response.json({ success: true, mode: 'backend' });
       response.headers.set('Cache-Control', 'no-store');
       response.headers.set(
@@ -56,9 +56,14 @@ export async function POST(request) {
     return Response.json({ error: 'Registration failed' }, { status: 400 });
   } catch (error) {
     console.error('[Register] Error:', error);
-    return Response.json(
-      { error: error.message || 'Registration failed. Please try again.' },
-      { status: 500 }
-    );
+    const message = error?.message || 'Registration failed. Please try again.';
+    const status =
+      message.includes('Backend fetch failed') ? 502 : Number(error?.status) || 500;
+    const hint = message.includes('Backend fetch failed')
+      ? 'Backend unreachable. Check NEXT_PUBLIC_API_URL and backend uptime.'
+      : error?.payload?.error
+      ? undefined
+      : 'Backend returned an unexpected response.';
+    return Response.json({ error: message, hint }, { status });
   }
 }

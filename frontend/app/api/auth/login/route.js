@@ -83,9 +83,11 @@ export async function POST(request) {
     return Response.json({ error: 'Invalid credentials' }, { status: 401 });
   } catch (error) {
     console.error('[Login] Error:', error);
-    return Response.json(
-      { error: error.message || 'Login failed. Please try again.' },
-      { status: 500 }
-    );
+    const message = error?.message || 'Login failed. Please try again.';
+    const status = message.includes('Backend fetch failed') ? 502 : 500;
+    const hint = message.includes('Backend fetch failed')
+      ? 'Backend unreachable. Check NEXT_PUBLIC_API_URL and backend uptime.'
+      : undefined;
+    return Response.json({ error: message, hint }, { status });
   }
 }
