@@ -10,19 +10,29 @@ export async function backendFetch(endpoint, options = {}) {
   console.log('[Backend API] Fetching:', url);
   
   try {
+    const controller = new AbortController();
+    const timeoutMs = 12000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     const response = await fetch(url, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
         ...options.headers,
       },
+      signal: controller.signal,
     });
     
+    clearTimeout(timeoutId);
     console.log('[Backend API] Response status:', response.status);
     return response;
   } catch (error) {
-    console.error('[Backend API] Fetch error:', error.message);
-    throw new Error(`Backend fetch failed: ${error.message} (${url})`);
+    const message =
+      error?.name === 'AbortError'
+        ? `Request timed out after 12s (${url})`
+        : error?.message || 'Unknown error';
+    console.error('[Backend API] Fetch error:', message);
+    throw new Error(`Backend fetch failed: ${message}`);
   }
 }
 
