@@ -1,6 +1,17 @@
-import { validateCsrfToken } from '@/lib/csrf';
+export const runtime = 'nodejs';
 
-export const runtime = 'edge';
+function validateCsrfToken(request) {
+  const cookieHeader = request.headers.get('cookie');
+  const cookies = Object.fromEntries(
+    (cookieHeader || '').split('; ').map(c => {
+      const [key, ...v] = c.split('=');
+      return [key, v.join('=')];
+    })
+  );
+  const cookieToken = cookies['csrf_token'];
+  const headerToken = request.headers.get('x-csrf-token');
+  return Boolean(cookieToken && headerToken && cookieToken === headerToken);
+}
 
 export async function POST(request) {
   if (!validateCsrfToken(request)) {
