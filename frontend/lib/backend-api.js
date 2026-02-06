@@ -45,6 +45,20 @@ export async function backendLogin(email, password) {
   return result;
 }
 
+export async function backendRegister(email, password) {
+  const response = await backendFetch('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Registration failed');
+  }
+
+  return response.json();
+}
+
 export async function backendGetDashboard(token) {
   console.log('[Backend API] Fetching dashboard data');
   
