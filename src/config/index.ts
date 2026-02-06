@@ -106,7 +106,7 @@ export const config: Config = {
 
   // Authentication
   jwtSecret: getEnvVar('JWT_SECRET'),
-  hmacSecret: getEnvVar('HMAC_SECRET'),
+  hmacSecret: getEnvVar('HMAC_SECRET', ''),
 
   // Market Data
   marketDataProvider: getEnvVar('MARKET_DATA_PROVIDER', 'alpaca'),

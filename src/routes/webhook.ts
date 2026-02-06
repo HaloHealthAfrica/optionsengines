@@ -47,6 +47,7 @@ export const webhookSchema = z
     strike: z.number().optional(),
     expiration: z.string().optional(), // ISO date string
     timestamp: z.string(),
+    secret: z.string().min(1).max(128).optional(),
   })
   .refine((data) => Boolean(data.symbol || data.ticker), {
     message: 'symbol is required',
@@ -118,24 +119,23 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
 
   try {
     // Log incoming request
+    const logBody =
+      req.body && typeof req.body === 'object' && 'secret' in req.body
+        ? { ...req.body, secret: '[REDACTED]' }
+        : req.body;
     logger.info('Webhook received', {
       requestId,
       ip: req.ip,
-      body: req.body,
+      body: logBody,
     });
 
-    // Validate HMAC signature if configured
-    const signature = req.headers['x-webhook-signature'] as string;
-    if (config.hmacSecret && config.hmacSecret !== 'change-this-to-another-secure-random-string-for-webhooks') {
-      if (!signature) {
-        logger.warn('Missing webhook signature', { requestId });
-        return res.status(401).json({
-          status: 'REJECTED',
-          error: 'Missing signature',
-          request_id: requestId,
-        });
-      }
+    // Validate HMAC signature if provided
+    const signature = req.headers['x-webhook-signature'] as string | undefined;
+    const hmacEnabled =
+      config.hmacSecret &&
+      config.hmacSecret !== 'change-this-to-another-secure-random-string-for-webhooks';
 
+    if (hmacEnabled && signature) {
       const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
       const payload = rawBody ? rawBody.toString('utf8') : JSON.stringify(req.body);
       const isValid = authService.verifyHmacSignature(payload, signature);
@@ -171,6 +171,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     }
 
     const payload = parseResult.data;
+    const { secret: _secret, ...payloadForStorage } = payload;
     const symbol = payload.symbol ?? payload.ticker;
     if (!symbol) {
       return res.status(400).json({
@@ -234,7 +235,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
         payload.timeframe,
         payload.timestamp ? new Date(payload.timestamp) : new Date(),
         'pending',
-        JSON.stringify(payload),
+        JSON.stringify(payloadForStorage),
         signalHash,
       ]
     );
