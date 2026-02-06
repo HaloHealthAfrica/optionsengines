@@ -13,11 +13,13 @@ export async function GET(request) {
     const data = await backendGetMonitoringStatus(auth.token, limit);
     const response = Response.json(data);
     response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('x-data-source', 'backend');
     return response;
   } catch (error) {
     console.error('Backend monitoring fetch failed, using mock data:', error);
     const response = Response.json(monitoringStatus);
     response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('x-data-source', 'mock');
     return response;
   }
 }

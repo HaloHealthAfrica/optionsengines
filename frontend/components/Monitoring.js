@@ -19,12 +19,15 @@ export default function Monitoring() {
   const [status, setStatus] = useState('idle');
   const [limit, setLimit] = useState(25);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [dataSource, setDataSource] = useState('unknown');
+  const [selectedEvent, setSelectedEvent] = useState(null);
 
   const loadData = useCallback(async () => {
     setStatus('loading');
     try {
       const response = await fetch(`/api/monitoring/status?limit=${limit}`, { cache: 'no-store' });
       if (!response.ok) throw new Error('Failed');
+      setDataSource(response.headers.get('x-data-source') || 'unknown');
       const payload = await response.json();
       setData(payload);
       setStatus('success');
@@ -57,6 +60,10 @@ export default function Monitoring() {
         <div>
           <h1 className="text-2xl font-semibold">Monitoring</h1>
           <p className="muted text-sm">Webhook throughput, provider health, and streaming status.</p>
+          <p className="muted text-xs">
+            Data source: {dataSource} · Limit: {limit} · Updated:{' '}
+            {data?.timestamp ? new Date(data.timestamp).toLocaleString() : '--'}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex gap-2">
@@ -171,7 +178,11 @@ export default function Monitoring() {
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
                 {recentFiltered.map((item) => (
-                  <tr key={item.event_id || item.request_id} className="text-slate-700 dark:text-slate-200">
+                  <tr
+                    key={item.event_id || item.request_id}
+                    className="cursor-pointer text-slate-700 transition hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900/40"
+                    onClick={() => setSelectedEvent(item)}
+                  >
                     <td className="py-3 text-xs text-slate-500">
                       {item.created_at ? new Date(item.created_at).toLocaleString() : '--'}
                     </td>
@@ -202,6 +213,35 @@ export default function Monitoring() {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="mt-4 rounded-2xl border border-slate-100 bg-white/60 p-4 text-xs dark:border-slate-800 dark:bg-slate-900/40">
+            <p className="text-sm font-semibold">Selected webhook</p>
+            {selectedEvent ? (
+              <div className="mt-2 grid gap-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="muted">Status</span>
+                  <span className="font-semibold">{selectedEvent.status}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="muted">Request ID</span>
+                  <span className="font-mono text-[11px]">{selectedEvent.request_id || '--'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="muted">Signal ID</span>
+                  <span className="font-mono text-[11px]">{selectedEvent.signal_id || '--'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="muted">Experiment</span>
+                  <span className="font-mono text-[11px]">{selectedEvent.experiment_id || '--'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="muted">Error</span>
+                  <span className="text-rose-500">{selectedEvent.error_message || 'None'}</span>
+                </div>
+              </div>
+            ) : (
+              <p className="muted mt-2">Click a webhook row to see details.</p>
+            )}
           </div>
         </div>
 

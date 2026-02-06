@@ -596,7 +596,12 @@ export class MarketDataService {
     }
 
     if (!this.checkCircuitBreaker('marketdata')) {
-      throw new Error('MarketData.app unavailable (circuit breaker open)');
+      logger.warn('MarketData.app options flow unavailable (circuit breaker open)', { symbol });
+      return {
+        symbol,
+        entries: [],
+        updatedAt: new Date(),
+      };
     }
 
     try {
@@ -636,8 +641,14 @@ export class MarketDataService {
       return summary;
     } catch (error) {
       this.recordFailure('marketdata');
-      logger.error('Failed to fetch options flow', error, { symbol });
-      throw error;
+      logger.warn('Failed to fetch options flow, returning empty summary', { error, symbol });
+      const emptySummary: OptionsFlowSummary = {
+        symbol,
+        entries: [],
+        updatedAt: new Date(),
+      };
+      cache.set(cacheKey, emptySummary, 15);
+      return emptySummary;
     }
   }
 
