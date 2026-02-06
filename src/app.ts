@@ -15,6 +15,8 @@ import optionsEnginesRoutes from './routes/options-engines.js';
 import authRoutes from './routes/auth.js';
 import dashboardRoutes from './routes/dashboard.js';
 import monitoringRoutes from './routes/monitoring.js';
+import ordersRoutes from './routes/orders.js';
+import historyRoutes from './routes/history.js';
 
 const app: Express = express();
 
@@ -51,6 +53,8 @@ app.use('/feature-flags', featureFlagRoutes);
 app.use('/positioning', positioningRoutes);
 app.use('/dashboard', dashboardRoutes);
 app.use('/monitoring', monitoringRoutes);
+app.use('/orders', ordersRoutes);
+app.use('/history', historyRoutes);
 app.use('/admin/cache', cacheInvalidation.createAdminRoutes());
 app.use('/api', optionsEnginesRoutes);
 app.use('/', engine2Routes);

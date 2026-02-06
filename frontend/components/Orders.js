@@ -22,6 +22,7 @@ export default function Orders() {
   const [sortKey, setSortKey] = useState('time');
   const [filter, setFilter] = useState('all');
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [dataSource, setDataSource] = useState('unknown');
 
   useEffect(() => {
     const loadOrders = async () => {
@@ -29,6 +30,7 @@ export default function Orders() {
       try {
         const response = await fetch('/api/orders');
         if (!response.ok) throw new Error('Failed');
+        setDataSource(response.headers.get('x-data-source') || 'unknown');
         const payload = await response.json();
         setOrders(payload.orders || []);
         setStatus('success');
@@ -50,9 +52,9 @@ export default function Orders() {
       filter === 'all' ? scoped : scoped.filter((order) => order.type.toLowerCase() === filter);
 
     return filtered.sort((a, b) => {
-      if (sortKey === 'price') return Number(b.price) - Number(a.price);
+      if (sortKey === 'price') return Number(b.price || 0) - Number(a.price || 0);
       if (sortKey === 'qty') return b.qty - a.qty;
-      return a.time.localeCompare(b.time);
+      return String(a.time || '').localeCompare(String(b.time || ''));
     });
   }, [orders, activeTab, filter, sortKey]);
 
@@ -62,6 +64,7 @@ export default function Orders() {
         <div>
           <h1 className="text-2xl font-semibold">Orders</h1>
           <p className="muted text-sm">Execution tracking and trade history.</p>
+          <p className="muted text-xs">Data source: {dataSource}</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
@@ -161,13 +164,17 @@ export default function Orders() {
                   <td className="px-4 py-4">{order.strike}</td>
                   <td className="px-4 py-4">{order.expiry}</td>
                   <td className="px-4 py-4">{order.qty}</td>
-                  <td className="px-4 py-4">${order.price}</td>
+                  <td className="px-4 py-4">
+                    {order.price !== null && order.price !== undefined ? `$${Number(order.price).toFixed(2)}` : '--'}
+                  </td>
                   <td className="px-4 py-4">
                     <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusColors[order.status]}`}>
                       {order.status}
                     </span>
                   </td>
-                  <td className="px-4 py-4">{order.time}</td>
+                  <td className="px-4 py-4">
+                    {order.time ? new Date(order.time).toLocaleString() : '--'}
+                  </td>
                 </tr>
               ))}
             </tbody>

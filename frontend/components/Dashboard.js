@@ -13,12 +13,14 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('idle');
   const [range, setRange] = useState('6M');
+  const [dataSource, setDataSource] = useState('unknown');
 
   const loadData = useCallback(async () => {
     setStatus('loading');
     try {
       const response = await fetch('/api/dashboard/metrics');
       if (!response.ok) throw new Error('Failed to load dashboard');
+      setDataSource(response.headers.get('x-data-source') || 'unknown');
       const payload = await response.json();
       setData(payload);
       setStatus('success');
@@ -46,6 +48,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-2xl font-semibold">Portfolio Overview</h1>
           <p className="muted text-sm">Live portfolio metrics and signal activity.</p>
+          <p className="muted text-xs">Data source: {dataSource}</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex flex-wrap gap-2" role="tablist" aria-label="Performance ranges">

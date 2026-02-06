@@ -11,7 +11,8 @@ export async function GET(request) {
     const data = await backendGetDashboard(auth.token);
     
     const response = Response.json(data);
-    response.headers.set('Cache-Control', 's-maxage=30, stale-while-revalidate=60');
+    response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('x-data-source', 'backend');
     return response;
   } catch (error) {
     console.error('Backend dashboard fetch failed, using mock data:', error);
@@ -22,7 +23,8 @@ export async function GET(request) {
       performance: performanceSeries,
       recentActivity,
     });
-    response.headers.set('Cache-Control', 's-maxage=30, stale-while-revalidate=60');
+    response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('x-data-source', 'mock');
     return response;
   }
 }

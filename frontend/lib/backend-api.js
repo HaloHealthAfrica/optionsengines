@@ -134,3 +134,31 @@ export async function backendGetMonitoringStatus(token, limit = 25) {
 
   return response.json();
 }
+
+export async function backendGetOrders(token) {
+  const response = await backendFetch('/orders', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch orders (${response.status})`);
+  }
+
+  return response.json();
+}
+
+export async function backendGetHistoryStats(token) {
+  const response = await backendFetch('/history/stats', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch history (${response.status})`);
+  }
+
+  return response.json();
+}

@@ -9,6 +9,7 @@ const WinLossChart = dynamic(() => import('./WinLossChart'), { ssr: false });
 export default function History() {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('idle');
+  const [dataSource, setDataSource] = useState('unknown');
 
   useEffect(() => {
     const loadData = async () => {
@@ -16,6 +17,7 @@ export default function History() {
       try {
         const response = await fetch('/api/history/stats');
         if (!response.ok) throw new Error('Failed');
+        setDataSource(response.headers.get('x-data-source') || 'unknown');
         const payload = await response.json();
         setData(payload);
         setStatus('success');
@@ -31,6 +33,7 @@ export default function History() {
       <div>
         <h1 className="text-2xl font-semibold">History & Analytics</h1>
         <p className="muted text-sm">Performance analytics and experiment tracking.</p>
+        <p className="muted text-xs">Data source: {dataSource}</p>
       </div>
 
       {status === 'error' && (
@@ -91,8 +94,10 @@ export default function History() {
                     {trade.symbol.slice(0, 1)}
                   </span>
                   <div>
-                    <p className="font-medium">{trade.symbol} · {trade.type}</p>
-                    <p className="muted text-xs">{trade.date}</p>
+                  <p className="font-medium">{trade.symbol} · {trade.type}</p>
+                  <p className="muted text-xs">
+                    {trade.date ? new Date(trade.date).toLocaleDateString() : '--'}
+                  </p>
                   </div>
                 </div>
                 <div className="text-right">
