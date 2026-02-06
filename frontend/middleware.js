@@ -35,6 +35,7 @@ export async function middleware(request) {
   if (
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/webhook') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon')
   ) {
