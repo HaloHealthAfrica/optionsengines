@@ -21,7 +21,10 @@
     "migrate:down": "node dist/migrations/runner.js down",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
-    "perf": "tsx scripts/performance/run-performance.ts"
+    "perf": "tsx scripts/performance/run-performance.ts",
+    "check:webhooks": "tsx scripts/check-webhooks.ts",
+    "test:webhook": "tsx scripts/test-webhook-endpoint.ts",
+    "diagnose": "npm run check:webhooks && npm run test:webhook"
   },
   "keywords": [
     "options",
