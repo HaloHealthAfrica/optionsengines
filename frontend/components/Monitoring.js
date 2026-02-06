@@ -43,6 +43,13 @@ export default function Monitoring() {
   const summary = data?.webhooks?.summary_24h || {};
   const ws = data?.websocket || {};
   const providers = data?.providers || {};
+  const pipeline = data?.pipeline || {};
+  const signalSummary = pipeline.signals_24h || {};
+  const orderSummary = pipeline.orders_24h || {};
+  const lastActivity = pipeline.last_activity || {};
+  const workerErrors = pipeline.worker_errors || {};
+  const recentSignals = pipeline.recent_signals || [];
+  const recentRejections = pipeline.recent_rejections || [];
   const recent = data?.webhooks?.recent || [];
   const engineStats = data?.engines?.by_variant_24h || {};
   const recentFiltered = recent.filter((item) => {
@@ -261,6 +268,50 @@ export default function Monitoring() {
 
         <div className="flex flex-col gap-6">
           <div className="card p-6">
+            <h2 className="text-lg font-semibold">Pipeline Health</h2>
+            <div className="mt-4 grid gap-3 text-sm">
+              <div className="flex items-center justify-between rounded-2xl border border-slate-100 px-4 py-3 dark:border-slate-800">
+                <span>Signals (24h)</span>
+                <span className="font-semibold">
+                  {signalSummary.total ?? 0} · P {signalSummary.pending ?? 0} · A {signalSummary.approved ?? 0} · R{' '}
+                  {signalSummary.rejected ?? 0}
+                </span>
+              </div>
+              <div className="flex items-center justify-between rounded-2xl border border-slate-100 px-4 py-3 dark:border-slate-800">
+                <span>Orders (24h)</span>
+                <span className="font-semibold">
+                  {orderSummary.total ?? 0} · Pending {orderSummary.pending_execution ?? 0} · Filled{' '}
+                  {orderSummary.filled ?? 0} · Failed {orderSummary.failed ?? 0}
+                </span>
+              </div>
+              <div className="flex flex-col gap-2 rounded-2xl border border-slate-100 px-4 py-3 text-xs dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="muted">Last signal</span>
+                  <span>{lastActivity.signal ? new Date(lastActivity.signal).toLocaleString() : '--'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="muted">Last order</span>
+                  <span>{lastActivity.order ? new Date(lastActivity.order).toLocaleString() : '--'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="muted">Last trade</span>
+                  <span>{lastActivity.trade ? new Date(lastActivity.trade).toLocaleString() : '--'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="muted">Last position</span>
+                  <span>{lastActivity.position ? new Date(lastActivity.position).toLocaleString() : '--'}</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between rounded-2xl border border-slate-100 px-4 py-3 text-xs dark:border-slate-800">
+                <span className="muted">Worker errors</span>
+                <span className="font-semibold">
+                  {workerErrors.total ?? 0} {workerErrors.total ? `(${Object.keys(workerErrors.bySource || {}).length} sources)` : ''}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card p-6">
             <h2 className="text-lg font-semibold">Decision Engine Mix (24h)</h2>
             <div className="mt-4 grid gap-3">
               <div className="flex items-center justify-between rounded-2xl border border-slate-100 px-4 py-3 text-sm dark:border-slate-800">
@@ -302,6 +353,42 @@ export default function Monitoring() {
             </div>
             <div className="mt-4 text-xs text-slate-500">
               Down: {(providers.down || []).length ? providers.down.join(', ') : 'None'}
+            </div>
+          </div>
+
+          <div className="card p-6">
+            <h2 className="text-lg font-semibold">Recent Signals</h2>
+            <div className="mt-3 grid gap-2 text-xs">
+              {recentSignals.slice(0, 6).map((item) => (
+                <div
+                  key={item.signal_id}
+                  className="flex items-center justify-between rounded-2xl border border-slate-100 px-3 py-2 dark:border-slate-800"
+                >
+                  <span className="font-medium">{item.symbol || '--'}</span>
+                  <span className="muted">{item.timeframe || '--'}</span>
+                  <span className="muted">{item.status || '--'}</span>
+                  <span>{item.created_at ? new Date(item.created_at).toLocaleTimeString() : '--'}</span>
+                </div>
+              ))}
+              {recentSignals.length === 0 && <p className="muted text-sm">No signals recorded yet.</p>}
+            </div>
+          </div>
+
+          <div className="card p-6">
+            <h2 className="text-lg font-semibold">Recent Rejections</h2>
+            <div className="mt-3 grid gap-2 text-xs">
+              {recentRejections.slice(0, 6).map((item) => (
+                <div
+                  key={item.signal_id}
+                  className="flex items-center justify-between rounded-2xl border border-slate-100 px-3 py-2 dark:border-slate-800"
+                >
+                  <span className="font-medium">{item.symbol || '--'}</span>
+                  <span className="muted">{item.timeframe || '--'}</span>
+                  <span className="text-rose-500">{item.rejection_reason || 'unknown'}</span>
+                  <span>{item.created_at ? new Date(item.created_at).toLocaleTimeString() : '--'}</span>
+                </div>
+              ))}
+              {recentRejections.length === 0 && <p className="muted text-sm">No rejections recorded.</p>}
             </div>
           </div>
         </div>
