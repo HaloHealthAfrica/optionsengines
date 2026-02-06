@@ -325,6 +325,9 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
       });
     }
 
+    // After this check, normalizedTimeframe is guaranteed to be a string
+    const timeframe: string = normalizedTimeframe;
+
     const normalizedDirection = normalizeDirection(payload);
 
     if (!normalizedDirection) {
@@ -338,7 +341,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     directionForLog = normalizedDirection;
 
     // Check for duplicates
-    const duplicate = await isDuplicate(symbol, normalizedDirection, normalizedTimeframe, 60);
+    const duplicate = await isDuplicate(symbol, normalizedDirection, timeframe, 60);
 
     if (duplicate) {
       logger.info('Duplicate signal detected', {
@@ -361,7 +364,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     const signalHash = generateSignalHash(
       symbol,
       normalizedDirection,
-      normalizedTimeframe,
+      timeframe,
       signalTimestamp.toISOString()
     );
 
@@ -380,7 +383,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
       [
         symbol,
         normalizedDirection,
-        normalizedTimeframe,
+        timeframe,
         signalTimestamp,
         'pending',
         JSON.stringify(payloadForStorage),
@@ -401,7 +404,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
     const routingDecision = await strategyRouter.route({
       signalId,
       symbol,
-      timeframe: normalizedTimeframe,
+      timeframe: timeframe,
       sessionId: signalTimestamp.toISOString(),
     });
     experimentIdForLog = routingDecision.experimentId;
@@ -416,8 +419,8 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
       };
 
       const [candles, indicators, currentPrice] = await Promise.all([
-        marketData.getCandles(symbol, payload.timeframe, 200),
-        marketData.getIndicators(symbol, payload.timeframe),
+        marketData.getCandles(symbol, timeframe, 200),
+        marketData.getIndicators(symbol, timeframe),
         marketData.getStockPrice(symbol),
       ]);
 
@@ -465,7 +468,7 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
         signalId,
         symbol,
         direction: normalizedDirection,
-        timeframe: payload.timeframe,
+        timeframe: timeframe,
         timestamp: signalTimestamp,
         sessionType: sessionContext.sessionType,
       };
