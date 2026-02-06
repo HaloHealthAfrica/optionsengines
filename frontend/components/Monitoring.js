@@ -18,11 +18,12 @@ export default function Monitoring() {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('idle');
   const [limit, setLimit] = useState(25);
+  const [activeFilter, setActiveFilter] = useState('all');
 
   const loadData = useCallback(async () => {
     setStatus('loading');
     try {
-      const response = await fetch(`/api/monitoring/status?limit=${limit}`);
+      const response = await fetch(`/api/monitoring/status?limit=${limit}`, { cache: 'no-store' });
       if (!response.ok) throw new Error('Failed');
       const payload = await response.json();
       setData(payload);
@@ -41,6 +42,14 @@ export default function Monitoring() {
   const providers = data?.providers || {};
   const recent = data?.webhooks?.recent || [];
   const engineStats = data?.engines?.by_variant_24h || {};
+  const recentFiltered = recent.filter((item) => {
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'duplicate') return item.status === 'duplicate';
+    if (activeFilter === 'failures') {
+      return ['error', 'invalid_signature', 'invalid_payload'].includes(item.status);
+    }
+    return item.status === activeFilter;
+  });
 
   return (
     <section className="flex flex-col gap-6">
@@ -80,15 +89,27 @@ export default function Monitoring() {
       )}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="card p-5">
+        <button
+          type="button"
+          onClick={() => setActiveFilter('all')}
+          className={`card p-5 text-left transition ${
+            activeFilter === 'all' ? 'ring-2 ring-brand-400/60' : 'hover:-translate-y-0.5'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium">Webhooks (24h)</p>
             <Activity size={16} className="text-slate-400" />
           </div>
           <p className="mt-3 text-2xl font-semibold">{summary.total ?? '--'}</p>
           <p className="muted text-xs">Accepted: {summary.accepted ?? 0}</p>
-        </div>
-        <div className="card p-5">
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveFilter('failures')}
+          className={`card p-5 text-left transition ${
+            activeFilter === 'failures' ? 'ring-2 ring-rose-400/60' : 'hover:-translate-y-0.5'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium">Webhook Failures</p>
             <AlertTriangle size={16} className="text-rose-400" />
@@ -97,16 +118,26 @@ export default function Monitoring() {
           <p className="muted text-xs">
             Invalid: {(summary.invalid_signature ?? 0) + (summary.invalid_payload ?? 0)}
           </p>
-        </div>
-        <div className="card p-5">
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveFilter('duplicate')}
+          className={`card p-5 text-left transition ${
+            activeFilter === 'duplicate' ? 'ring-2 ring-amber-400/60' : 'hover:-translate-y-0.5'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium">Duplicates</p>
             <CheckCircle2 size={16} className="text-amber-400" />
           </div>
           <p className="mt-3 text-2xl font-semibold">{summary.duplicate ?? 0}</p>
           <p className="muted text-xs">Deduplicated signals</p>
-        </div>
-        <div className="card p-5">
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveFilter('all')}
+          className="card p-5 text-left transition hover:-translate-y-0.5"
+        >
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium">WebSocket</p>
             <RadioTower size={16} className="text-sky-400" />
@@ -115,12 +146,17 @@ export default function Monitoring() {
           <p className="muted text-xs">
             {ws.enabled ? 'Enabled' : 'Disabled'} · {ws.subscribedSymbols?.length || 0} symbols
           </p>
-        </div>
+        </button>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.2fr,1fr]">
         <div className="card p-6">
-          <h2 className="text-lg font-semibold">Recent Webhooks</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Recent Webhooks</h2>
+            <span className="muted text-xs">
+              Showing {recentFiltered.length} of {recent.length}
+            </span>
+          </div>
           <div className="mt-4 overflow-auto">
             <table className="w-full text-sm">
               <thead className="text-left text-xs uppercase text-slate-400">
@@ -134,7 +170,7 @@ export default function Monitoring() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
-                {recent.map((item) => (
+                {recentFiltered.map((item) => (
                   <tr key={item.event_id || item.request_id} className="text-slate-700 dark:text-slate-200">
                     <td className="py-3 text-xs text-slate-500">
                       {item.created_at ? new Date(item.created_at).toLocaleString() : '--'}
@@ -150,10 +186,10 @@ export default function Monitoring() {
                     <td className="py-3 text-right text-xs">{item.processing_time_ms ?? '--'}</td>
                   </tr>
                 ))}
-                {recent.length === 0 && status !== 'loading' && (
+                {recentFiltered.length === 0 && status !== 'loading' && (
                   <tr>
                     <td className="py-4 text-sm text-slate-500" colSpan={6}>
-                      No webhook activity yet.
+                      No webhook activity for this filter yet.
                     </td>
                   </tr>
                 )}
