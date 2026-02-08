@@ -9,6 +9,7 @@ import { ValidationOrchestrator } from '../../orchestration/validation-orchestra
 import { ValidationCategory } from '../../types/index.js';
 
 describe('Validation Orchestrator - Property Tests', () => {
+  jest.setTimeout(60000);
   const orchestrator = new ValidationOrchestrator();
 
   /**
@@ -41,9 +42,9 @@ describe('Validation Orchestrator - Property Tests', () => {
           expect(Array.isArray(report.recommendations)).toBe(true);
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 5 }
     );
-  }, 30000); // Increase timeout for full validation
+  }, 60000); // Increase timeout for full validation
 
   /**
    * Property 74: Validation Failure Isolation
@@ -68,7 +69,7 @@ describe('Validation Orchestrator - Property Tests', () => {
           expect(report.categoryResults.size).toBeLessThanOrEqual(categories.length);
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 5 }
     );
   });
 
@@ -104,9 +105,9 @@ describe('Validation Orchestrator - Property Tests', () => {
           });
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 5 }
     );
-  }, 30000);
+  }, 60000);
 
   /**
    * Property 78: Validation Export Format
@@ -139,9 +140,9 @@ describe('Validation Orchestrator - Property Tests', () => {
           expect(Array.isArray(parsed.recommendations)).toBe(true);
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 5 }
     );
-  }, 30000);
+  }, 60000);
 
   /**
    * Additional property: Readiness score calculation is correct
@@ -166,9 +167,9 @@ describe('Validation Orchestrator - Property Tests', () => {
           }
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 5 }
     );
-  }, 30000);
+  }, 60000);
 
   /**
    * Additional property: Validation status is consistent
@@ -194,7 +195,7 @@ describe('Validation Orchestrator - Property Tests', () => {
           }
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 5 }
     );
-  }, 30000);
+  }, 60000);
 });

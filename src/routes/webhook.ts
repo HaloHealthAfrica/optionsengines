@@ -6,33 +6,8 @@ import { db } from '../services/database.service.js';
 import { authService } from '../services/auth.service.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
-import { strategyRouter } from '../services/strategy-router.service.js';
-import { marketData } from '../services/market-data.js';
-import { eventLogger } from '../services/event-logger.service.js';
-import { shadowExecutor } from '../services/shadow-executor.service.js';
-import { featureFlags } from '../services/feature-flag.service.js';
-import { positioningService } from '../services/positioning.service.js';
-import { TechnicalAgent } from '../agents/core/technical-agent.js';
-import { ContextAgent } from '../agents/core/context-agent.js';
-import { RiskAgent } from '../agents/core/risk-agent.js';
-import { MetaDecisionAgent } from '../agents/core/meta-decision-agent.js';
-import { ORBSpecialist } from '../agents/specialists/orb-specialist.js';
-import { StratSpecialist } from '../agents/specialists/strat-specialist.js';
-import { TTMSpecialist } from '../agents/specialists/ttm-specialist.js';
-import { GammaFlowSpecialist } from '../agents/specialists/gamma-flow-specialist.js';
-import { SatylandSubAgent } from '../agents/subagents/satyland-sub-agent.js';
-import { AgentOutput, EnrichedSignal, MarketData, SessionContext } from '../types/index.js';
 
 const router = Router();
-const metaDecisionAgent = new MetaDecisionAgent();
-const coreAgents = [new TechnicalAgent(), new ContextAgent(), new RiskAgent()];
-const specialistAgents = [
-  new ORBSpecialist(),
-  new StratSpecialist(),
-  new TTMSpecialist(),
-  new GammaFlowSpecialist(),
-];
-const subAgents = [new SatylandSubAgent()];
 
 // Webhook payload schema
 export const webhookSchema = z
@@ -400,123 +375,11 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
       direction: normalizedDirection,
     });
 
-    // Route signal to Engine 1 (A) or Engine 2 (B)
-    const routingDecision = await strategyRouter.route({
-      signalId,
-      symbol,
-      timeframe: timeframe,
-      sessionId: signalTimestamp.toISOString(),
-    });
-    experimentIdForLog = routingDecision.experimentId;
-    variantForLog = routingDecision.variant;
-
-    if (routingDecision.variant === 'B') {
-      const marketHours = await marketData.getMarketHours();
-      const sessionContext: SessionContext = {
-        sessionType: marketHours.isMarketOpen ? 'RTH' : 'ETH',
-        isMarketOpen: marketHours.isMarketOpen,
-        minutesUntilClose: marketHours.minutesUntilClose,
-      };
-
-      const [candles, indicators, currentPrice] = await Promise.all([
-        marketData.getCandles(symbol, timeframe, 200),
-        marketData.getIndicators(symbol, timeframe),
-        marketData.getStockPrice(symbol),
-      ]);
-
-      let gexData = null;
-      let optionsFlow = null;
-      try {
-        gexData = await positioningService.getGexSnapshot(symbol);
-      } catch (error) {
-        logger.warn('GEX data unavailable', { error, symbol });
-      }
-      try {
-        optionsFlow = await positioningService.getOptionsFlowSnapshot(symbol, 50);
-      } catch (error) {
-        logger.warn('Options flow data unavailable', { error, symbol });
-      }
-
-      const riskLimitResult = await db.query(
-        `SELECT * FROM risk_limits WHERE enabled = true ORDER BY created_at DESC LIMIT 1`
-      );
-      const riskLimit = riskLimitResult.rows[0] || {};
-
-      const exposureResult = await db.query(
-        `SELECT COUNT(*)::int AS count, COALESCE(SUM(entry_price * quantity * 100), 0) AS exposure
-         FROM refactored_positions WHERE status IN ('open', 'closing')`
-      );
-      const openPositions = exposureResult.rows[0]?.count || 0;
-      const exposure = Number(exposureResult.rows[0]?.exposure || 0);
-      const maxTotalExposure =
-        riskLimit.max_total_exposure !== undefined ? Number(riskLimit.max_total_exposure) : null;
-
-      const marketContext: MarketData = {
-        candles,
-        indicators,
-        currentPrice,
-        sessionContext,
-        gex: gexData,
-        optionsFlow,
-        risk: {
-          positionLimitExceeded: openPositions >= config.maxOpenPositions,
-          exposureExceeded: maxTotalExposure !== null && exposure > maxTotalExposure,
-        },
-      };
-
-      const enrichedSignal: EnrichedSignal = {
-        signalId,
-        symbol,
-        direction: normalizedDirection,
-        timeframe: timeframe,
-        timestamp: signalTimestamp,
-        sessionType: sessionContext.sessionType,
-      };
-
-      const allAgents = [...coreAgents, ...specialistAgents, ...subAgents];
-      const outputs: AgentOutput[] = [];
-
-      for (const agent of allAgents) {
-        if (!agent.shouldActivate(enrichedSignal, marketContext)) {
-          continue;
-        }
-        const output = await agent.analyze(enrichedSignal, marketContext);
-        outputs.push({
-          ...output,
-          metadata: {
-            ...output.metadata,
-            agentType: agent.type,
-          },
-        });
-      }
-
-      const metaDecision = metaDecisionAgent.aggregate(outputs);
-      await eventLogger.logDecision({
-        experimentId: routingDecision.experimentId,
-        signalId,
-        outputs,
-        metaDecision,
-      });
-
-      if (metaDecision.decision === 'approve') {
-        if (featureFlags.isEnabled('enable_shadow_execution')) {
-          await shadowExecutor.simulateExecution(metaDecision, enrichedSignal, routingDecision.experimentId);
-        } else {
-          logger.info('Shadow execution disabled, skipping', {
-            experimentId: routingDecision.experimentId,
-            signalId,
-          });
-        }
-      }
-    }
-
     // Return success response
     await logWebhookEvent({ status: 'accepted' });
-    return res.status(201).json({
+    return res.status(200).json({
       status: 'ACCEPTED',
       signal_id: signalId,
-      experiment_id: routingDecision.experimentId,
-      variant: routingDecision.variant,
       request_id: requestId,
       processing_time_ms: Date.now() - startTime,
     });

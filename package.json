@@ -13,6 +13,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:e2e": "tsx tests/e2e/cli.ts",
+    "test:e2e:live": "node scripts/e2e-test.js",
     "test:e2e:engine-a": "tsx tests/e2e/cli.ts -- --engine-a",
     "test:e2e:engine-b": "tsx tests/e2e/cli.ts -- --engine-b",
     "test:e2e:ci": "tsx tests/e2e/cli.ts -- --ci",

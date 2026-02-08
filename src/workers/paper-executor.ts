@@ -14,6 +14,8 @@ interface PendingOrder {
   expiration: Date;
   type: 'call' | 'put';
   quantity: number;
+  engine?: 'A' | 'B' | null;
+  experiment_id?: string | null;
 }
 
 async function fetchOptionPriceWithRetry(
@@ -121,9 +123,17 @@ export class PaperExecutorWorker {
           const fillTimestamp = new Date();
 
           await db.query(
-            `INSERT INTO trades (order_id, fill_price, fill_quantity, fill_timestamp, commission)
-             VALUES ($1, $2, $3, $4, $5)`,
-            [order.order_id, price, order.quantity, fillTimestamp, 0]
+            `INSERT INTO trades (order_id, fill_price, fill_quantity, fill_timestamp, commission, engine, experiment_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+              order.order_id,
+              price,
+              order.quantity,
+              fillTimestamp,
+              0,
+              order.engine ?? null,
+              order.experiment_id ?? null,
+            ]
           );
 
           await db.query(
@@ -162,10 +172,12 @@ export class PaperExecutorWorker {
                 type,
                 quantity,
                 entry_price,
+                engine,
+                experiment_id,
                 status,
                 entry_timestamp,
                 last_updated
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`,
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)`,
               [
                 order.symbol,
                 order.option_symbol,
@@ -174,6 +186,8 @@ export class PaperExecutorWorker {
                 order.type,
                 order.quantity,
                 price,
+                order.engine ?? null,
+                order.experiment_id ?? null,
                 'open',
                 fillTimestamp,
               ]

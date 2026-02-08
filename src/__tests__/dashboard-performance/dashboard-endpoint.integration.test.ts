@@ -2,6 +2,7 @@
 // Tests parallel fetching, partial failures, and cache utilization
 
 import request from 'supertest';
+import nock from 'nock';
 import { app } from '../../app.js';
 import { redisCache } from '../../services/redis-cache.service.js';
 import { authService } from '../../services/auth.service.js';
@@ -11,6 +12,7 @@ describe('Dashboard Endpoint Integration', () => {
   let authToken: string;
 
   beforeAll(async () => {
+    nock.enableNetConnect('127.0.0.1');
     // Connect Redis
     if (!redisCache.isAvailable()) {
       await redisCache.connect(process.env.REDIS_URL);
@@ -21,11 +23,12 @@ describe('Dashboard Endpoint Integration', () => {
       userId: 'test-user',
       email: 'test@example.com',
       role: 'admin',
-    });
+    }).token;
   });
 
   afterAll(async () => {
     await redisCache.disconnect();
+    nock.disableNetConnect();
   });
 
   afterEach(async () => {

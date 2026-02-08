@@ -123,7 +123,7 @@ describe('Integration: Shadow execution', () => {
     (marketData.getStockPrice as jest.Mock).mockReset();
   });
 
-  test('calls shadow executor when Variant B approved', async () => {
+  test('does not call shadow executor in webhook handler', async () => {
     (db.query as jest.Mock).mockImplementation(async (text: string) => {
       if (text.includes('INSERT INTO signals')) {
         return { rows: [{ signal_id: 'sig-1' }] };
@@ -136,35 +136,6 @@ describe('Integration: Shadow execution', () => {
       }
       return { rows: [] };
     });
-    (strategyRouter.route as jest.Mock).mockResolvedValue({
-      experimentId: 'exp-1',
-      variant: 'B',
-      assignmentHash: 'hash',
-      splitPercentage: 100,
-      assignmentReason: 'hash_split',
-    });
-    (featureFlags.isEnabled as jest.Mock).mockImplementation((flag: string) => {
-      if (flag === 'enable_shadow_execution') return true;
-      return false;
-    });
-    (marketData.getMarketHours as jest.Mock).mockResolvedValue({
-      isMarketOpen: true,
-      minutesUntilClose: 120,
-    });
-    (marketData.getCandles as jest.Mock).mockResolvedValue([]);
-    (marketData.getIndicators as jest.Mock).mockResolvedValue({
-      ema8: [110],
-      ema13: [105],
-      ema21: [100],
-      ema48: [95],
-      ema200: [90],
-      atr: [1],
-      bollingerBands: { upper: [], middle: [], lower: [] },
-      keltnerChannels: { upper: [], middle: [], lower: [] },
-      ttmSqueeze: { state: 'off', momentum: 1 },
-    });
-    (marketData.getStockPrice as jest.Mock).mockResolvedValue(120);
-
     await request(app)
       .post('/webhook')
       .send({
@@ -173,8 +144,8 @@ describe('Integration: Shadow execution', () => {
         timeframe: '5m',
         timestamp: new Date().toISOString(),
       })
-      .expect(201);
+      .expect(200);
 
-    expect(shadowExecutor.simulateExecution as jest.Mock).toHaveBeenCalled();
+    expect(shadowExecutor.simulateExecution as jest.Mock).not.toHaveBeenCalled();
   });
 });

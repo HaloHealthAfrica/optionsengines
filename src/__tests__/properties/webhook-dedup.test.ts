@@ -63,7 +63,7 @@ describe('Property 4: Deduplication idempotence', () => {
         const res2 = createMockResponse();
         await handleWebhook(req2 as any, res2 as any);
 
-        expect(res1.status).toHaveBeenCalledWith(201);
+        expect(res1.status).toHaveBeenCalledWith(200);
         expect(res2.status).toHaveBeenCalledWith(200);
         expect(res2.json).toHaveBeenCalledWith(
           expect.objectContaining({ status: 'DUPLICATE' })

@@ -1,7 +1,7 @@
 // Database migration runner
 import { readdir, readFile } from 'fs/promises';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import pg from 'pg';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
@@ -22,7 +22,7 @@ class MigrationRunner {
   constructor() {
     this.pool = new Pool({
       connectionString: config.databaseUrl,
-      max: 5,
+      max: config.dbPoolMax,
     });
   }
 
@@ -155,7 +155,7 @@ async function main() {
 }
 
 // Run if executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }
 

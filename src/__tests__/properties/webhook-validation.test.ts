@@ -45,13 +45,12 @@ describe('Property 1: Webhook validation consistency', () => {
     );
   });
 
-  test('Property: Missing required fields fail validation consistently', async () => {
+  test('Property: Missing symbol fails validation consistently', async () => {
     await fc.assert(
-      fc.asyncProperty(symbolArb, timeframeArb, async (symbol, timeframe) => {
+      fc.asyncProperty(timeframeArb, async (timeframe) => {
         const invalidPayload = {
-          symbol,
           timeframe,
-          // Missing timestamp
+          // Missing symbol
         };
 
         const result1 = webhookSchema.safeParse(invalidPayload);

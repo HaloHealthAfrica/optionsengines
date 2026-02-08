@@ -31,6 +31,8 @@ type ConfigSummary = {
   maxHoldDays: number;
   abSplitPercentage: number;
   enableVariantB: boolean;
+  enableOrchestrator: boolean;
+  enableDualPaperTrading: boolean;
 };
 
 function maskDatabaseUrl(url: string): string {
@@ -83,6 +85,10 @@ export function logConfigSummary(summary: ConfigSummary = config): void {
     abTesting: {
       abSplitPercentage: summary.abSplitPercentage,
       enableVariantB: summary.enableVariantB,
+    },
+    orchestrator: {
+      enableOrchestrator: summary.enableOrchestrator,
+      enableDualPaperTrading: summary.enableDualPaperTrading,
     },
   });
 }

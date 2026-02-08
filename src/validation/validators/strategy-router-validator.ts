@@ -13,18 +13,28 @@
 import { ValidationResult, ValidationCategory } from '../types/index.js';
 import { computeDeterministicHash, StrategyRouter, type RoutingSignal } from '../../services/strategy-router.service.js';
 import { featureFlags } from '../../services/feature-flag.service.js';
+import { db } from '../../services/database.service.js';
 
 /**
  * Helper to create mock routing signal
  */
 function createMockSignal(overrides: Partial<RoutingSignal> = {}): RoutingSignal {
   return {
-    signalId: 'test-signal-1',
+    signalId: '00000000-0000-0000-0000-000000000100',
     symbol: 'SPY',
     timeframe: '5m',
     sessionId: 'session-123',
     ...overrides,
   };
+}
+
+async function ensureSignalExists(signalId: string): Promise<void> {
+  await db.query(
+    `INSERT INTO signals (signal_id, symbol, direction, timeframe, timestamp, status, raw_payload, signal_hash, processed, processing_lock)
+     VALUES ($1, 'SPY', 'long', '5m', NOW(), 'pending', '{}', $2, FALSE, FALSE)
+     ON CONFLICT DO NOTHING`,
+    [signalId, 'a'.repeat(64)]
+  );
 }
 
 /**
@@ -39,6 +49,7 @@ export class StrategyRouterValidator {
     const startTime = Date.now();
     const failures = [];
 
+    const signalIds: string[] = [];
     try {
       const router = new StrategyRouter();
 
@@ -56,7 +67,9 @@ export class StrategyRouterValidator {
       }
 
       // Test Engine A routing (default when variant B disabled)
-      const signalA = createMockSignal({ signalId: 'test-a-1' });
+      const signalA = createMockSignal({ signalId: '00000000-0000-0000-0000-000000000001' });
+      signalIds.push(signalA.signalId);
+      await ensureSignalExists(signalA.signalId);
       
       // Mock feature flag as disabled for Engine A test
       const originalIsEnabled = featureFlags.isEnabled.bind(featureFlags);
@@ -89,7 +102,9 @@ export class StrategyRouterValidator {
       }
 
       // Test Engine B routing (when enabled and hash falls in split)
-      const signalB = createMockSignal({ signalId: 'test-b-1' });
+      const signalB = createMockSignal({ signalId: '00000000-0000-0000-0000-000000000002' });
+      signalIds.push(signalB.signalId);
+      await ensureSignalExists(signalB.signalId);
       
       // Mock feature flag as enabled for Engine B test
       featureFlags.isEnabled = () => true;
@@ -142,6 +157,14 @@ export class StrategyRouterValidator {
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
         context: {},
       });
+    } finally {
+      if (signalIds.length > 0) {
+        await db.query(
+          `DELETE FROM experiments WHERE signal_id = ANY($1::uuid[])`,
+          [signalIds]
+        );
+        await db.query(`DELETE FROM signals WHERE signal_id = ANY($1::uuid[])`, [signalIds]);
+      }
     }
 
     return {
@@ -241,11 +264,14 @@ export class StrategyRouterValidator {
     const startTime = Date.now();
     const failures = [];
 
+    const signalIds: string[] = [];
     try {
       const router = new StrategyRouter();
       
       // Create signal and get initial routing
-      const signal = createMockSignal({ signalId: 'test-isolation-1' });
+      const signal = createMockSignal({ signalId: '00000000-0000-0000-0000-000000000010' });
+      signalIds.push(signal.signalId);
+      await ensureSignalExists(signal.signalId);
       const hash = computeDeterministicHash(signal.symbol, signal.timeframe, signal.sessionId);
       
       // Verify hash is deterministic (same signal always gets same hash)
@@ -262,7 +288,12 @@ export class StrategyRouterValidator {
       }
 
       // Verify different signals get different hashes
-      const signal2 = createMockSignal({ signalId: 'test-isolation-2', sessionId: 'session-456' });
+      const signal2 = createMockSignal({
+        signalId: '00000000-0000-0000-0000-000000000011',
+        sessionId: 'session-456',
+      });
+      signalIds.push(signal2.signalId);
+      await ensureSignalExists(signal2.signalId);
       const hash3 = computeDeterministicHash(signal2.symbol, signal2.timeframe, signal2.sessionId);
       
       if (hash === hash3) {
@@ -285,7 +316,10 @@ export class StrategyRouterValidator {
       const routing1 = await router.route(signal);
       
       // Route same signal again (should get same variant due to hash)
-      const routing2 = await router.route({ ...signal, signalId: 'test-isolation-1-retry' });
+      const retrySignalId = '00000000-0000-0000-0000-000000000012';
+      signalIds.push(retrySignalId);
+      await ensureSignalExists(retrySignalId);
+      const routing2 = await router.route({ ...signal, signalId: retrySignalId });
       
       featureFlags.isEnabled = originalIsEnabled;
       
@@ -308,6 +342,14 @@ export class StrategyRouterValidator {
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
         context: {},
       });
+    } finally {
+      if (signalIds.length > 0) {
+        await db.query(
+          `DELETE FROM experiments WHERE signal_id = ANY($1::uuid[])`,
+          [signalIds]
+        );
+        await db.query(`DELETE FROM signals WHERE signal_id = ANY($1::uuid[])`, [signalIds]);
+      }
     }
 
     return {

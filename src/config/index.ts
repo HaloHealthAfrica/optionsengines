@@ -47,6 +47,7 @@ interface Config {
   paperExecutorInterval: number;
   positionRefresherInterval: number;
   exitMonitorInterval: number;
+  orchestratorIntervalMs: number;
 
   // Risk Management
   maxPositionSize: number;
@@ -70,6 +71,10 @@ interface Config {
   enableTtmSpecialist: boolean;
   enableSatylandSubagent: boolean;
   enableShadowExecution: boolean;
+
+  // Orchestrator
+  enableOrchestrator: boolean;
+  enableDualPaperTrading: boolean;
 
   // Logging
   logLevel: string;
@@ -139,6 +144,7 @@ export const config: Config = {
   paperExecutorInterval: getEnvVarNumber('PAPER_EXECUTOR_INTERVAL', 10000),
   positionRefresherInterval: getEnvVarNumber('POSITION_REFRESHER_INTERVAL', 60000),
   exitMonitorInterval: getEnvVarNumber('EXIT_MONITOR_INTERVAL', 60000),
+  orchestratorIntervalMs: getEnvVarNumber('ORCHESTRATOR_INTERVAL_MS', 30000),
 
   // Risk Management
   maxPositionSize: getEnvVarNumber('MAX_POSITION_SIZE', 10),
@@ -162,6 +168,10 @@ export const config: Config = {
   enableTtmSpecialist: getEnvVarBoolean('ENABLE_TTM_SPECIALIST', false),
   enableSatylandSubagent: getEnvVarBoolean('ENABLE_SATYLAND_SUBAGENT', false),
   enableShadowExecution: getEnvVarBoolean('ENABLE_SHADOW_EXECUTION', false),
+
+  // Orchestrator
+  enableOrchestrator: getEnvVarBoolean('ENABLE_ORCHESTRATOR', true),
+  enableDualPaperTrading: getEnvVarBoolean('ENABLE_DUAL_PAPER_TRADING', true),
 
   // Logging
   logLevel: getEnvVar('LOG_LEVEL', 'info'),

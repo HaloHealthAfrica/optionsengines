@@ -9,29 +9,34 @@ import fc from 'fast-check';
 import { MarketDataService } from '../../services/market-data.js';
 import { IndicatorService } from '../../services/indicators.js';
 import { AlpacaClient } from '../../services/providers/alpaca-client.js';
+import { MarketDataClient } from '../../services/providers/marketdata-client.js';
 import { TwelveDataClient } from '../../services/providers/twelvedata-client.js';
 import { cache } from '../../services/cache.service.js';
 
 // Mock the provider clients
 jest.mock('../../services/providers/alpaca-client.js');
+jest.mock('../../services/providers/marketdata-client.js');
 jest.mock('../../services/providers/twelvedata-client.js');
 
 describe('Property 7: Indicator Derivation Without API Calls', () => {
   let marketDataService: MarketDataService;
   let indicatorService: IndicatorService;
   let mockAlpaca: jest.Mocked<AlpacaClient>;
+  let mockMarketData: jest.Mocked<MarketDataClient>;
   let mockTwelveData: jest.Mocked<TwelveDataClient>;
 
   beforeEach(() => {
     cache.clear();
 
     mockAlpaca = new AlpacaClient() as jest.Mocked<AlpacaClient>;
+    mockMarketData = new MarketDataClient() as jest.Mocked<MarketDataClient>;
     mockTwelveData = new TwelveDataClient() as jest.Mocked<TwelveDataClient>;
 
     marketDataService = new MarketDataService();
     indicatorService = new IndicatorService();
 
     (marketDataService as any).alpaca = mockAlpaca;
+    (marketDataService as any).marketData = mockMarketData;
     (marketDataService as any).twelveData = mockTwelveData;
   });
 
@@ -61,10 +66,11 @@ describe('Property 7: Indicator Derivation Without API Calls', () => {
         candlesArbitrary,
         async (symbol, timeframe, candles) => {
           // Setup: Cache candles (simulate previous API call)
-          mockAlpaca.getCandles.mockResolvedValue(candles);
+          mockMarketData.getCandles.mockResolvedValue(candles);
           await marketDataService.getCandles(symbol, timeframe, 200);
 
           // Clear mock call history
+          mockMarketData.getCandles.mockClear();
           mockAlpaca.getCandles.mockClear();
           mockTwelveData.getCandles.mockClear();
 
@@ -72,6 +78,7 @@ describe('Property 7: Indicator Derivation Without API Calls', () => {
           const indicators = await marketDataService.getIndicators(symbol, timeframe);
 
           // Verify: No additional API calls were made
+          expect(mockMarketData.getCandles).not.toHaveBeenCalled();
           expect(mockAlpaca.getCandles).not.toHaveBeenCalled();
           expect(mockTwelveData.getCandles).not.toHaveBeenCalled();
 
@@ -199,16 +206,18 @@ describe('Property 7: Indicator Derivation Without API Calls', () => {
         candlesArbitrary,
         async (symbol, timeframe, candles) => {
           // Setup: First call calculates and caches
-          mockAlpaca.getCandles.mockResolvedValue(candles);
+          mockMarketData.getCandles.mockResolvedValue(candles);
           const indicators1 = await marketDataService.getIndicators(symbol, timeframe);
 
           // Clear API mocks
+          mockMarketData.getCandles.mockClear();
           mockAlpaca.getCandles.mockClear();
 
           // Execute: Second call should use cache
           const indicators2 = await marketDataService.getIndicators(symbol, timeframe);
 
           // Verify: No API calls on second request
+          expect(mockMarketData.getCandles).not.toHaveBeenCalled();
           expect(mockAlpaca.getCandles).not.toHaveBeenCalled();
 
           // Verify: Same indicators returned

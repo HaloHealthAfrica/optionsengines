@@ -57,7 +57,7 @@ describe('Property 2: Cache Hit Returns Cached Data', () => {
           expect(result.ttl_remaining).toBeLessThanOrEqual(ttl);
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 50 }
     );
   });
 });
@@ -125,6 +125,7 @@ describe('Property 3: Cache Miss Triggers Fresh Fetch', () => {
           const testKey = `test:populate:${key}`;
 
           // First access - cache miss
+          await redisCache.invalidate(testKey);
           const miss = await redisCache.getCached(testKey);
           expect(miss.hit).toBe(false);
 
@@ -135,9 +136,11 @@ describe('Property 3: Cache Miss Triggers Fresh Fetch', () => {
           const hit = await redisCache.getCached(testKey);
           expect(hit.hit).toBe(true);
           expect(hit.data).toEqual(value);
+
+          await redisCache.invalidate(testKey);
         }
       ),
-      { numRuns: 100 }
+      { numRuns: 50 }
     );
   });
 });

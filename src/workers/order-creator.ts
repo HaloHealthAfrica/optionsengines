@@ -137,9 +137,11 @@ export class OrderCreatorWorker {
               expiration,
               type,
               quantity,
+              engine,
+              experiment_id,
               order_type,
               status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
             [
               signal.signal_id,
               signal.symbol,
@@ -148,6 +150,8 @@ export class OrderCreatorWorker {
               expiration,
               optionType,
               quantity,
+              'A',
+              null,
               'paper',
               'pending_execution',
             ]

@@ -48,6 +48,8 @@ export class RedisCacheService {
       this.client = new Redis(url, {
         maxRetriesPerRequest: 3,
         tls: url.includes('upstash.io') ? {} : undefined, // Enable TLS for Upstash
+        connectTimeout: 2000,
+        enableOfflineQueue: false,
         retryStrategy: (times: number) => {
           const delay = Math.min(times * 1000, 5000);
           logger.warn('Redis connection retry', { attempt: times, delayMs: delay });
@@ -74,12 +76,25 @@ export class RedisCacheService {
         logger.warn('Redis connection closed');
       });
 
-      // Test connection
-      await this.client.ping();
+      // Test connection with a timeout to avoid hanging
+      const pingPromise = this.client.ping();
+      const timeoutPromise = new Promise((_, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Redis ping timeout'));
+        }, 2000);
+        if (typeof (timeout as any).unref === 'function') {
+          (timeout as any).unref();
+        }
+      });
+
+      await Promise.race([pingPromise, timeoutPromise]);
       this.isConnected = true;
       logger.info('Redis cache initialized');
     } catch (error) {
       logger.error('Failed to connect to Redis', error);
+      if (this.client) {
+        this.client.disconnect();
+      }
       this.client = null;
       this.isConnected = false;
     }

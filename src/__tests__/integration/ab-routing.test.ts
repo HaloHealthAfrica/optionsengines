@@ -101,14 +101,6 @@ describe('Integration: A/B routing', () => {
       }
       return { rows: [] };
     });
-    (strategyRouter.route as jest.Mock).mockResolvedValue({
-      experimentId: 'exp-1',
-      variant: 'A',
-      assignmentHash: 'hash',
-      splitPercentage: 0,
-      assignmentReason: 'variant_b_disabled',
-    });
-
     const response = await request(app)
       .post('/webhook')
       .send({
@@ -117,9 +109,9 @@ describe('Integration: A/B routing', () => {
         timeframe: '5m',
         timestamp: new Date().toISOString(),
       })
-      .expect(201);
+      .expect(200);
 
-    expect(response.body.variant).toBe('A');
+    expect(response.body.signal_id).toBeDefined();
   });
 
   test('returns variant B when routed to Engine 2', async () => {
@@ -155,14 +147,6 @@ describe('Integration: A/B routing', () => {
       ttmSqueeze: { state: 'off', momentum: 1 },
     });
     (marketData.getStockPrice as jest.Mock).mockResolvedValue(120);
-    (strategyRouter.route as jest.Mock).mockResolvedValue({
-      experimentId: 'exp-2',
-      variant: 'B',
-      assignmentHash: 'hash',
-      splitPercentage: 100,
-      assignmentReason: 'hash_split',
-    });
-
     const response = await request(app)
       .post('/webhook')
       .send({
@@ -171,8 +155,8 @@ describe('Integration: A/B routing', () => {
         timeframe: '15m',
         timestamp: new Date().toISOString(),
       })
-      .expect(201);
+      .expect(200);
 
-    expect(response.body.variant).toBe('B');
+    expect(response.body.signal_id).toBeDefined();
   });
 });

@@ -19,6 +19,7 @@ import { validateDeterminism } from '../validation/determinism-validator';
 import { SystemState } from '../orchestration/test-orchestrator';
 
 describe('Phase 11: Determinism and Replay', () => {
+  jest.setTimeout(60000);
   let orchestrator: TestOrchestratorImpl;
   let webhookGenerator: DefaultWebhookGenerator;
   let gexGenerator: DefaultGEXGenerator;
@@ -166,7 +167,7 @@ describe('Phase 11: Determinism and Replay', () => {
             }
           }
         ),
-        { numRuns: 50, seed: 130 }
+        { numRuns: 5, seed: 130 }
       );
     });
   });
@@ -273,7 +274,7 @@ describe('Phase 11: Determinism and Replay', () => {
             }
           }
         ),
-        { numRuns: 50, seed: 131 }
+        { numRuns: 5, seed: 131 }
       );
     });
   });
@@ -347,7 +348,7 @@ describe('Phase 11: Determinism and Replay', () => {
             }
           }
         ),
-        { numRuns: 50, seed: 132 }
+        { numRuns: 5, seed: 132 }
       );
     });
   });

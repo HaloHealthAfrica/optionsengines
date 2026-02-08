@@ -10,32 +10,32 @@ interface WebhookPayload {
   timestamp: string;
 }
 
-const testSignals: WebhookPayload[] = [
-  {
-    symbol: 'SPY',
-    direction: 'long',
-    timeframe: '5m',
-    timestamp: new Date().toISOString(),
-  },
-  {
-    symbol: 'QQQ',
-    direction: 'short',
-    timeframe: '15m',
-    timestamp: new Date().toISOString(),
-  },
-  {
-    symbol: 'IWM',
-    direction: 'long',
-    timeframe: '1h',
-    timestamp: new Date().toISOString(),
-  },
-  {
-    symbol: 'SPY',
-    direction: 'short',
-    timeframe: '5m',
-    timestamp: new Date().toISOString(),
-  },
-];
+const symbols = ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLV', 'XLE', 'TSLA', 'NVDA'];
+const timeframes = ['1m', '5m', '15m', '30m', '1h'];
+const directions: Array<WebhookPayload['direction']> = ['long', 'short'];
+
+function buildUniqueSignals(count: number): WebhookPayload[] {
+  const signals: WebhookPayload[] = [];
+  const seen = new Set<string>();
+  const now = Date.now();
+
+  for (const symbol of symbols) {
+    for (const timeframe of timeframes) {
+      for (const direction of directions) {
+        const key = `${symbol}:${timeframe}:${direction}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const timestamp = new Date(now + signals.length * 1000).toISOString();
+        signals.push({ symbol, direction, timeframe, timestamp });
+        if (signals.length >= count) return signals;
+      }
+    }
+  }
+
+  return signals;
+}
+
+const testSignals: WebhookPayload[] = buildUniqueSignals(25);
 
 async function sendWebhook(payload: WebhookPayload): Promise<void> {
   const url = `${BACKEND_URL}/webhook`;

@@ -15,6 +15,8 @@ interface OpenPosition {
   entry_price: number;
   entry_timestamp: Date;
   status: 'open' | 'closing' | 'closed';
+  engine?: 'A' | 'B' | null;
+  experiment_id?: string | null;
 }
 
 interface ExitRule {
@@ -160,9 +162,11 @@ export class ExitMonitorWorker {
               expiration,
               type,
               quantity,
+              engine,
+              experiment_id,
               order_type,
               status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
             [
               null,
               position.symbol,
@@ -171,6 +175,8 @@ export class ExitMonitorWorker {
               position.expiration,
               position.type,
               position.quantity,
+              position.engine ?? null,
+              position.experiment_id ?? null,
               'paper',
               'pending_execution',
             ]
