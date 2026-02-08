@@ -60,9 +60,36 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     rejectionReason = 'max_positions_per_symbol_exceeded';
   }
 
-  const candles = await marketData.getCandles(signal.symbol, signal.timeframe, 200);
-  const indicators = await marketData.getIndicators(signal.symbol, signal.timeframe);
-  const currentPrice = await marketData.getStockPrice(signal.symbol);
+  let candles: any[] = [];
+  let indicators: Record<string, any> = {};
+  let currentPrice = 0;
+
+  try {
+    currentPrice = await marketData.getStockPrice(signal.symbol);
+  } catch (error) {
+    logger.warn('Failed to fetch current price for enrichment', { error, symbol: signal.symbol });
+    rejectionReason = rejectionReason || 'market_data_unavailable';
+  }
+
+  try {
+    candles = await marketData.getCandles(signal.symbol, signal.timeframe, 200);
+  } catch (error) {
+    logger.warn('Failed to fetch candles for enrichment', { error, symbol: signal.symbol });
+    rejectionReason = rejectionReason || 'market_data_unavailable';
+  }
+
+  try {
+    indicators = await marketData.getIndicators(signal.symbol, signal.timeframe);
+  } catch (error) {
+    logger.warn('Failed to fetch indicators for enrichment', { error, symbol: signal.symbol });
+    rejectionReason = rejectionReason || 'market_data_unavailable';
+    indicators = {
+      ema8: [currentPrice],
+      ema21: [currentPrice],
+      atr: [0],
+      ttmSqueeze: { state: 'off', momentum: 0 },
+    };
+  }
 
   let gexData = null;
   let optionsFlow = null;

@@ -19,7 +19,7 @@ import { StratSpecialist } from '../agents/specialists/strat-specialist.js';
 import { TTMSpecialist } from '../agents/specialists/ttm-specialist.js';
 import { SatylandSubAgent } from '../agents/subagents/satyland-sub-agent.js';
 import { eventLogger } from '../services/event-logger.service.js';
-import { EnrichedSignal, MarketData } from '../types/index.js';
+import { EnrichedSignal, MarketData, Indicators } from '../types/index.js';
 
 async function buildRecommendation(
   engine: 'A' | 'B',
@@ -51,9 +51,54 @@ async function buildRecommendation(
 async function buildEngineBRecommendation(signal: Signal): Promise<TradeRecommendation | null> {
   try {
     const enrichment = await buildSignalEnrichment(signal);
-    const candles = await marketData.getCandles(signal.symbol, signal.timeframe, 200);
-    const indicators = enrichment.enrichedData.indicators || (await marketData.getIndicators(signal.symbol, signal.timeframe));
-    const currentPrice = enrichment.enrichedData.currentPrice ?? (await marketData.getStockPrice(signal.symbol));
+    let candles: any[] = [];
+    let indicators = enrichment.enrichedData.indicators as Indicators | undefined;
+    let currentPrice = enrichment.enrichedData.currentPrice as number | undefined;
+
+    try {
+      candles = await marketData.getCandles(signal.symbol, signal.timeframe, 200);
+    } catch (error) {
+      logger.warn('Engine B candles unavailable', { error, symbol: signal.symbol });
+    }
+
+    if (!indicators) {
+      try {
+        indicators = await marketData.getIndicators(signal.symbol, signal.timeframe);
+      } catch (error) {
+        logger.warn('Engine B indicators unavailable', { error, symbol: signal.symbol });
+      }
+    }
+
+    if (!Number.isFinite(currentPrice) || !currentPrice) {
+      try {
+        currentPrice = await marketData.getStockPrice(signal.symbol);
+      } catch (error) {
+        logger.warn('Engine B price unavailable', { error, symbol: signal.symbol });
+      }
+    }
+
+    if (!currentPrice) {
+      logger.warn('Engine B market data missing, skipping recommendation', {
+        symbol: signal.symbol,
+        hasIndicators: Boolean(indicators),
+        hasPrice: Boolean(currentPrice),
+      });
+      return null;
+    }
+
+    if (!indicators) {
+      indicators = {
+        ema8: [currentPrice],
+        ema13: [currentPrice],
+        ema21: [currentPrice],
+        ema48: [currentPrice],
+        ema200: [currentPrice],
+        atr: [0],
+        bollingerBands: { upper: [currentPrice], middle: [currentPrice], lower: [currentPrice] },
+        keltnerChannels: { upper: [currentPrice], middle: [currentPrice], lower: [currentPrice] },
+        ttmSqueeze: { state: 'off', momentum: 0 },
+      };
+    }
     const marketHours = await marketData.getMarketHours();
     const isMarketOpen = marketHours.isMarketOpen;
     const riskResult = enrichment.riskResult || {};

@@ -345,6 +345,8 @@ function buildMarketContextPayload(input: {
     ticker: input.symbol,
     exchange,
     price,
+    direction: input.signalType === 'buy' ? 'long' : 'short',
+    bias: input.signalType === 'buy' ? 'bullish' : 'bearish',
     timestamp: epochSeconds,
     type: 'CONTEXT',
     event: 'bar_close',

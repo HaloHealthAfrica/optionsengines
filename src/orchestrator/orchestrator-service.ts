@@ -110,6 +110,7 @@ export class OrchestratorService {
       logger.error('Failed to process signal', error, {
         signal_id: signal.signal_id,
       });
+      await this.signalProcessor.updateStatus(signal.signal_id, 'rejected', 'processing_error');
       await this.signalProcessor.markFailed(signal.signal_id);
       return {
         experiment: {} as any,

@@ -10,9 +10,11 @@
 import pg from 'pg';
 import crypto from 'crypto';
 import { Signal, MarketContext } from './types.js';
+import { Candle } from '../types/index.js';
 import { SignalSchema, MarketContextSchema } from './schemas.js';
 import { logger } from '../utils/logger.js';
 import { marketData } from '../services/market-data.js';
+import { indicators as indicatorService } from '../services/indicators.js';
 
 export class SignalProcessor {
   private pool: pg.Pool;
@@ -43,6 +45,7 @@ export class SignalProcessor {
            SELECT signal_id
            FROM signals
            WHERE processed = FALSE AND processing_lock = FALSE
+             AND (status IS NULL OR status = 'pending')
            ${signalFilter}
            ORDER BY timestamp ASC
            LIMIT $1
@@ -87,10 +90,69 @@ export class SignalProcessor {
    * Includes prices, indicators, and metadata for deterministic replay
    */
   async createMarketContext(signal: Signal): Promise<MarketContext> {
-    const candles = await marketData.getCandles(signal.symbol, signal.timeframe, 200);
-    const indicators = await marketData.getIndicators(signal.symbol, signal.timeframe);
-    const currentPrice = await marketData.getStockPrice(signal.symbol);
-    const lastVolume = candles.length > 0 ? candles[candles.length - 1].volume : 0;
+    let candles: Candle[] = [];
+    let currentPrice = 0;
+    let lastVolume = 0;
+    let latestIndicators: Record<string, number> = {};
+
+    try {
+      currentPrice = await marketData.getStockPrice(signal.symbol);
+    } catch (error) {
+      logger.warn('Market context price unavailable', { error, symbol: signal.symbol });
+    }
+
+    if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+      const payloadPrice = this.extractPriceFromPayload(signal.raw_payload, signal.symbol);
+      if (payloadPrice) {
+        currentPrice = payloadPrice;
+      }
+    }
+
+    try {
+      candles = await marketData.getCandles(signal.symbol, signal.timeframe, 200);
+      lastVolume = candles.length > 0 ? candles[candles.length - 1].volume : 0;
+    } catch (error) {
+      logger.warn('Market context candles unavailable', { error, symbol: signal.symbol });
+    }
+
+    try {
+      const indicatorSeries = await marketData.getIndicators(signal.symbol, signal.timeframe);
+      const latest = indicatorService.getLatestValues(indicatorSeries);
+      latestIndicators = {
+        ema8: latest.ema8,
+        ema13: latest.ema13,
+        ema21: latest.ema21,
+        ema48: latest.ema48,
+        ema200: latest.ema200,
+        atr: latest.atr,
+        bbUpper: latest.bbUpper,
+        bbMiddle: latest.bbMiddle,
+        bbLower: latest.bbLower,
+        kcUpper: latest.kcUpper,
+        kcMiddle: latest.kcMiddle,
+        kcLower: latest.kcLower,
+        ttmState: latest.ttmState === 'on' ? 1 : 0,
+        ttmMomentum: latest.ttmMomentum,
+      };
+    } catch (error) {
+      logger.warn('Market context indicators unavailable', { error, symbol: signal.symbol });
+      latestIndicators = {
+        ema8: currentPrice,
+        ema13: currentPrice,
+        ema21: currentPrice,
+        ema48: currentPrice,
+        ema200: currentPrice,
+        atr: 0,
+        bbUpper: currentPrice,
+        bbMiddle: currentPrice,
+        bbLower: currentPrice,
+        kcUpper: currentPrice,
+        kcMiddle: currentPrice,
+        kcLower: currentPrice,
+        ttmState: 0,
+        ttmMomentum: 0,
+      };
+    }
 
     const context: MarketContext = {
       signal_id: signal.signal_id,
@@ -100,7 +162,7 @@ export class SignalProcessor {
       bid: currentPrice,
       ask: currentPrice,
       volume: lastVolume,
-      indicators: indicators as unknown as Record<string, number>,
+      indicators: latestIndicators,
       context_hash: '', // Will be computed below
     };
 
@@ -222,6 +284,41 @@ export class SignalProcessor {
     });
 
     return crypto.createHash('sha256').update(data).digest('hex');
+  }
+
+  private extractPriceFromPayload(payload: Record<string, any>, symbol: string): number | null {
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+
+    const candidates: Array<number | null> = [
+      this.toNumber(payload.current_price),
+      this.toNumber(payload.price),
+      this.toNumber(payload.entry?.price),
+      this.toNumber(payload.instrument?.current_price),
+      this.toNumber(payload.market?.spy_price),
+      this.toNumber(payload.market?.qqq_price),
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate !== null && Number.isFinite(candidate) && candidate > 0) {
+        return candidate;
+      }
+    }
+
+    const symbolKey = String(symbol || '').toLowerCase();
+    const marketKey = payload.market?.[`${symbolKey}_price`];
+    const marketPrice = this.toNumber(marketKey);
+    if (marketPrice !== null && Number.isFinite(marketPrice) && marketPrice > 0) {
+      return marketPrice;
+    }
+
+    return null;
+  }
+
+  private toNumber(value: unknown): number | null {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
   }
 
   /**

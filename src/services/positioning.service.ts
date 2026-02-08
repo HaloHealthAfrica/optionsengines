@@ -106,7 +106,17 @@ export class PositioningService {
   }
 
   async getOptionsFlowSnapshot(symbol: string, limit: number = 50): Promise<OptionsFlowSummary> {
-    const flow = await marketData.getOptionsFlow(symbol, limit);
+    let flow: OptionsFlowSummary;
+    try {
+      flow = await marketData.getOptionsFlow(symbol, limit);
+    } catch (error) {
+      logger.warn('Options flow unavailable, returning empty summary', { error, symbol });
+      return {
+        symbol,
+        entries: [],
+        updatedAt: new Date(),
+      };
+    }
 
     try {
       const totalCallVolume = flow.entries

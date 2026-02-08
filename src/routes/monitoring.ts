@@ -613,6 +613,7 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
         indicator_values: {},
         is_test: signal.is_test || false,
         test_session_id: signal.test_session_id || null,
+        rejection_reason: signal.rejection_reason || null,
       };
       detail.raw_webhook_payload = signal.raw_payload || null;
       detail.timestamp = detail.timestamp || signal.created_at;

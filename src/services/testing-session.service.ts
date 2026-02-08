@@ -111,6 +111,7 @@ export async function getTestSessionSummary(testSessionId: string): Promise<any>
     },
     webhooks: webhookRows.map((row: any) => ({
       webhook_id: row.event_id,
+      signal_id: row.signal_id || null,
       symbol: row.symbol,
       status: row.status,
       timeframe: row.timeframe,
