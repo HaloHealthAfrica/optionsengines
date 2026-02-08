@@ -9,6 +9,7 @@ import {
   TEST_SIGNAL_TYPES,
   TEST_SYMBOLS,
   TEST_TIMEFRAMES,
+  TestWebhookFormat,
   TestSignalType,
 } from '../services/testing-webhook.service.js';
 import { ensureTestSession, getTestSessionSummary, markTestSessionCompleted, clearTestSession } from '../services/testing-session.service.js';
@@ -71,6 +72,7 @@ const singleSchema = z.object({
   symbol: z.string().min(1),
   timeframe: z.string().min(1),
   signal_type: z.enum(TEST_SIGNAL_TYPES),
+  format: z.enum(['ultimate_options', 'trend_start', 'dots_indicator', 'market_context']).optional(),
   price: z.number().optional(),
   indicators: z.record(z.any()).optional(),
   is_test: z.boolean().optional(),
@@ -84,6 +86,7 @@ const batchSchema = z.object({
   symbols: z.array(z.string()).min(1).optional(),
   timeframes: z.array(z.string()).min(1).optional(),
   signal_types: z.array(z.enum(TEST_SIGNAL_TYPES)).min(1).optional(),
+  format: z.enum(['ultimate_options', 'trend_start', 'dots_indicator', 'market_context']).optional(),
   count: z.number().int().positive().max(500),
   timing: z.enum(['immediate', 'realistic', 'rapid']).optional(),
   interval_seconds: z.number().positive().optional(),
@@ -173,6 +176,7 @@ router.post('/webhooks/send', requireAuth, requireTestingAccess, requireTestingR
     testScenario: parsed.data.test_scenario || 'single',
     sequenceNumber: parsed.data.sequence_number || 1,
     isTest: parsed.data.is_test ?? true,
+    format: parsed.data.format as TestWebhookFormat | undefined,
   });
 
   await ensureTestSession(testSessionId, parsed.data.test_scenario || 'single', 1);
@@ -222,6 +226,7 @@ router.post('/webhooks/send-batch', requireAuth, requireTestingAccess, requireTe
         testScenario: scenario,
         sequenceNumber: i + 1,
         isTest: true,
+        format: payload.format as TestWebhookFormat | undefined,
       });
       await sendPayload(webhookPayload, requestIds[i], req);
       const delayMs = computeDelayMs(payload.timing, payload.interval_seconds);

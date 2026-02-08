@@ -319,6 +319,7 @@ export default function Monitoring({ initialView = 'overview' }) {
     timeframe: '5m',
     signal_type: 'buy',
     count: 1,
+    format: 'ultimate_options',
   });
   const [testStatus, setTestStatus] = useState('idle');
   const [lastTestAt, setLastTestAt] = useState(null);
@@ -418,6 +419,7 @@ export default function Monitoring({ initialView = 'overview' }) {
               symbols: payload.symbols && payload.symbols.length ? payload.symbols : [payload.symbol],
               timeframes: payload.timeframes && payload.timeframes.length ? payload.timeframes : [payload.timeframe],
               signal_types: payload.signal_types && payload.signal_types.length ? payload.signal_types : [payload.signal_type],
+              format: payload.format,
               count: Number(payload.count || 1),
               timing: payload.timing || 'realistic',
               realistic_prices: true,
@@ -426,6 +428,7 @@ export default function Monitoring({ initialView = 'overview' }) {
               symbol: payload.symbol,
               timeframe: payload.timeframe,
               signal_type: payload.signal_type,
+              format: payload.format,
             };
 
       const response = await fetch(endpoint, {
@@ -950,6 +953,19 @@ export default function Monitoring({ initialView = 'overview' }) {
                     {signal}
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="grid gap-1">
+              <span className="muted">Format</span>
+              <select
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+                value={testForm.format}
+                onChange={(event) => setTestForm((prev) => ({ ...prev, format: event.target.value }))}
+              >
+                <option value="ultimate_options">Ultimate Options Strategy</option>
+                <option value="trend_start">Trend + Start Indicator</option>
+                <option value="dots_indicator">Dots Indicator</option>
+                <option value="market_context">Market Context Indicator</option>
               </select>
             </label>
             <label className="grid gap-1">

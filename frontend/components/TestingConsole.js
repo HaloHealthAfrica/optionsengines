@@ -50,6 +50,7 @@ export default function TestingConsole() {
     symbol: 'SPY',
     timeframe: '5m',
     signal_type: 'buy',
+    format: 'ultimate_options',
   });
   const [customJson, setCustomJson] = useState(
     JSON.stringify(
@@ -255,6 +256,19 @@ export default function TestingConsole() {
                       {signal}
                     </option>
                   ))}
+                </select>
+              </label>
+              <label className="grid gap-1">
+                <span className="muted text-xs">Webhook Format</span>
+                <select
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+                  value={single.format}
+                  onChange={(event) => setSingle((prev) => ({ ...prev, format: event.target.value }))}
+                >
+                  <option value="ultimate_options">Ultimate Options Strategy</option>
+                  <option value="trend_start">Trend + Start Indicator</option>
+                  <option value="dots_indicator">Dots Indicator</option>
+                  <option value="market_context">Market Context Indicator</option>
                 </select>
               </label>
               <button
