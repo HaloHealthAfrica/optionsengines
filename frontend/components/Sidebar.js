@@ -18,6 +18,7 @@ const iconMap = {
   orders: Activity,
   history: Activity,
   monitoring: RadioTower,
+  'decision-engines': BarChart3,
   settings: SettingsIcon,
 };
 

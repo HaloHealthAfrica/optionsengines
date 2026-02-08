@@ -298,14 +298,14 @@ function DecisionEngineDetails({ detail, onDecisionClick }) {
   );
 }
 
-export default function Monitoring() {
+export default function Monitoring({ initialView = 'overview' }) {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('idle');
   const [limit, setLimit] = useState(25);
   const [activeFilter, setActiveFilter] = useState('all');
   const [dataSource, setDataSource] = useState('unknown');
   const [selectedEvent, setSelectedEvent] = useState(null);
-  const [view, setView] = useState('overview');
+  const [view, setView] = useState(initialView);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailStatus, setDetailStatus] = useState('idle');
   const [detailData, setDetailData] = useState(null);
