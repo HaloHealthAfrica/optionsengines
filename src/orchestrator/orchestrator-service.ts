@@ -19,6 +19,7 @@ import { ShadowExecutor } from '../services/shadow-executor.service.js';
 import { EnrichedSignal, MetaDecision } from '../types/index.js';
 import { db } from '../services/database.service.js';
 import { config } from '../config/index.js';
+import { buildSignalEnrichment } from '../services/signal-enrichment.service.js';
 
 export class OrchestratorService {
   constructor(
@@ -44,6 +45,7 @@ export class OrchestratorService {
 
   async processSignal(signal: Signal): Promise<ExperimentResult> {
     try {
+      const enrichment = await buildSignalEnrichment(signal);
       const market_context = await this.createMarketContext(signal);
       const experiment = await this.createExperiment(signal);
       const policy = await this.getExecutionPolicy(experiment.experiment_id);
@@ -60,6 +62,21 @@ export class OrchestratorService {
         policy.execution_mode,
         'B',
         engineB
+      );
+
+      await this.persistRecommendation(
+        signal,
+        experiment.experiment_id,
+        'A',
+        engine_a_recommendation,
+        enrichment
+      );
+      await this.persistRecommendation(
+        signal,
+        experiment.experiment_id,
+        'B',
+        engine_b_recommendation,
+        enrichment
       );
 
       await this.updateSignalStatus(signal, policy, engine_a_recommendation, engine_b_recommendation);
@@ -263,5 +280,62 @@ export class OrchestratorService {
       experiment_id,
       is_shadow,
     };
+  }
+
+  private async persistRecommendation(
+    signal: Signal,
+    experimentId: string,
+    engine: 'A' | 'B',
+    recommendation: TradeRecommendation | undefined,
+    enrichment: { enrichedData: Record<string, any>; riskResult: Record<string, any>; rejectionReason: string | null }
+  ): Promise<void> {
+    if (!recommendation) {
+      return;
+    }
+
+    const rationale = {
+      enriched_data: enrichment.enrichedData,
+      risk_check_result: enrichment.riskResult,
+      rejection_reason: enrichment.rejectionReason,
+    };
+
+    await db.query(
+      `INSERT INTO decision_recommendations (
+        experiment_id,
+        signal_id,
+        engine,
+        symbol,
+        direction,
+        timeframe,
+        strike,
+        expiration,
+        quantity,
+        entry_price,
+        is_shadow,
+        rationale
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      ON CONFLICT (experiment_id, engine)
+      DO UPDATE SET
+        strike = EXCLUDED.strike,
+        expiration = EXCLUDED.expiration,
+        quantity = EXCLUDED.quantity,
+        entry_price = EXCLUDED.entry_price,
+        is_shadow = EXCLUDED.is_shadow,
+        rationale = EXCLUDED.rationale`,
+      [
+        experimentId,
+        signal.signal_id,
+        engine,
+        signal.symbol,
+        signal.direction,
+        signal.timeframe,
+        recommendation.strike,
+        recommendation.expiration,
+        recommendation.quantity,
+        recommendation.entry_price,
+        recommendation.is_shadow,
+        JSON.stringify(rationale),
+      ]
+    );
   }
 }

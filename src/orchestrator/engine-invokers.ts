@@ -2,40 +2,19 @@
  * Engine invokers - bridge orchestrator to decision engines.
  */
 
-import { marketData } from '../services/market-data.js';
 import { config } from '../config/index.js';
 import { TradeRecommendation, Signal, MarketContext } from './types.js';
 import { logger } from '../utils/logger.js';
-
-function calculateExpiration(dteDays: number): Date {
-  const base = new Date();
-  base.setUTCDate(base.getUTCDate() + dteDays);
-  const day = base.getUTCDay();
-  const daysUntilFriday = (5 - day + 7) % 7;
-  base.setUTCDate(base.getUTCDate() + daysUntilFriday);
-  base.setUTCHours(0, 0, 0, 0);
-  return base;
-}
-
-function calculateStrike(price: number, direction: 'long' | 'short'): number {
-  return direction === 'long' ? Math.ceil(price) : Math.floor(price);
-}
+import { selectStrike } from '../services/strike-selection.service.js';
+import { buildEntryExitPlan } from '../services/entry-exit-agent.service.js';
 
 async function buildRecommendation(
   engine: 'A' | 'B',
   signal: Signal
 ): Promise<TradeRecommendation | null> {
   try {
-    const price = await marketData.getStockPrice(signal.symbol);
-    const strike = calculateStrike(price, signal.direction);
-    const expiration = calculateExpiration(config.maxHoldDays);
-    const optionType = signal.direction === 'long' ? 'call' : 'put';
-    const optionPrice = await marketData.getOptionPrice(
-      signal.symbol,
-      strike,
-      expiration,
-      optionType
-    );
+    const { strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction);
+    const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
 
     const quantity = Math.max(1, Math.floor(config.maxPositionSize));
 
@@ -47,7 +26,7 @@ async function buildRecommendation(
       strike,
       expiration,
       quantity,
-      entry_price: optionPrice,
+      entry_price: entryPrice,
       is_shadow: false,
     };
   } catch (error) {

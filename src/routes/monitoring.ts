@@ -161,10 +161,17 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
                 s.symbol,
                 s.timeframe,
                 s.direction,
-                we.processing_time_ms
+                we.processing_time_ms,
+                dr.strike AS rec_strike,
+                dr.expiration AS rec_expiration,
+                dr.quantity AS rec_quantity,
+                dr.entry_price AS rec_entry_price,
+                dr.rationale AS rec_rationale
          FROM orders o
          LEFT JOIN signals s ON s.signal_id = o.signal_id
          LEFT JOIN webhook_events we ON we.signal_id = o.signal_id
+         LEFT JOIN decision_recommendations dr
+           ON dr.experiment_id = o.experiment_id AND dr.engine = o.engine
          WHERE o.created_at > NOW() - ($1::int || ' hours')::interval
          ${ordersFilter}
          ORDER BY o.created_at DESC
@@ -410,6 +417,13 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
         engine: row.engine || 'A',
         signal_id: row.signal_id,
         experiment_id: row.experiment_id,
+        recommendation: {
+          strike: row.rec_strike,
+          expiration: row.rec_expiration,
+          quantity: row.rec_quantity,
+          entry_price: row.rec_entry_price,
+          rationale: row.rec_rationale,
+        },
       })),
     },
     pipeline: {
@@ -575,6 +589,12 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
       [experimentId]
     );
     const experiment = experimentResult.rows[0];
+    const recommendationResult = await db.query(
+      `SELECT engine, strike, expiration, quantity, entry_price, is_shadow, rationale
+       FROM decision_recommendations
+       WHERE experiment_id = $1`,
+      [experimentId]
+    );
     if (experiment) {
       detail.experiment = {
         experiment_id: experiment.experiment_id,
@@ -598,6 +618,15 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
         decision_factors: [],
         thresholds_met: null,
         risk_checks_passed: null,
+        recommendations: recommendationResult.rows.map((row) => ({
+          engine: row.engine,
+          strike: row.strike,
+          expiration: row.expiration,
+          quantity: row.quantity,
+          entry_price: row.entry_price,
+          is_shadow: row.is_shadow,
+          rationale: row.rationale,
+        })),
       };
     }
   }
@@ -613,6 +642,7 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
       decision_factors: [],
       thresholds_met: null,
       risk_checks_passed: null,
+      recommendations: [],
     };
   }
 

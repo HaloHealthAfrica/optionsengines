@@ -119,6 +119,8 @@ function DecisionEngineDetails({ detail, onDecisionClick }) {
                   <th className="pb-2">Symbol</th>
                   <th className="pb-2">TF</th>
                   <th className="pb-2">Decision</th>
+                  <th className="pb-2">Strike/Exp</th>
+                  <th className="pb-2">Qty/Entry</th>
                   <th className="pb-2">Confidence</th>
                   <th className="pb-2">Outcome</th>
                   <th className="pb-2">ms</th>
@@ -142,6 +144,18 @@ function DecisionEngineDetails({ detail, onDecisionClick }) {
                     <td className="py-3 font-medium">{row.symbol}</td>
                     <td className="py-3">{row.timeframe}</td>
                     <td className="py-3">{row.decision}</td>
+                    <td className="py-3">
+                      <div className="text-xs text-slate-600 dark:text-slate-300">
+                        <div>{row.recommendation?.strike ?? '--'}</div>
+                        <div>{row.recommendation?.expiration ? new Date(row.recommendation.expiration).toLocaleDateString() : '--'}</div>
+                      </div>
+                    </td>
+                    <td className="py-3">
+                      <div className="text-xs text-slate-600 dark:text-slate-300">
+                        <div>{row.recommendation?.quantity ?? '--'}</div>
+                        <div>{row.recommendation?.entry_price ?? '--'}</div>
+                      </div>
+                    </td>
                     <td className="py-3">{row.confidence ?? '--'}%</td>
                     <td className="py-3">
                       <span className={`rounded-full px-2 py-1 text-xs font-semibold ${outcomeBadge(row.outcome)}`}>
@@ -158,7 +172,7 @@ function DecisionEngineDetails({ detail, onDecisionClick }) {
                 ))}
                 {decisions.length === 0 && (
                   <tr>
-                    <td className="py-4 text-sm text-slate-500" colSpan={8}>
+                    <td className="py-4 text-sm text-slate-500" colSpan={10}>
                       No decision activity yet.
                     </td>
                   </tr>
@@ -1171,6 +1185,17 @@ export default function Monitoring({ initialView = 'overview' }) {
                           {detailDecision.decision_time_ms ?? '--'} ms
                         </span>
                       </div>
+                      {(detailDecision.recommendations || []).length > 0 && (
+                        <div className="mt-3 rounded-xl border border-slate-100 p-3 text-[11px] text-slate-600 dark:border-slate-800 dark:text-slate-200">
+                          {(detailDecision.recommendations || []).map((rec, idx) => (
+                            <div key={`${rec.engine}-${idx}`} className="grid gap-1">
+                              <div className="font-semibold">Engine {rec.engine}</div>
+                              <div>Strike: {rec.strike ?? '--'} · Exp: {rec.expiration ? new Date(rec.expiration).toLocaleDateString() : '--'}</div>
+                              <div>Qty: {rec.quantity ?? '--'} · Entry: {rec.entry_price ?? '--'}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
