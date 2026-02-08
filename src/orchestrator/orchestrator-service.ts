@@ -49,7 +49,7 @@ export class OrchestratorService {
       const market_context = await this.createMarketContext(signal);
       const experiment = await this.createExperiment(signal);
       signal.experiment_id = experiment.experiment_id;
-      const policy = await this.getExecutionPolicy(experiment.experiment_id);
+      const policy = await this.getExecutionPolicy(experiment.experiment_id, experiment.variant);
       const { engineA, engineB } = await this.distributeSignal(signal, market_context, experiment);
 
       const engine_a_recommendation = this.applyPolicyToRecommendation(
@@ -129,8 +129,8 @@ export class OrchestratorService {
     return this.experimentManager.createExperiment(signal, 0.5, 'v1.0');
   }
 
-  async getExecutionPolicy(experiment_id: string) {
-    return this.policyEngine.getExecutionPolicy(experiment_id, 'v1.0');
+  async getExecutionPolicy(experiment_id: string, variant?: 'A' | 'B') {
+    return this.policyEngine.getExecutionPolicy(experiment_id, 'v1.0', variant);
   }
 
   async distributeSignal(signal: Signal, context: MarketContext, experiment: { variant: 'A' | 'B' }) {
@@ -241,7 +241,7 @@ export class OrchestratorService {
     ].filter(Boolean) as Array<{ engine: 'A' | 'B'; rec: TradeRecommendation }>;
 
     for (const { engine, rec } of recommendations) {
-      if (!config.enableDualPaperTrading && rec.is_shadow) {
+      if (rec.is_shadow) {
         continue;
       }
 

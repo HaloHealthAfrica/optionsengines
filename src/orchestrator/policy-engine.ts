@@ -36,7 +36,8 @@ export class PolicyEngine {
    */
   async getExecutionPolicy(
     experiment_id: string,
-    policy_version: string = 'v1.0'
+    policy_version: string = 'v1.0',
+    preferredEngine?: 'A' | 'B'
   ): Promise<ExecutionPolicy> {
     const availability = await this.checkEngineAvailability();
 
@@ -45,11 +46,27 @@ export class PolicyEngine {
     let shadow_engine: 'A' | 'B' | null = null;
     let reason = 'Engine A unavailable or non-paper mode';
 
-    if (config.appMode === 'PAPER' && availability.engineA) {
-      execution_mode = 'ENGINE_A_PRIMARY';
-      executed_engine = 'A';
-      shadow_engine = availability.engineB ? 'B' : null;
-      reason = 'Paper mode with Engine A available';
+    if (config.appMode === 'PAPER') {
+      if (preferredEngine) {
+        const preferredAvailable = preferredEngine === 'A' ? availability.engineA : availability.engineB;
+        if (preferredAvailable) {
+          execution_mode = preferredEngine === 'A' ? 'ENGINE_A_PRIMARY' : 'ENGINE_B_PRIMARY';
+          executed_engine = preferredEngine;
+          shadow_engine =
+            preferredEngine === 'A'
+              ? (availability.engineB ? 'B' : null)
+              : (availability.engineA ? 'A' : null);
+          reason = `Paper mode with preferred engine ${preferredEngine}`;
+        } else {
+          execution_mode = 'SHADOW_ONLY';
+          reason = `Preferred engine ${preferredEngine} unavailable`;
+        }
+      } else if (availability.engineA) {
+        execution_mode = 'ENGINE_A_PRIMARY';
+        executed_engine = 'A';
+        shadow_engine = availability.engineB ? 'B' : null;
+        reason = 'Paper mode with Engine A available';
+      }
     }
 
     this.validatePolicy(execution_mode, executed_engine, shadow_engine);

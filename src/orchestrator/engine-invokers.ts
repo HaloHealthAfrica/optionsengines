@@ -13,6 +13,11 @@ import { ContextAgent } from '../agents/core/context-agent.js';
 import { TechnicalAgent } from '../agents/core/technical-agent.js';
 import { RiskAgent } from '../agents/core/risk-agent.js';
 import { MetaDecisionAgent } from '../agents/core/meta-decision-agent.js';
+import { GammaFlowSpecialist } from '../agents/specialists/gamma-flow-specialist.js';
+import { ORBSpecialist } from '../agents/specialists/orb-specialist.js';
+import { StratSpecialist } from '../agents/specialists/strat-specialist.js';
+import { TTMSpecialist } from '../agents/specialists/ttm-specialist.js';
+import { SatylandSubAgent } from '../agents/subagents/satyland-sub-agent.js';
 import { eventLogger } from '../services/event-logger.service.js';
 import { EnrichedSignal, MarketData } from '../types/index.js';
 
@@ -82,23 +87,34 @@ async function buildEngineBRecommendation(signal: Signal): Promise<TradeRecommen
       sessionType: isMarketOpen ? 'RTH' : 'ETH',
     };
 
-    const contextAgent = new ContextAgent();
-    const technicalAgent = new TechnicalAgent();
-    const riskAgent = new RiskAgent();
     const metaAgent = new MetaDecisionAgent();
 
-    const outputs = await Promise.all([
-      contextAgent.analyze(enrichedSignal, marketContextForAgents),
-      technicalAgent.analyze(enrichedSignal, marketContextForAgents),
-      riskAgent.analyze(enrichedSignal, marketContextForAgents),
-    ]);
+    const agents = [
+      new ContextAgent(),
+      new TechnicalAgent(),
+      new RiskAgent(),
+      new GammaFlowSpecialist(),
+      new ORBSpecialist(),
+      new StratSpecialist(),
+      new TTMSpecialist(),
+      new SatylandSubAgent(),
+    ];
 
-    const outputsWithType = outputs.map((output) => ({
-      ...output,
-      metadata: { ...(output.metadata || {}), agentType: 'core' as const },
-    }));
+    const activatedAgents = agents.filter((agent) =>
+      agent.shouldActivate(enrichedSignal, marketContextForAgents)
+    );
 
-    const metaDecision = metaAgent.aggregate(outputsWithType);
+    const outputs = await Promise.all(
+      activatedAgents.map(async (agent) => {
+        const output = await agent.analyze(enrichedSignal, marketContextForAgents);
+        return {
+          ...output,
+          metadata: { ...(output.metadata || {}), agentType: agent.type },
+        };
+      })
+    );
+
+    const metaDecision = metaAgent.aggregate(outputs);
 
     if (signal.experiment_id) {
       await eventLogger.logDecision({

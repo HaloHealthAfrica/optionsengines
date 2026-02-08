@@ -73,6 +73,7 @@ function DecisionEngineDetails({ detail, onDecisionClick }) {
   const breakdown = detail?.breakdown || {};
   const pipeline = detail?.pipeline || {};
   const decisions = detail?.decision_log || [];
+  const agentMetrics = detail?.agent_metrics || [];
   const bySymbol = breakdown.by_symbol || [];
   const byDecision = breakdown.by_decision || [];
   const byOutcome = breakdown.by_outcome || [];
@@ -221,6 +222,45 @@ function DecisionEngineDetails({ detail, onDecisionClick }) {
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          <div className="card p-6">
+            <h3 className="text-base font-semibold">Agent Performance (24h)</h3>
+            <div className="mt-4 overflow-auto">
+              <table className="w-full text-xs">
+                <thead className="text-left text-[11px] uppercase text-slate-400">
+                  <tr>
+                    <th className="pb-2">Agent</th>
+                    <th className="pb-2">Type</th>
+                    <th className="pb-2">Total</th>
+                    <th className="pb-2">Avg Conf</th>
+                    <th className="pb-2">Block %</th>
+                    <th className="pb-2">Bias (B/Ba/N)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs dark:divide-slate-800">
+                  {agentMetrics.map((row) => (
+                    <tr key={`${row.agent_name}-${row.agent_type}`}>
+                      <td className="py-2 font-medium">{row.agent_name}</td>
+                      <td className="py-2">{row.agent_type}</td>
+                      <td className="py-2">{row.total ?? 0}</td>
+                      <td className="py-2">{row.avg_confidence ?? 0}%</td>
+                      <td className="py-2">{row.block_rate ?? 0}%</td>
+                      <td className="py-2">
+                        {row.bias?.bullish ?? 0}/{row.bias?.bearish ?? 0}/{row.bias?.neutral ?? 0}
+                      </td>
+                    </tr>
+                  ))}
+                  {agentMetrics.length === 0 && (
+                    <tr>
+                      <td className="py-3 text-slate-500" colSpan={6}>
+                        No agent metrics yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -1197,6 +1237,28 @@ export default function Monitoring({ initialView = 'overview' }) {
                         </div>
                       )}
                     </div>
+                    {(detailDecision.agent_decisions || []).length > 0 && (
+                      <div className="mt-4 rounded-xl border border-slate-100 p-3 text-[11px] text-slate-600 dark:border-slate-800 dark:text-slate-200">
+                        <p className="mb-2 text-xs font-semibold">Agent Decisions</p>
+                        <div className="grid gap-2">
+                          {(detailDecision.agent_decisions || []).map((agent, idx) => (
+                            <div key={`${agent.agent}-${idx}`} className="grid gap-1 rounded-lg border border-slate-100 p-2 dark:border-slate-800">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold">{agent.agent}</span>
+                                <span className="text-[10px] text-slate-400">{agent.type}</span>
+                              </div>
+                              <div>
+                                Bias: {agent.bias ?? '--'} · Conf: {agent.confidence ?? '--'}% · Block:{' '}
+                                {agent.block ? 'yes' : 'no'}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                Reasons: {(agent.reasons || []).join(', ') || 'none'}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="rounded-2xl border border-slate-100 p-5 dark:border-slate-800">

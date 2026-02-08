@@ -72,11 +72,12 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
   let decisionOverview = { rows: [] as any[] };
   let decisionByEngine = { rows: [] as any[] };
   let decisionQueue = { rows: [] as any[] };
+  let agentMetricsRows = { rows: [] as any[] };
 
   try {
     [recentEvents, summaryRows, engineRows, signalSummaryRows, orderSummaryRows, recentSignals, recentRejections, activityRows,
       decisionLogRows, decisionBreakdownSymbol, decisionBreakdownOutcome, decisionBreakdownTimeframe, decisionBreakdownDecision,
-      decisionOverview, decisionByEngine, decisionQueue] =
+      decisionOverview, decisionByEngine, decisionQueue, agentMetricsRows] =
       await Promise.all([
       db.query(
         `SELECT we.event_id, we.request_id, we.signal_id, we.experiment_id, we.variant, we.status, we.error_message,
@@ -249,6 +250,24 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
          ${ordersFilter}
          GROUP BY o.engine`
       ),
+      db.query(
+        `SELECT ad.agent_name,
+                ad.agent_type,
+                COUNT(*)::int AS total,
+                AVG(ad.confidence)::float AS avg_confidence,
+                SUM(CASE WHEN ad.block THEN 1 ELSE 0 END)::int AS blocks,
+                SUM(CASE WHEN ad.bias = 'bullish' THEN 1 ELSE 0 END)::int AS bullish,
+                SUM(CASE WHEN ad.bias = 'bearish' THEN 1 ELSE 0 END)::int AS bearish,
+                SUM(CASE WHEN ad.bias = 'neutral' THEN 1 ELSE 0 END)::int AS neutral
+         FROM agent_decisions ad
+         JOIN signals s ON s.signal_id = ad.signal_id
+         WHERE ad.agent_name <> 'meta_decision'
+           AND ad.created_at > NOW() - ($1::int || ' hours')::interval
+           ${signalsFilter}
+         GROUP BY ad.agent_name, ad.agent_type
+         ORDER BY ad.agent_type, total DESC`,
+        [windowHours]
+      ),
     ]);
   } catch (error) {
     // If migrations aren't applied yet, return empty webhook data
@@ -269,6 +288,7 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
     decisionOverview = { rows: [] };
     decisionByEngine = { rows: [] };
     decisionQueue = { rows: [] };
+    agentMetricsRows = { rows: [] };
   }
 
   const webhookSummary = summaryRows.rows.reduce<Record<string, number>>((acc, row) => {
@@ -425,6 +445,22 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
           rationale: row.rec_rationale,
         },
       })),
+      agent_metrics: agentMetricsRows.rows.map((row) => {
+        const total = Number(row.total || 0);
+        const blocks = Number(row.blocks || 0);
+        return {
+          agent_name: row.agent_name,
+          agent_type: row.agent_type,
+          total,
+          avg_confidence: row.avg_confidence ? Math.round(row.avg_confidence) : 0,
+          block_rate: total ? Math.round((blocks / total) * 100) : 0,
+          bias: {
+            bullish: Number(row.bullish || 0),
+            bearish: Number(row.bearish || 0),
+            neutral: Number(row.neutral || 0),
+          },
+        };
+      }),
     },
     pipeline: {
       signals_24h: {
@@ -494,6 +530,7 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
   let signalId: string | null = null;
   let experimentId: string | null = null;
   let orderId: string | null = null;
+  let agentDecisionRows: any[] = [];
 
   if (type === 'webhook' && webhookRow.rows.length > 0) {
     const row = webhookRow.rows[0];
@@ -583,6 +620,16 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
     }
   }
 
+  if (!experimentId && signalId) {
+    const experimentLookup = await db.query(
+      `SELECT experiment_id FROM experiments WHERE signal_id = $1 LIMIT 1`,
+      [signalId]
+    );
+    if (experimentLookup.rows[0]?.experiment_id) {
+      experimentId = experimentLookup.rows[0].experiment_id;
+    }
+  }
+
   if (experimentId) {
     const experimentResult = await db.query(
       `SELECT * FROM experiments WHERE experiment_id = $1 LIMIT 1`,
@@ -608,6 +655,15 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
       detail.signal_data = detail.signal_data || {
         signal_id: experiment.signal_id,
       };
+      agentDecisionRows = (
+        await db.query(
+          `SELECT agent_name, agent_type, bias, confidence, reasons, block, metadata, created_at
+           FROM agent_decisions
+           WHERE experiment_id = $1
+           ORDER BY created_at ASC`,
+          [experimentId]
+        )
+      ).rows;
       detail.decision_engine = {
         engine: experiment.variant === 'A' ? 'Engine A' : 'Engine B',
         decision: detail.signal_data?.signal_type || 'hold',
@@ -626,6 +682,16 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
           entry_price: row.entry_price,
           is_shadow: row.is_shadow,
           rationale: row.rationale,
+        })),
+        agent_decisions: agentDecisionRows.map((row: any) => ({
+          agent: row.agent_name,
+          type: row.agent_type,
+          bias: row.bias,
+          confidence: row.confidence,
+          block: row.block,
+          reasons: row.reasons || [],
+          metadata: row.metadata || {},
+          created_at: row.created_at,
         })),
       };
     }
