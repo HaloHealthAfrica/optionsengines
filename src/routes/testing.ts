@@ -202,7 +202,7 @@ router.post('/webhooks/send-batch', requireAuth, requireTestingAccess, requireTe
   const scenario = payload.scenario || 'batch';
   const symbols = payload.symbols && payload.symbols.length ? payload.symbols : TEST_SYMBOLS;
   const timeframes = payload.timeframes && payload.timeframes.length ? payload.timeframes : TEST_TIMEFRAMES;
-  const signalTypes = payload.signal_types && payload.signal_types.length ? payload.signal_types : TEST_SIGNAL_TYPES;
+  const signalTypes = payload.signal_types && payload.signal_types.length ? payload.signal_types : [...TEST_SIGNAL_TYPES];
   const requestIds = Array.from({ length: payload.count }, () => crypto.randomUUID());
   const delayEstimate = computeDelayMs(payload.timing, payload.interval_seconds);
   const estimatedCompletion = new Date(Date.now() + delayEstimate * payload.count);

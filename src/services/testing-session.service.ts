@@ -171,7 +171,7 @@ export async function clearTestSession(testSessionId: string): Promise<{
   await db.query(`DELETE FROM refactored_signals WHERE signal_id IN (SELECT signal_id FROM signals WHERE test_session_id = $1)`, [
     testSessionId,
   ]);
-  const signalsDeleted = await db.query(
+  await db.query(
     `DELETE FROM signals WHERE test_session_id = $1`,
     [testSessionId]
   );
