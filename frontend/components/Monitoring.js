@@ -323,6 +323,7 @@ export default function Monitoring({ initialView = 'overview' }) {
   const [testStatus, setTestStatus] = useState('idle');
   const [lastTestAt, setLastTestAt] = useState(null);
   const [activeTestSession, setActiveTestSession] = useState(null);
+  const [testError, setTestError] = useState(null);
 
   const loadData = useCallback(async () => {
     setStatus('loading');
@@ -406,6 +407,7 @@ export default function Monitoring({ initialView = 'overview' }) {
 
   const sendQuickTest = useCallback(async (payload) => {
     setTestStatus('loading');
+    setTestError(null);
     try {
       const endpoint =
         payload.count && payload.count > 1 ? '/api/testing/webhooks/send-batch' : '/api/testing/webhooks/send';
@@ -431,13 +433,16 @@ export default function Monitoring({ initialView = 'overview' }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!response.ok) throw new Error('Failed');
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || 'Failed to send test webhook');
+      }
       setLastTestAt(new Date().toISOString());
       setActiveTestSession(result.test_session_id || null);
       await loadData();
       setTestStatus('success');
     } catch (error) {
+      setTestError(error?.message || 'Failed to send test webhook');
       setTestStatus('error');
     }
   }, [loadData]);
@@ -965,6 +970,7 @@ export default function Monitoring({ initialView = 'overview' }) {
             >
               {testStatus === 'loading' ? 'Sending...' : 'Send Test Webhook'}
             </button>
+            {testError && <p className="text-xs text-rose-500">{testError}</p>}
           </div>
           <div className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800">
             <p>Active tests: {activeTestSession ? 1 : 0}</p>

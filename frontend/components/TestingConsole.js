@@ -70,6 +70,7 @@ export default function TestingConsole() {
   const [sessionData, setSessionData] = useState(null);
   const [status, setStatus] = useState('idle');
   const [customError, setCustomError] = useState(null);
+  const [requestError, setRequestError] = useState(null);
 
   const fetchSession = useCallback(async (id) => {
     if (!id) return;
@@ -90,31 +91,54 @@ export default function TestingConsole() {
 
   const sendSingle = useCallback(async () => {
     setStatus('loading');
-    const response = await fetch('/api/testing/webhooks/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(single),
-    });
-    const payload = await response.json();
-    setSessionId(payload.test_session_id || null);
-    setStatus('success');
+    setRequestError(null);
+    try {
+      const response = await fetch('/api/testing/webhooks/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(single),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setRequestError(payload?.error || 'Failed to send test webhook');
+        setStatus('error');
+        return;
+      }
+      setSessionId(payload.test_session_id || null);
+      setStatus('success');
+    } catch (error) {
+      setRequestError(error?.message || 'Failed to send test webhook');
+      setStatus('error');
+    }
   }, [single]);
 
   const sendScenario = useCallback(async (payload) => {
     setStatus('loading');
-    const response = await fetch('/api/testing/webhooks/send-batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
-    setSessionId(result.test_session_id || null);
-    setStatus('success');
+    setRequestError(null);
+    try {
+      const response = await fetch('/api/testing/webhooks/send-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setRequestError(result?.error || 'Failed to send test batch');
+        setStatus('error');
+        return;
+      }
+      setSessionId(result.test_session_id || null);
+      setStatus('success');
+    } catch (error) {
+      setRequestError(error?.message || 'Failed to send test batch');
+      setStatus('error');
+    }
   }, []);
 
   const sendCustom = useCallback(async () => {
     setStatus('loading');
     setCustomError(null);
+    setRequestError(null);
     try {
       const parsed = JSON.parse(customJson);
       const response = await fetch('/api/testing/webhooks/send-custom', {
@@ -122,7 +146,12 @@ export default function TestingConsole() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ custom_payload: parsed, validation_mode: validationMode }),
       });
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setRequestError(result?.error || 'Failed to send custom webhook');
+        setStatus('error');
+        return;
+      }
       if (result.status === 'validation_failed') {
         setCustomError(result.validation_result?.errors?.join(', ') || 'Validation failed');
       } else {
@@ -131,6 +160,7 @@ export default function TestingConsole() {
       setStatus('success');
     } catch (error) {
       setCustomError('Invalid JSON payload.');
+      setRequestError('Invalid JSON payload.');
       setStatus('error');
     }
   }, [customJson, validationMode]);
@@ -234,6 +264,7 @@ export default function TestingConsole() {
               >
                 {status === 'loading' ? 'Sending...' : 'Send Test Webhook'}
               </button>
+              {requestError && <p className="text-xs text-rose-500">{requestError}</p>}
             </div>
           )}
 
@@ -284,6 +315,7 @@ export default function TestingConsole() {
                 Load recent production webhook
               </button>
               {customError && <p className="text-xs text-rose-500">{customError}</p>}
+              {requestError && <p className="text-xs text-rose-500">{requestError}</p>}
               <button
                 type="button"
                 onClick={sendCustom}
