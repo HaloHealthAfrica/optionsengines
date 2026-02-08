@@ -79,8 +79,7 @@ function DecisionEngineDetails({ detail, onDecisionClick }) {
   const byTimeframe = breakdown.by_timeframe || [];
 
   return (
-    <>
-      <section className="flex flex-col gap-6">
+    <section className="flex flex-col gap-6">
       <div>
         <h2 className="text-lg font-semibold">Decision Engine Details</h2>
         <p className="muted text-sm">Engine performance, decision logs, and pipeline health.</p>
@@ -799,7 +798,7 @@ export default function Monitoring({ initialView = 'overview' }) {
       </div>
       </>
       )}
-      </section>
+
       {detailOpen && (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/40" onClick={closeDetail} />
@@ -1097,6 +1096,6 @@ export default function Monitoring({ initialView = 'overview' }) {
           </div>
         </div>
       )}
-    </>
+    </section>
   );
 }
