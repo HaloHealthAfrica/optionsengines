@@ -244,9 +244,9 @@ export class OrchestratorService {
     execution_mode: string,
     engine: 'A' | 'B',
     recommendation: TradeRecommendation | null
-  ): TradeRecommendation | null {
+  ): TradeRecommendation | undefined {
     if (!recommendation) {
-      return null;
+      return undefined;
     }
 
     let is_shadow = false;
