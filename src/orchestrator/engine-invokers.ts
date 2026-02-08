@@ -15,7 +15,6 @@ import { RiskAgent } from '../agents/core/risk-agent.js';
 import { MetaDecisionAgent } from '../agents/core/meta-decision-agent.js';
 import { eventLogger } from '../services/event-logger.service.js';
 import { EnrichedSignal, MarketData } from '../types/index.js';
-import { config } from '../config/index.js';
 
 async function buildRecommendation(
   engine: 'A' | 'B',
