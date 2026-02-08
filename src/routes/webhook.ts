@@ -35,8 +35,23 @@ export const webhookSchema = z
     strike: z.number().optional(),
     expiration: z.string().optional(), // ISO date string
     timestamp: z.union([z.string(), z.number()]).optional(),
+    price: z.number().optional(),
+    indicators: z.record(z.any()).optional(),
+    is_test: z.boolean().optional(),
+    test_session_id: z.string().min(1).max(128).optional(),
+    test_scenario: z.string().min(1).max(128).optional(),
+    sequence_number: z.number().int().positive().optional(),
+    metadata: z
+      .object({
+        is_test: z.boolean().optional(),
+        test_session_id: z.string().min(1).max(128).optional(),
+        test_scenario: z.string().min(1).max(128).optional(),
+        sequence_number: z.number().int().positive().optional(),
+      })
+      .optional(),
     secret: z.string().min(1).max(128).optional(),
   })
+  .passthrough()
   .refine((data) => Boolean(data.symbol || data.ticker), {
     message: 'symbol is required',
     path: ['symbol'],
@@ -64,7 +79,8 @@ export async function isDuplicate(
   ticker: string,
   direction: 'long' | 'short',
   timeframe: string,
-  windowSeconds: number = 60
+  windowSeconds: number = 60,
+  isTest: boolean = false
 ): Promise<boolean> {
   const cutoffTime = new Date(Date.now() - windowSeconds * 1000);
 
@@ -74,8 +90,9 @@ export async function isDuplicate(
        AND direction = $2 
        AND timeframe = $3 
        AND created_at > $4 
+       AND COALESCE(is_test, false) = $5
      LIMIT 1`,
-    [ticker, direction.toLowerCase(), timeframe, cutoffTime]
+    [ticker, direction.toLowerCase(), timeframe, cutoffTime, isTest]
   );
 
   return result.rows.length > 0;
@@ -175,22 +192,68 @@ function normalizeTimestamp(raw: WebhookPayload['timestamp']): Date {
   return parsed;
 }
 
-export async function handleWebhook(req: Request, res: Response): Promise<Response> {
+type TestMetadata = {
+  isTest: boolean;
+  testSessionId: string | null;
+  testScenario: string | null;
+  sequenceNumber: number | null;
+};
+
+function extractTestMetadata(payload: WebhookPayload): TestMetadata {
+  const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+  const isTest = Boolean(
+    (payload as WebhookPayload & { is_test?: boolean }).is_test ?? (metadata as any).is_test
+  );
+  const testSessionId =
+    (payload as WebhookPayload & { test_session_id?: string }).test_session_id ??
+    (metadata as any).test_session_id ??
+    null;
+  const testScenario =
+    (payload as WebhookPayload & { test_scenario?: string }).test_scenario ??
+    (metadata as any).test_scenario ??
+    null;
+  const sequenceNumber =
+    (payload as WebhookPayload & { sequence_number?: number }).sequence_number ??
+    (metadata as any).sequence_number ??
+    null;
+
+  return {
+    isTest,
+    testSessionId,
+    testScenario,
+    sequenceNumber,
+  };
+}
+
+export async function processWebhookPayload(input: {
+  payload: unknown;
+  signature?: string;
+  ip?: string;
+  rawBody?: Buffer;
+  requestId?: string;
+}): Promise<{
+  httpStatus: number;
+  response: Record<string, any>;
+  status: 'ACCEPTED' | 'DUPLICATE' | 'REJECTED' | 'ERROR';
+  requestId: string;
+}> {
   const startTime = Date.now();
-  const requestId = crypto.randomUUID();
+  const requestId = input.requestId || crypto.randomUUID();
   let symbolForLog: string | undefined;
   let directionForLog: 'long' | 'short' | undefined;
   let timeframeForLog: string | undefined;
   let signalIdForLog: string | undefined;
   let experimentIdForLog: string | undefined;
   let variantForLog: 'A' | 'B' | undefined;
+  let testMetaForLog: TestMetadata | null = null;
+  let webhookEventId: string | null = null;
 
   const logWebhookEvent = async (input: {
     status: 'accepted' | 'duplicate' | 'invalid_signature' | 'invalid_payload' | 'error';
     errorMessage?: string;
   }): Promise<void> => {
     try {
-      await db.query(
+      const result = await db.query(
         `INSERT INTO webhook_events (
           request_id,
           signal_id,
@@ -201,8 +264,12 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
           symbol,
           direction,
           timeframe,
-          processing_time_ms
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          processing_time_ms,
+          is_test,
+          test_session_id,
+          test_scenario
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        RETURNING event_id`,
         [
           requestId,
           signalIdForLog || null,
@@ -214,8 +281,12 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
           directionForLog || null,
           timeframeForLog || null,
           Date.now() - startTime,
+          testMetaForLog?.isTest || false,
+          testMetaForLog?.testSessionId || null,
+          testMetaForLog?.testScenario || null,
         ]
       );
+      webhookEventId = result.rows[0]?.event_id || webhookEventId;
     } catch (error) {
       logger.warn('Failed to log webhook event', { requestId, error });
     }
@@ -224,39 +295,45 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
   try {
     // Log incoming request
     const logBody =
-      req.body && typeof req.body === 'object' && 'secret' in req.body
-        ? { ...req.body, secret: '[REDACTED]' }
-        : req.body;
+      input.payload && typeof input.payload === 'object' && 'secret' in (input.payload as Record<string, any>)
+        ? { ...(input.payload as Record<string, any>), secret: '[REDACTED]' }
+        : input.payload;
     logger.info('Webhook received', {
       requestId,
-      ip: req.ip,
+      ip: input.ip,
       body: logBody,
     });
 
     // Validate HMAC signature if provided
-    const signature = req.headers['x-webhook-signature'] as string | undefined;
+    const signature = input.signature;
     const hmacEnabled =
       config.hmacSecret &&
       config.hmacSecret !== 'change-this-to-another-secure-random-string-for-webhooks';
 
     if (hmacEnabled && signature) {
-      const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
-      const payload = rawBody ? rawBody.toString('utf8') : JSON.stringify(req.body);
+      const rawBody = input.rawBody;
+      const payload = rawBody ? rawBody.toString('utf8') : JSON.stringify(input.payload);
       const isValid = authService.verifyHmacSignature(payload, signature);
 
       if (!isValid) {
         logger.warn('Invalid webhook signature', { requestId });
         await logWebhookEvent({ status: 'invalid_signature', errorMessage: 'Invalid signature' });
-        return res.status(401).json({
+        return {
+          httpStatus: 401,
           status: 'REJECTED',
-          error: 'Invalid signature',
-          request_id: requestId,
-        });
+          requestId,
+          response: {
+            status: 'REJECTED',
+            error: 'Invalid signature',
+            request_id: requestId,
+            webhook_event_id: webhookEventId,
+          },
+        };
       }
     }
 
     // Validate payload structure
-    const parseResult = webhookSchema.safeParse(req.body);
+    const parseResult = webhookSchema.safeParse(input.payload);
 
     if (!parseResult.success) {
       logger.warn('Invalid webhook payload', {
@@ -265,39 +342,58 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
       });
       await logWebhookEvent({ status: 'invalid_payload', errorMessage: 'Invalid payload' });
 
-      return res.status(400).json({
+      return {
+        httpStatus: 400,
         status: 'REJECTED',
-        error: 'Invalid payload',
-        details: parseResult.error.errors.map((e) => ({
-          field: e.path.join('.'),
-          message: e.message,
-        })),
-        request_id: requestId,
-      });
+        requestId,
+        response: {
+          status: 'REJECTED',
+          error: 'Invalid payload',
+          details: parseResult.error.errors.map((e) => ({
+            field: e.path.join('.'),
+            message: e.message,
+          })),
+          request_id: requestId,
+          webhook_event_id: webhookEventId,
+        },
+      };
     }
 
     const payload = parseResult.data;
     const { secret: _secret, ...payloadForStorage } = payload;
+    testMetaForLog = extractTestMetadata(payload);
     const symbol = payload.symbol ?? payload.ticker;
     symbolForLog = symbol;
     const normalizedTimeframe = normalizeTimeframe(payload);
     timeframeForLog = normalizedTimeframe ?? undefined;
     if (!symbol) {
       await logWebhookEvent({ status: 'invalid_payload', errorMessage: 'Missing symbol' });
-      return res.status(400).json({
+      return {
+        httpStatus: 400,
         status: 'REJECTED',
-        error: 'Missing symbol',
-        request_id: requestId,
-      });
+        requestId,
+        response: {
+          status: 'REJECTED',
+          error: 'Missing symbol',
+          request_id: requestId,
+          webhook_event_id: webhookEventId,
+        },
+      };
     }
 
     if (!normalizedTimeframe) {
       await logWebhookEvent({ status: 'invalid_payload', errorMessage: 'Missing or invalid timeframe' });
-      return res.status(400).json({
+      return {
+        httpStatus: 400,
         status: 'REJECTED',
-        error: 'Missing or invalid timeframe',
-        request_id: requestId,
-      });
+        requestId,
+        response: {
+          status: 'REJECTED',
+          error: 'Missing or invalid timeframe',
+          request_id: requestId,
+          webhook_event_id: webhookEventId,
+        },
+      };
     }
 
     // After this check, normalizedTimeframe is guaranteed to be a string
@@ -307,16 +403,22 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
 
     if (!normalizedDirection) {
       await logWebhookEvent({ status: 'invalid_payload', errorMessage: 'Missing or invalid direction' });
-      return res.status(400).json({
+      return {
+        httpStatus: 400,
         status: 'REJECTED',
-        error: 'Missing or invalid direction',
-        request_id: requestId,
-      });
+        requestId,
+        response: {
+          status: 'REJECTED',
+          error: 'Missing or invalid direction',
+          request_id: requestId,
+          webhook_event_id: webhookEventId,
+        },
+      };
     }
     directionForLog = normalizedDirection;
 
     // Check for duplicates
-    const duplicate = await isDuplicate(symbol, normalizedDirection, timeframe, 60);
+    const duplicate = await isDuplicate(symbol, normalizedDirection, timeframe, 60, testMetaForLog?.isTest || false);
 
     if (duplicate) {
       logger.info('Duplicate signal detected', {
@@ -326,12 +428,19 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
       });
 
       await logWebhookEvent({ status: 'duplicate' });
-      return res.status(200).json({
+      return {
+        httpStatus: 200,
         status: 'DUPLICATE',
-        message: 'Signal already received',
-        request_id: requestId,
-        processing_time_ms: Date.now() - startTime,
-      });
+        requestId,
+        response: {
+          status: 'DUPLICATE',
+          message: 'Signal already received',
+          request_id: requestId,
+          processing_time_ms: Date.now() - startTime,
+          webhook_event_id: webhookEventId,
+          test_session_id: testMetaForLog?.testSessionId || null,
+        },
+      };
     }
 
     // Generate signal hash
@@ -352,8 +461,11 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
         timestamp, 
         status, 
         raw_payload, 
-        signal_hash
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        signal_hash,
+        is_test,
+        test_session_id,
+        test_scenario
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING signal_id`,
       [
         symbol,
@@ -363,6 +475,9 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
         'pending',
         JSON.stringify(payloadForStorage),
         signalHash,
+        testMetaForLog?.isTest || false,
+        testMetaForLog?.testSessionId || null,
+        testMetaForLog?.testScenario || null,
       ]
     );
 
@@ -377,23 +492,47 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
 
     // Return success response
     await logWebhookEvent({ status: 'accepted' });
-    return res.status(200).json({
+    return {
+      httpStatus: 200,
       status: 'ACCEPTED',
-      signal_id: signalId,
-      request_id: requestId,
-      processing_time_ms: Date.now() - startTime,
-    });
+      requestId,
+      response: {
+        status: 'ACCEPTED',
+        signal_id: signalId,
+        request_id: requestId,
+        processing_time_ms: Date.now() - startTime,
+        webhook_event_id: webhookEventId,
+        test_session_id: testMetaForLog?.testSessionId || null,
+        is_test: testMetaForLog?.isTest || false,
+      },
+    };
   } catch (error: any) {
     logger.error('Webhook processing failed', error, { requestId });
     await logWebhookEvent({ status: 'error', errorMessage: error?.message || 'Internal server error' });
 
-    return res.status(500).json({
+    return {
+      httpStatus: 500,
       status: 'ERROR',
-      error: 'Internal server error',
-      request_id: requestId,
-      processing_time_ms: Date.now() - startTime,
-    });
+      requestId,
+      response: {
+        status: 'ERROR',
+        error: 'Internal server error',
+        request_id: requestId,
+        processing_time_ms: Date.now() - startTime,
+        webhook_event_id: webhookEventId,
+      },
+    };
   }
+}
+
+export async function handleWebhook(req: Request, res: Response): Promise<Response> {
+  const result = await processWebhookPayload({
+    payload: req.body,
+    signature: req.headers['x-webhook-signature'] as string | undefined,
+    ip: req.ip,
+    rawBody: (req as Request & { rawBody?: Buffer }).rawBody,
+  });
+  return res.status(result.httpStatus).json(result.response);
 }
 
 /**

@@ -11,6 +11,7 @@ import { cacheWarmer } from './services/cache-warmer.service.js';
 import { createShutdownHandler } from './utils/shutdown.js';
 import { MigrationRunner } from './migrations/runner.js';
 import { logConfigSummary } from './utils/config-log.js';
+import { createTestingWebSocketServer } from './services/testing-live.service.js';
 
 async function bootstrap(): Promise<void> {
   try {
@@ -49,6 +50,8 @@ async function bootstrap(): Promise<void> {
       variantB: config.enableVariantB ? 'ENABLED' : 'DISABLED',
     });
   });
+
+  createTestingWebSocketServer(server);
 
   const shutdownHandler = createShutdownHandler({
     server,

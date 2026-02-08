@@ -17,6 +17,8 @@ import dashboardRoutes from './routes/dashboard.js';
 import monitoringRoutes from './routes/monitoring.js';
 import ordersRoutes from './routes/orders.js';
 import historyRoutes from './routes/history.js';
+import testingRoutes from './routes/testing.js';
+import webhookSchemaRoutes from './routes/webhooks.js';
 
 const app: Express = express();
 
@@ -58,6 +60,8 @@ app.use('/history', historyRoutes);
 app.use('/admin/cache', cacheInvalidation.createAdminRoutes());
 app.use('/api', optionsEnginesRoutes);
 app.use('/', engine2Routes);
+app.use('/api/v1/testing', testingRoutes);
+app.use('/api/v1/webhooks', webhookSchemaRoutes);
 
 // Root endpoint
 app.get('/', (_req: Request, res: Response) => {

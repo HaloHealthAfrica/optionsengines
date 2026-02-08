@@ -121,15 +121,146 @@ export async function backendGetPositioning(token, symbol = 'SPY') {
   return data;
 }
 
-export async function backendGetMonitoringStatus(token, limit = 25) {
-  const response = await backendFetch(`/monitoring/status?limit=${limit}`, {
+export async function backendGetMonitoringStatus(token, limit = 25, testFilter = 'all') {
+  const response = await backendFetch(
+    `/monitoring/status?limit=${limit}&testFilter=${encodeURIComponent(testFilter)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch monitoring status');
+  }
+
+  return response.json();
+}
+
+export async function backendGetWebhookSchema(token) {
+  const response = await backendFetch('/api/v1/webhooks/schema', {
     headers: {
       Authorization: `Bearer ${token}`,
     },
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch monitoring status');
+    throw new Error('Failed to fetch webhook schema');
+  }
+
+  return response.json();
+}
+
+export async function backendGetRecentProductionWebhooks(token, limit = 10, status = '') {
+  const query = new URLSearchParams();
+  query.set('limit', String(limit));
+  if (status) query.set('status', status);
+  const response = await backendFetch(`/api/v1/webhooks/recent-production?${query.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch recent production webhooks');
+  }
+
+  return response.json();
+}
+
+export async function backendSendTestWebhook(token, payload) {
+  const response = await backendFetch('/api/v1/testing/webhooks/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const error = await safeJson(response);
+    throw new Error(error?.error || 'Failed to send test webhook');
+  }
+
+  return response.json();
+}
+
+export async function backendSendBatchTestWebhooks(token, payload) {
+  const response = await backendFetch('/api/v1/testing/webhooks/send-batch', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const error = await safeJson(response);
+    throw new Error(error?.error || 'Failed to send batch test webhooks');
+  }
+
+  return response.json();
+}
+
+export async function backendSendCustomWebhook(token, payload) {
+  const response = await backendFetch('/api/v1/testing/webhooks/send-custom', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const error = await safeJson(response);
+    throw new Error(error?.error || 'Failed to send custom webhook');
+  }
+
+  return response.json();
+}
+
+export async function backendSendBatchCustomWebhooks(token, payload) {
+  const response = await backendFetch('/api/v1/testing/webhooks/send-batch-custom', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const error = await safeJson(response);
+    throw new Error(error?.error || 'Failed to send batch custom webhooks');
+  }
+
+  return response.json();
+}
+
+export async function backendGetTestSession(token, testSessionId) {
+  const response = await backendFetch(`/api/v1/testing/sessions/${testSessionId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch test session');
+  }
+
+  return response.json();
+}
+
+export async function backendClearTestSession(token, testSessionId) {
+  const response = await backendFetch(`/api/v1/testing/sessions/${testSessionId}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to clear test session');
   }
 
   return response.json();

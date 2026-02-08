@@ -302,6 +302,7 @@ export default function Monitoring({ initialView = 'overview' }) {
   const [status, setStatus] = useState('idle');
   const [limit, setLimit] = useState(25);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [testFilter, setTestFilter] = useState('all');
   const [dataSource, setDataSource] = useState('unknown');
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [view, setView] = useState(initialView);
@@ -312,11 +313,24 @@ export default function Monitoring({ initialView = 'overview' }) {
   const [detailType, setDetailType] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [relatedWebhooks, setRelatedWebhooks] = useState([]);
+  const [testPanelOpen, setTestPanelOpen] = useState(false);
+  const [testForm, setTestForm] = useState({
+    symbol: 'SPY',
+    timeframe: '5m',
+    signal_type: 'buy',
+    count: 1,
+  });
+  const [testStatus, setTestStatus] = useState('idle');
+  const [lastTestAt, setLastTestAt] = useState(null);
+  const [activeTestSession, setActiveTestSession] = useState(null);
 
   const loadData = useCallback(async () => {
     setStatus('loading');
     try {
-      const response = await fetch(`/api/monitoring/status?limit=${limit}`, { cache: 'no-store' });
+      const response = await fetch(
+        `/api/monitoring/status?limit=${limit}&testFilter=${encodeURIComponent(testFilter)}`,
+        { cache: 'no-store' }
+      );
       if (!response.ok) throw new Error('Failed');
       setDataSource(response.headers.get('x-data-source') || 'unknown');
       const payload = await response.json();
@@ -325,11 +339,19 @@ export default function Monitoring({ initialView = 'overview' }) {
     } catch (error) {
       setStatus('error');
     }
-  }, [limit]);
+  }, [limit, testFilter]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!activeTestSession) return;
+    const interval = setInterval(() => {
+      loadData();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [activeTestSession, loadData]);
 
   const openDetail = useCallback((type, id, eventSnapshot) => {
     if (!type || !id) return;
@@ -382,6 +404,44 @@ export default function Monitoring({ initialView = 'overview' }) {
     }
   }, []);
 
+  const sendQuickTest = useCallback(async (payload) => {
+    setTestStatus('loading');
+    try {
+      const endpoint =
+        payload.count && payload.count > 1 ? '/api/testing/webhooks/send-batch' : '/api/testing/webhooks/send';
+      const body =
+        payload.count && payload.count > 1
+          ? {
+              scenario: payload.scenario || 'quick_test',
+              symbols: payload.symbols && payload.symbols.length ? payload.symbols : [payload.symbol],
+              timeframes: payload.timeframes && payload.timeframes.length ? payload.timeframes : [payload.timeframe],
+              signal_types: payload.signal_types && payload.signal_types.length ? payload.signal_types : [payload.signal_type],
+              count: Number(payload.count || 1),
+              timing: payload.timing || 'realistic',
+              realistic_prices: true,
+            }
+          : {
+              symbol: payload.symbol,
+              timeframe: payload.timeframe,
+              signal_type: payload.signal_type,
+            };
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error('Failed');
+      const result = await response.json();
+      setLastTestAt(new Date().toISOString());
+      setActiveTestSession(result.test_session_id || null);
+      await loadData();
+      setTestStatus('success');
+    } catch (error) {
+      setTestStatus('error');
+    }
+  }, [loadData]);
+
   useEffect(() => {
     if (!detailOpen) return;
     loadDetail(detailType, detailId);
@@ -425,6 +485,8 @@ export default function Monitoring({ initialView = 'overview' }) {
   const recent = data?.webhooks?.recent || [];
   const engineStats = data?.engines?.by_variant_24h || {};
   const recentFiltered = recent.filter((item) => {
+    if (testFilter === 'test' && !item.is_test) return false;
+    if (testFilter === 'production' && item.is_test) return false;
     if (activeFilter === 'all') return true;
     if (activeFilter === 'duplicate') return item.status === 'duplicate';
     if (activeFilter === 'failures') {
@@ -463,6 +525,23 @@ export default function Monitoring({ initialView = 'overview' }) {
                 onClick={() => setView(item.id)}
                 className={`tab-button ${view === item.id ? 'tab-button-active' : 'bg-white/60 dark:bg-slate-900/50'}`}
                 aria-pressed={view === item.id}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            {[
+              { id: 'all', label: 'Show all' },
+              { id: 'production', label: 'Production only' },
+              { id: 'test', label: 'Test only' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setTestFilter(item.id)}
+                className={`tab-button ${item.id === testFilter ? 'tab-button-active' : 'bg-white/60 dark:bg-slate-900/50'}`}
+                aria-pressed={item.id === testFilter}
               >
                 {item.label}
               </button>
@@ -607,6 +686,11 @@ export default function Monitoring({ initialView = 'overview' }) {
                         {item.signal_id && (
                           <span className="rounded-full bg-sky-100 px-2 py-1 text-[10px] font-semibold text-sky-700 dark:bg-sky-500/20 dark:text-sky-200">
                             signal
+                          </span>
+                        )}
+                        {item.is_test && (
+                          <span className="rounded-full bg-violet-100 px-2 py-1 text-[10px] font-semibold text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">
+                            test
                           </span>
                         )}
                         {item.variant && (
@@ -797,6 +881,130 @@ export default function Monitoring({ initialView = 'overview' }) {
         </div>
       </div>
       </>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setTestPanelOpen((open) => !open)}
+        className="fixed bottom-6 right-6 z-40 rounded-full bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 dark:bg-white dark:text-slate-900"
+        aria-label="Open test webhooks panel"
+      >
+        🧪 Test Webhooks
+      </button>
+
+      {testPanelOpen && (
+        <div className="fixed bottom-20 right-6 z-40 w-[320px] rounded-3xl border border-slate-100 bg-white p-4 shadow-xl dark:border-slate-800 dark:bg-slate-950">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold">Quick Test</p>
+            <button
+              type="button"
+              className="text-xs text-slate-400 hover:text-slate-600"
+              onClick={() => setTestPanelOpen(false)}
+            >
+              X
+            </button>
+          </div>
+          <div className="mt-4 grid gap-3 text-xs">
+            <label className="grid gap-1">
+              <span className="muted">Symbol</span>
+              <select
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+                value={testForm.symbol}
+                onChange={(event) => setTestForm((prev) => ({ ...prev, symbol: event.target.value }))}
+              >
+                {['SPY', 'QQQ', 'SPX', 'AAPL', 'TSLA', 'MSFT'].map((symbol) => (
+                  <option key={symbol} value={symbol}>
+                    {symbol}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1">
+              <span className="muted">Timeframe</span>
+              <select
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+                value={testForm.timeframe}
+                onChange={(event) => setTestForm((prev) => ({ ...prev, timeframe: event.target.value }))}
+              >
+                {['1m', '5m', '15m', '1h', '4h', '1d'].map((tf) => (
+                  <option key={tf} value={tf}>
+                    {tf}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1">
+              <span className="muted">Signal</span>
+              <select
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+                value={testForm.signal_type}
+                onChange={(event) => setTestForm((prev) => ({ ...prev, signal_type: event.target.value }))}
+              >
+                {['buy', 'sell'].map((signal) => (
+                  <option key={signal} value={signal}>
+                    {signal}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1">
+              <span className="muted">Count</span>
+              <input
+                type="number"
+                min={1}
+                max={200}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+                value={testForm.count}
+                onChange={(event) => setTestForm((prev) => ({ ...prev, count: Number(event.target.value) }))}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => sendQuickTest(testForm)}
+              className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900"
+            >
+              {testStatus === 'loading' ? 'Sending...' : 'Send Test Webhook'}
+            </button>
+          </div>
+          <div className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800">
+            <p>Active tests: {activeTestSession ? 1 : 0}</p>
+            <p>Last test: {lastTestAt ? new Date(lastTestAt).toLocaleTimeString() : 'Never'}</p>
+          </div>
+          <div className="mt-4 grid gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() =>
+                sendQuickTest({
+                  symbols: ['SPY', 'QQQ', 'SPX'],
+                  timeframes: ['1m', '5m', '15m', '1h', '1d'],
+                  signal_types: ['buy', 'sell'],
+                  count: 30,
+                  scenario: 'mixed_trades_30',
+                  timing: 'realistic',
+                })
+              }
+              className="rounded-xl border border-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900/40"
+            >
+              🚀 Run 30 Mixed Trades
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                sendQuickTest({
+                  symbols: ['SPY', 'QQQ', 'SPX', 'AAPL', 'TSLA', 'MSFT'],
+                  timeframes: ['1m', '5m'],
+                  signal_types: ['buy', 'sell'],
+                  count: 100,
+                  scenario: 'high_volume_100',
+                  timing: 'rapid',
+                })
+              }
+              className="rounded-xl border border-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900/40"
+            >
+              📊 Simulate High Volume
+            </button>
+          </div>
+        </div>
       )}
 
       {detailOpen && (

@@ -9,6 +9,7 @@ import History from './History';
 import Settings from './Settings';
 import Monitoring from './Monitoring';
 import DecisionEnginePage from './DecisionEnginePage';
+import TestingConsole from './TestingConsole';
 
 const tabs = [
   { id: 'dashboard', label: 'Dashboard' },
@@ -17,6 +18,7 @@ const tabs = [
   { id: 'history', label: 'History' },
   { id: 'monitoring', label: 'Monitoring' },
   { id: 'decision-engines', label: 'Decision Engines' },
+  { id: 'testing', label: 'Testing' },
   { id: 'settings', label: 'Settings' },
 ];
 
@@ -53,6 +55,8 @@ export default function ClientShell() {
         return <Monitoring />;
       case 'decision-engines':
         return <DecisionEnginePage />;
+      case 'testing':
+        return <TestingConsole />;
       case 'settings':
         return <Settings />;
       default:

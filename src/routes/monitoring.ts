@@ -35,6 +35,26 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
   const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 25) : 10;
   const windowHoursParam = Number(req.query.windowHours);
   const windowHours = Number.isFinite(windowHoursParam) && windowHoursParam > 0 ? windowHoursParam : 24;
+  const testFilter = String(req.query.testFilter || 'all').toLowerCase();
+
+  const webhookFilter =
+    testFilter === 'test'
+      ? 'AND we.is_test = TRUE'
+      : testFilter === 'production'
+        ? 'AND COALESCE(we.is_test, false) = FALSE'
+        : '';
+  const signalsFilter =
+    testFilter === 'test'
+      ? 'AND s.is_test = TRUE'
+      : testFilter === 'production'
+        ? 'AND COALESCE(s.is_test, false) = FALSE'
+        : '';
+  const ordersFilter =
+    testFilter === 'test'
+      ? 'AND COALESCE(s.is_test, false) = TRUE'
+      : testFilter === 'production'
+        ? 'AND COALESCE(s.is_test, false) = FALSE'
+        : '';
 
   let recentEvents = { rows: [] as any[] };
   let summaryRows = { rows: [] as any[] };
@@ -59,46 +79,55 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
       decisionOverview, decisionByEngine, decisionQueue] =
       await Promise.all([
       db.query(
-        `SELECT event_id, request_id, signal_id, experiment_id, variant, status, error_message,
-                symbol, direction, timeframe, processing_time_ms, created_at
-         FROM webhook_events
-       WHERE created_at > NOW() - ($2::int || ' hours')::interval
-         ORDER BY created_at DESC
+        `SELECT we.event_id, we.request_id, we.signal_id, we.experiment_id, we.variant, we.status, we.error_message,
+                we.symbol, we.direction, we.timeframe, we.processing_time_ms, we.created_at, we.is_test, we.test_session_id
+         FROM webhook_events we
+       WHERE we.created_at > NOW() - ($2::int || ' hours')::interval
+         ${webhookFilter}
+         ORDER BY we.created_at DESC
        LIMIT $1`,
         [limit, windowHours]
       ),
       db.query(
-        `SELECT status, COUNT(*)::int AS count
-         FROM webhook_events
-       WHERE created_at > NOW() - ($1::int || ' hours')::interval
-         GROUP BY status`,
+        `SELECT we.status, COUNT(*)::int AS count
+         FROM webhook_events we
+       WHERE we.created_at > NOW() - ($1::int || ' hours')::interval
+         ${webhookFilter}
+         GROUP BY we.status`,
         [windowHours]
       ),
       db.query(
-        `SELECT variant, COUNT(*)::int AS count
-         FROM experiments
-       WHERE created_at > NOW() - ($1::int || ' hours')::interval
-         GROUP BY variant`,
+        `SELECT e.variant, COUNT(*)::int AS count
+         FROM experiments e
+         JOIN signals s ON s.signal_id = e.signal_id
+       WHERE e.created_at > NOW() - ($1::int || ' hours')::interval
+         ${signalsFilter}
+         GROUP BY e.variant`,
         [windowHours]
       ),
       db.query(
-        `SELECT status, COUNT(*)::int AS count
-         FROM signals
-       WHERE created_at > NOW() - ($1::int || ' hours')::interval
-         GROUP BY status`,
+        `SELECT s.status, COUNT(*)::int AS count
+         FROM signals s
+       WHERE s.created_at > NOW() - ($1::int || ' hours')::interval
+         ${signalsFilter}
+         GROUP BY s.status`,
         [windowHours]
       ),
       db.query(
-        `SELECT status, COUNT(*)::int AS count
-         FROM orders
-       WHERE created_at > NOW() - ($1::int || ' hours')::interval
-         GROUP BY status`,
+        `SELECT o.status, COUNT(*)::int AS count
+         FROM orders o
+         LEFT JOIN signals s ON s.signal_id = o.signal_id
+       WHERE o.created_at > NOW() - ($1::int || ' hours')::interval
+         ${ordersFilter}
+         GROUP BY o.status`,
         [windowHours]
       ),
       db.query(
-        `SELECT signal_id, symbol, direction, timeframe, status, created_at
-         FROM signals
-         ORDER BY created_at DESC
+        `SELECT s.signal_id, s.symbol, s.direction, s.timeframe, s.status, s.created_at
+         FROM signals s
+         WHERE 1=1
+         ${signalsFilter}
+         ORDER BY s.created_at DESC
          LIMIT 10`
       ),
       db.query(
@@ -106,13 +135,17 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
          FROM signals s
          JOIN refactored_signals rs ON rs.signal_id = s.signal_id
          WHERE s.status = 'rejected'
+         ${signalsFilter}
          ORDER BY s.created_at DESC
          LIMIT 10`
       ),
       db.query(
         `SELECT 
-           (SELECT MAX(created_at) FROM signals) AS last_signal_at,
-           (SELECT MAX(created_at) FROM orders) AS last_order_at,
+           (SELECT MAX(s.created_at) FROM signals s WHERE 1=1 ${signalsFilter}) AS last_signal_at,
+           (SELECT MAX(o.created_at)
+            FROM orders o
+            LEFT JOIN signals s ON s.signal_id = o.signal_id
+            WHERE 1=1 ${ordersFilter}) AS last_order_at,
            (SELECT MAX(fill_timestamp) FROM trades) AS last_trade_at,
            (SELECT MAX(created_at) FROM refactored_positions) AS last_position_at`
       ),
@@ -133,6 +166,7 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
          LEFT JOIN signals s ON s.signal_id = o.signal_id
          LEFT JOIN webhook_events we ON we.signal_id = o.signal_id
          WHERE o.created_at > NOW() - ($1::int || ' hours')::interval
+         ${ordersFilter}
          ORDER BY o.created_at DESC
          LIMIT 50`,
         [windowHours]
@@ -142,6 +176,7 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
          FROM orders o
          LEFT JOIN signals s ON s.signal_id = o.signal_id
          WHERE o.created_at > NOW() - ($1::int || ' hours')::interval
+         ${ordersFilter}
          GROUP BY s.symbol
          ORDER BY count DESC
          LIMIT 10`,
@@ -150,7 +185,9 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
       db.query(
         `SELECT o.status, COUNT(*)::int AS count
          FROM orders o
+         LEFT JOIN signals s ON s.signal_id = o.signal_id
          WHERE o.created_at > NOW() - ($1::int || ' hours')::interval
+         ${ordersFilter}
          GROUP BY o.status`,
         [windowHours]
       ),
@@ -159,6 +196,7 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
          FROM orders o
          LEFT JOIN signals s ON s.signal_id = o.signal_id
          WHERE o.created_at > NOW() - ($1::int || ' hours')::interval
+         ${ordersFilter}
          GROUP BY s.timeframe
          ORDER BY count DESC`,
         [windowHours]
@@ -168,6 +206,7 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
          FROM orders o
          LEFT JOIN signals s ON s.signal_id = o.signal_id
          WHERE o.created_at > NOW() - ($1::int || ' hours')::interval
+         ${ordersFilter}
          GROUP BY s.direction`,
         [windowHours]
       ),
@@ -178,7 +217,9 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
                 AVG(COALESCE(we.processing_time_ms, 0))::float AS avg_latency
          FROM orders o
          LEFT JOIN webhook_events we ON we.signal_id = o.signal_id
-         WHERE o.created_at > NOW() - ($1::int || ' hours')::interval`,
+         LEFT JOIN signals s ON s.signal_id = o.signal_id
+         WHERE o.created_at > NOW() - ($1::int || ' hours')::interval
+         ${ordersFilter}`,
         [windowHours]
       ),
       db.query(
@@ -187,15 +228,19 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
                 AVG(COALESCE(we.processing_time_ms, 0))::float AS avg_latency
          FROM orders o
          LEFT JOIN webhook_events we ON we.signal_id = o.signal_id
+         LEFT JOIN signals s ON s.signal_id = o.signal_id
          WHERE o.created_at > NOW() - ($1::int || ' hours')::interval
+         ${ordersFilter}
          GROUP BY o.engine`,
         [windowHours]
       ),
       db.query(
-        `SELECT engine, COUNT(*)::int AS count
-         FROM orders
-         WHERE status = 'pending_execution'
-         GROUP BY engine`
+        `SELECT o.engine, COUNT(*)::int AS count
+         FROM orders o
+         LEFT JOIN signals s ON s.signal_id = o.signal_id
+         WHERE o.status = 'pending_execution'
+         ${ordersFilter}
+         GROUP BY o.engine`
       ),
     ]);
   } catch (error) {
@@ -515,6 +560,8 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
         signal_type: signal.direction === 'long' ? 'buy' : 'sell',
         price: null,
         indicator_values: {},
+        is_test: signal.is_test || false,
+        test_session_id: signal.test_session_id || null,
       };
       detail.raw_webhook_payload = signal.raw_payload || null;
       detail.timestamp = detail.timestamp || signal.created_at;
