@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import { Signal, MarketContext } from './types.js';
 import { SignalSchema, MarketContextSchema } from './schemas.js';
 import { logger } from '../utils/logger.js';
+import { marketData } from '../services/market-data.js';
 
 export class SignalProcessor {
   private pool: pg.Pool;
@@ -86,18 +87,20 @@ export class SignalProcessor {
    * Includes prices, indicators, and metadata for deterministic replay
    */
   async createMarketContext(signal: Signal): Promise<MarketContext> {
-    // TODO: In production, fetch real market data from market data service
-    // For now, create a minimal context snapshot
-    
+    const candles = await marketData.getCandles(signal.symbol, signal.timeframe, 200);
+    const indicators = await marketData.getIndicators(signal.symbol, signal.timeframe);
+    const currentPrice = await marketData.getStockPrice(signal.symbol);
+    const lastVolume = candles.length > 0 ? candles[candles.length - 1].volume : 0;
+
     const context: MarketContext = {
       signal_id: signal.signal_id,
       timestamp: signal.timestamp,
       symbol: signal.symbol,
-      current_price: 1, // Will be populated by market data service
-      bid: 1,
-      ask: 1,
-      volume: 0,
-      indicators: {}, // Will be populated by indicators service
+      current_price: currentPrice,
+      bid: currentPrice,
+      ask: currentPrice,
+      volume: lastVolume,
+      indicators: indicators as unknown as Record<string, number>,
       context_hash: '', // Will be computed below
     };
 
@@ -184,12 +187,19 @@ export class SignalProcessor {
     }
   }
 
-  async updateStatus(signal_id: string, status: 'approved' | 'rejected'): Promise<void> {
+  async updateStatus(
+    signal_id: string,
+    status: 'approved' | 'rejected',
+    rejectionReason?: string | null
+  ): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query(
-        `UPDATE signals SET status = $1 WHERE signal_id = $2`,
-        [status, signal_id]
+        `UPDATE signals
+         SET status = $1,
+             rejection_reason = $3
+         WHERE signal_id = $2`,
+        [status, signal_id, rejectionReason ?? null]
       );
     } finally {
       client.release();

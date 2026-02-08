@@ -22,6 +22,7 @@ interface Config {
 
   // Market Data
   marketDataProvider: string;
+  marketDataProviderPriority: string[];
   alpacaApiKey: string;
   alpacaSecretKey: string;
   alpacaPaper: boolean;
@@ -118,6 +119,13 @@ export const config: Config = {
 
   // Market Data
   marketDataProvider: getEnvVar('MARKET_DATA_PROVIDER', 'alpaca'),
+  marketDataProviderPriority: getEnvVar(
+    'MARKET_DATA_PROVIDER_PRIORITY',
+    'alpaca,polygon,marketdata,twelvedata'
+  )
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean),
   alpacaApiKey: getEnvVar('ALPACA_API_KEY', ''),
   alpacaSecretKey: getEnvVar('ALPACA_SECRET_KEY', ''),
   alpacaPaper: getEnvVarBoolean('ALPACA_PAPER', true),
@@ -171,7 +179,7 @@ export const config: Config = {
 
   // Orchestrator
   enableOrchestrator: getEnvVarBoolean('ENABLE_ORCHESTRATOR', true),
-  enableDualPaperTrading: getEnvVarBoolean('ENABLE_DUAL_PAPER_TRADING', true),
+  enableDualPaperTrading: getEnvVarBoolean('ENABLE_DUAL_PAPER_TRADING', false),
 
   // Logging
   logLevel: getEnvVar('LOG_LEVEL', 'info'),

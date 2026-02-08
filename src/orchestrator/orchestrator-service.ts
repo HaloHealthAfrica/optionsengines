@@ -48,8 +48,9 @@ export class OrchestratorService {
       const enrichment = await buildSignalEnrichment(signal);
       const market_context = await this.createMarketContext(signal);
       const experiment = await this.createExperiment(signal);
+      signal.experiment_id = experiment.experiment_id;
       const policy = await this.getExecutionPolicy(experiment.experiment_id);
-      const { engineA, engineB } = await this.distributeSignal(signal, market_context);
+      const { engineA, engineB } = await this.distributeSignal(signal, market_context, experiment);
 
       const engine_a_recommendation = this.applyPolicyToRecommendation(
         experiment.experiment_id,
@@ -79,8 +80,20 @@ export class OrchestratorService {
         enrichment
       );
 
-      await this.updateSignalStatus(signal, policy, engine_a_recommendation, engine_b_recommendation);
-      await this.createPaperOrders(signal, experiment.experiment_id, engine_a_recommendation, engine_b_recommendation);
+      await this.updateSignalStatus(
+        signal,
+        policy,
+        engine_a_recommendation,
+        engine_b_recommendation,
+        enrichment
+      );
+      await this.createPaperOrders(
+        signal,
+        experiment.experiment_id,
+        engine_a_recommendation,
+        engine_b_recommendation,
+        enrichment
+      );
       await this.handleShadowExecution(signal, engine_b_recommendation, experiment.experiment_id);
 
       await this.signalProcessor.markProcessed(signal.signal_id, experiment.experiment_id);
@@ -120,8 +133,14 @@ export class OrchestratorService {
     return this.policyEngine.getExecutionPolicy(experiment_id, 'v1.0');
   }
 
-  async distributeSignal(signal: Signal, context: MarketContext) {
-    return this.engineCoordinator.invokeBoth(signal, context);
+  async distributeSignal(signal: Signal, context: MarketContext, experiment: { variant: 'A' | 'B' }) {
+    if (experiment.variant === 'A') {
+      const engineA = await this.engineCoordinator.invokeEngineA(signal, context);
+      return { engineA, engineB: null };
+    }
+
+    const engineB = await this.engineCoordinator.invokeEngineB(signal, context);
+    return { engineA: null, engineB };
   }
 
   async trackOutcome(outcome: TradeOutcome): Promise<void> {
@@ -135,13 +154,30 @@ export class OrchestratorService {
     signal: Signal,
     policy: { executed_engine: 'A' | 'B' | null },
     engineA?: TradeRecommendation | null,
-    engineB?: TradeRecommendation | null
+    engineB?: TradeRecommendation | null,
+    enrichment?: { enrichedData: Record<string, any>; riskResult: Record<string, any>; rejectionReason: string | null }
   ): Promise<void> {
+    const risk = enrichment?.riskResult || {};
+    const positionLimitExceeded =
+      Number(risk.openPositions ?? 0) >= Number(risk.maxOpenPositions ?? Number.POSITIVE_INFINITY) ||
+      Number(risk.openSymbolPositions ?? 0) >= Number(risk.maxPositionsPerSymbol ?? Number.POSITIVE_INFINITY);
+    const hasRejection = Boolean(
+      enrichment?.rejectionReason ||
+        risk.marketOpen === false ||
+        positionLimitExceeded
+    );
+
     const executed = policy.executed_engine;
     const recommendation = executed === 'A' ? engineA : executed === 'B' ? engineB : null;
-    const shouldTrade = Boolean(executed && recommendation && !recommendation.is_shadow);
+    const shouldTrade = Boolean(
+      executed &&
+        recommendation &&
+        !recommendation.is_shadow &&
+        !hasRejection
+    );
     const status = shouldTrade ? 'approved' : 'rejected';
-    await this.signalProcessor.updateStatus(signal.signal_id, status);
+    const rejectionReason = hasRejection ? enrichment?.rejectionReason || 'risk_rejected' : null;
+    await this.signalProcessor.updateStatus(signal.signal_id, status, rejectionReason);
   }
 
   private async handleShadowExecution(
@@ -149,10 +185,7 @@ export class OrchestratorService {
     recommendation: TradeRecommendation | undefined,
     experimentId: string
   ): Promise<void> {
-    if (config.enableDualPaperTrading) {
-      return;
-    }
-    if (!this.shadowExecutor || !recommendation?.is_shadow) {
+    if (!this.shadowExecutor || !recommendation?.is_shadow || !config.enableShadowExecution) {
       return;
     }
 
@@ -181,9 +214,24 @@ export class OrchestratorService {
     signal: Signal,
     experimentId: string,
     engineA?: TradeRecommendation | null,
-    engineB?: TradeRecommendation | null
+    engineB?: TradeRecommendation | null,
+    enrichment?: { enrichedData: Record<string, any>; riskResult: Record<string, any>; rejectionReason: string | null }
   ): Promise<void> {
     if (config.appMode !== 'PAPER') {
+      return;
+    }
+
+    const signalStatus = await db.query(
+      `SELECT status, rejection_reason FROM signals WHERE signal_id = $1 LIMIT 1`,
+      [signal.signal_id]
+    );
+    const statusRow = signalStatus.rows[0];
+    if (!statusRow || statusRow.status !== 'approved' || statusRow.rejection_reason) {
+      logger.warn('Skipping order creation (signal rejected)', {
+        signal_id: signal.signal_id,
+        status: statusRow?.status ?? 'unknown',
+        rejection_reason: statusRow?.rejection_reason ?? enrichment?.rejectionReason ?? null,
+      });
       return;
     }
 

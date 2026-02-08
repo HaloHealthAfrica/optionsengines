@@ -24,7 +24,7 @@ export class MarketDataService {
   private readonly maxFailures: number = 5;
   private readonly resetTimeout: number = 60000; // 60 seconds
   private readonly maxRetries: number = 2;
-  private readonly providerPriority: Provider[] = ['marketdata', 'twelvedata', 'alpaca', 'polygon'];
+  private providerPriority: Provider[] = [];
   private readonly streamEnabled: boolean = config.polygonWsEnabled;
 
   constructor() {
@@ -32,6 +32,13 @@ export class MarketDataService {
     this.polygon = new PolygonClient();
     this.marketData = new MarketDataClient();
     this.twelveData = new TwelveDataClient();
+
+    const normalizedProviders = config.marketDataProviderPriority
+      .map((value) => value.toLowerCase())
+      .filter((value) => ['alpaca', 'polygon', 'marketdata', 'twelvedata'].includes(value));
+    this.providerPriority = (normalizedProviders.length > 0
+      ? normalizedProviders
+      : ['alpaca', 'polygon', 'marketdata', 'twelvedata']) as Provider[];
 
     // Initialize circuit breakers for all providers
     this.providerPriority.forEach((provider) => {
@@ -215,6 +222,11 @@ export class MarketDataService {
           }
         );
 
+        if (!this.isValidPrice(symbol, price)) {
+          logger.warn('Rejected implausible price', { symbol, price, provider: providerName });
+          continue;
+        }
+
         this.recordSuccess(providerName);
         cache.set(cacheKey, price, 30);
         logger.info(`Price fetched from ${providerName}`, { symbol, price });
@@ -226,6 +238,25 @@ export class MarketDataService {
     }
 
     throw new Error('All market data providers failed');
+  }
+
+  private isValidPrice(symbol: string, price: number): boolean {
+    if (!Number.isFinite(price) || price <= 0) {
+      return false;
+    }
+
+    const bounds: Record<string, { min: number; max: number }> = {
+      SPY: { min: 300, max: 700 },
+      QQQ: { min: 200, max: 600 },
+      IWM: { min: 100, max: 300 },
+    };
+    const normalized = symbol.toUpperCase();
+    const range = bounds[normalized];
+    if (range && (price < range.min || price > range.max)) {
+      return false;
+    }
+
+    return true;
   }
 
   /**
