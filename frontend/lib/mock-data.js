@@ -170,6 +170,86 @@ export const monitoringStatus = {
       { provider: 'twelvedata', capacity: 800, currentTokens: 780, utilizationPercent: '2.50%', requestsAllowed: 10, requestsBlocked: 0 },
     ],
   },
+  decision_engine: {
+    overview: {
+      decisions_per_min: 3.2,
+      decisions_per_hour: 192,
+      success_rate: 94.2,
+      failure_rate: 5.8,
+      avg_latency_ms: 32,
+      utilization_pct: 76,
+      failures_24h: 14,
+      total_decisions: 234,
+    },
+    comparison: {
+      A: {
+        decisions: 233,
+        success_rate: 95,
+        avg_latency_ms: 30,
+        queue_depth: 2,
+        volume_label: 'Primary',
+        volume_reason: 'Higher availability',
+      },
+      B: {
+        decisions: 1,
+        success_rate: 100,
+        avg_latency_ms: 45,
+        queue_depth: 0,
+        volume_label: 'Low activity',
+        volume_reason: 'Sparse signals',
+      },
+    },
+    pipeline: {
+      signals_received: 256,
+      decisions_made: 234,
+      orders_placed: 220,
+      queue_depth_a: 2,
+      queue_depth_b: 0,
+      stuck_stage: 'None',
+    },
+    breakdown: {
+      by_symbol: [
+        { label: 'SPY', value: 78 },
+        { label: 'QQQ', value: 55 },
+        { label: 'AAPL', value: 42 },
+        { label: 'TSLA', value: 28 },
+      ],
+      by_decision: [
+        { label: 'Buy', value: 132 },
+        { label: 'Sell', value: 64 },
+        { label: 'Hold', value: 24 },
+        { label: 'Close', value: 14 },
+      ],
+      by_outcome: [
+        { label: 'Success', value: 202 },
+        { label: 'Failed', value: 14 },
+        { label: 'Pending', value: 18 },
+      ],
+      by_timeframe: [
+        { label: '1m', value: 44 },
+        { label: '5m', value: 120 },
+        { label: '15m', value: 52 },
+        { label: '1h', value: 18 },
+      ],
+    },
+    decision_log: Array.from({ length: 12 }).map((_, idx) => {
+      const symbol = symbols[idx % symbols.length];
+      const decisionTypes = ['Buy', 'Sell', 'Hold', 'Close'];
+      const outcomes = ['Success', 'Pending', 'Failed'];
+      const engine = idx % 3 === 0 ? 'B' : 'A';
+      return {
+        id: `dec-${1000 + idx}`,
+        timestamp: new Date(Date.now() - idx * 60 * 1000).toISOString(),
+        symbol,
+        timeframe: idx % 2 === 0 ? '5m' : '15m',
+        decision: decisionTypes[idx % decisionTypes.length],
+        confidence: 60 + (idx % 5) * 8,
+        outcome: outcomes[idx % outcomes.length],
+        processing_ms: 24 + idx * 3,
+        engine,
+      };
+    }),
+  },
 };
 
 export const winLossDistribution = [

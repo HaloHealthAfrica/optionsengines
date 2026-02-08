@@ -135,6 +135,37 @@ export async function backendGetMonitoringStatus(token, limit = 25) {
   return response.json();
 }
 
+export async function backendGetMonitoringDetail(token, type, id) {
+  const response = await backendFetch(`/monitoring/details?type=${type}&id=${id}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch monitoring detail (${response.status})`);
+  }
+
+  return response.json();
+}
+
+export async function backendGetRelatedWebhooks(token, symbol, timeframe, hours = 24) {
+  const response = await backendFetch(
+    `/monitoring/related?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}&hours=${hours}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch related webhooks (${response.status})`);
+  }
+
+  return response.json();
+}
+
 export async function backendGetOrders(token) {
   const response = await backendFetch('/orders', {
     headers: {

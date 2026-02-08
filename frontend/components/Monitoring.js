@@ -14,6 +14,290 @@ function statusBadge(status) {
   return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200';
 }
 
+function engineBadge(engine) {
+  const value = String(engine || '').toUpperCase();
+  if (value === 'A') return 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200';
+  if (value === 'B') return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200';
+  return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200';
+}
+
+function outcomeBadge(outcome) {
+  const value = String(outcome || '').toLowerCase();
+  if (value === 'success' || value === 'filled') {
+    return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200';
+  }
+  if (value === 'failed' || value === 'rejected') {
+    return 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200';
+  }
+  if (value === 'pending') {
+    return 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200';
+  }
+  return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200';
+}
+
+function statusTone(status) {
+  const value = String(status || '').toLowerCase();
+  if (['accepted', 'filled', 'success'].includes(value)) return 'bg-emerald-100 text-emerald-700';
+  if (['duplicate'].includes(value)) return 'bg-amber-100 text-amber-700';
+  if (['pending', 'pending_execution'].includes(value)) return 'bg-sky-100 text-sky-700';
+  if (value.includes('invalid') || value === 'error' || value === 'failed' || value === 'rejected') {
+    return 'bg-rose-100 text-rose-700';
+  }
+  return 'bg-slate-100 text-slate-700';
+}
+
+function formatWhen(value) {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+async function copyText(value) {
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(String(value));
+  } catch {
+    const input = document.createElement('textarea');
+    input.value = String(value);
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    document.body.removeChild(input);
+  }
+}
+
+function DecisionEngineDetails({ detail, onDecisionClick }) {
+  const overview = detail?.overview || {};
+  const comparison = detail?.comparison || {};
+  const breakdown = detail?.breakdown || {};
+  const pipeline = detail?.pipeline || {};
+  const decisions = detail?.decision_log || [];
+  const bySymbol = breakdown.by_symbol || [];
+  const byDecision = breakdown.by_decision || [];
+  const byOutcome = breakdown.by_outcome || [];
+  const byTimeframe = breakdown.by_timeframe || [];
+
+  return (
+    <>
+      <section className="flex flex-col gap-6">
+      <div>
+        <h2 className="text-lg font-semibold">Decision Engine Details</h2>
+        <p className="muted text-sm">Engine performance, decision logs, and pipeline health.</p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="card p-5">
+          <p className="text-sm font-medium">Processing rate</p>
+          <p className="mt-3 text-2xl font-semibold">{overview.decisions_per_min ?? '--'} / min</p>
+          <p className="muted text-xs">{overview.decisions_per_hour ?? '--'} / hour</p>
+        </div>
+        <div className="card p-5">
+          <p className="text-sm font-medium">Success rate</p>
+          <p className="mt-3 text-2xl font-semibold">{overview.success_rate ?? '--'}%</p>
+          <p className="muted text-xs">Failures: {overview.failure_rate ?? '--'}%</p>
+        </div>
+        <div className="card p-5">
+          <p className="text-sm font-medium">Avg decision latency</p>
+          <p className="mt-3 text-2xl font-semibold">{overview.avg_latency_ms ?? '--'} ms</p>
+          <p className="muted text-xs">Utilization: {overview.utilization_pct ?? '--'}%</p>
+        </div>
+        <div className="card p-5">
+          <p className="text-sm font-medium">Failures (24h)</p>
+          <p className="mt-3 text-2xl font-semibold">{overview.failures_24h ?? '--'}</p>
+          <p className="muted text-xs">Decisions: {overview.total_decisions ?? '--'}</p>
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1.4fr,1fr]">
+        <div className="card p-6">
+          <h3 className="text-base font-semibold">Decision Log</h3>
+          <div className="mt-4 overflow-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs uppercase text-slate-400">
+                <tr>
+                  <th className="pb-2">Time</th>
+                  <th className="pb-2">Symbol</th>
+                  <th className="pb-2">TF</th>
+                  <th className="pb-2">Decision</th>
+                  <th className="pb-2">Confidence</th>
+                  <th className="pb-2">Outcome</th>
+                  <th className="pb-2">ms</th>
+                  <th className="pb-2">Engine</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
+                {decisions.map((row) => (
+                  <tr
+                    key={row.id}
+                    className={onDecisionClick ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900/40' : ''}
+                    onClick={() => {
+                      if (onDecisionClick && row.experiment_id) {
+                        onDecisionClick(row.experiment_id);
+                      }
+                    }}
+                  >
+                    <td className="py-3 text-xs text-slate-500">
+                      {row.timestamp ? new Date(row.timestamp).toLocaleString() : '--'}
+                    </td>
+                    <td className="py-3 font-medium">{row.symbol}</td>
+                    <td className="py-3">{row.timeframe}</td>
+                    <td className="py-3">{row.decision}</td>
+                    <td className="py-3">{row.confidence ?? '--'}%</td>
+                    <td className="py-3">
+                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${outcomeBadge(row.outcome)}`}>
+                        {row.outcome}
+                      </span>
+                    </td>
+                    <td className="py-3">{row.processing_ms ?? '--'}</td>
+                    <td className="py-3">
+                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${engineBadge(row.engine)}`}>
+                        Engine {row.engine}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {decisions.length === 0 && (
+                  <tr>
+                    <td className="py-4 text-sm text-slate-500" colSpan={8}>
+                      No decision activity yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-6">
+          <div className="card p-6">
+            <h3 className="text-base font-semibold">Engine Comparison</h3>
+            <div className="mt-4 grid gap-3 text-sm">
+              {['A', 'B'].map((engine) => {
+                const stats = comparison[engine] || {};
+                return (
+                  <div key={engine} className="rounded-2xl border border-slate-100 p-4 dark:border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold">Engine {engine}</p>
+                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${engineBadge(engine)}`}>
+                        {stats.volume_label ?? 'Active'}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid gap-1 text-xs text-slate-500">
+                      <div className="flex items-center justify-between">
+                        <span>Decisions</span>
+                        <span className="text-slate-700 dark:text-slate-200">{stats.decisions ?? '--'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Success rate</span>
+                        <span className="text-slate-700 dark:text-slate-200">{stats.success_rate ?? '--'}%</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Avg latency</span>
+                        <span className="text-slate-700 dark:text-slate-200">{stats.avg_latency_ms ?? '--'} ms</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Queue depth</span>
+                        <span className="text-slate-700 dark:text-slate-200">{stats.queue_depth ?? '--'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Why volume differs?</span>
+                        <span className="text-slate-700 dark:text-slate-200">{stats.volume_reason ?? '--'}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="card p-6">
+            <h3 className="text-base font-semibold">Processing Pipeline</h3>
+            <div className="mt-4 grid gap-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span>Signals received</span>
+                <span className="font-semibold">{pipeline.signals_received ?? '--'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Decisions made</span>
+                <span className="font-semibold">{pipeline.decisions_made ?? '--'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Orders placed</span>
+                <span className="font-semibold">{pipeline.orders_placed ?? '--'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Queue depth A</span>
+                <span className="font-semibold">{pipeline.queue_depth_a ?? '--'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Queue depth B</span>
+                <span className="font-semibold">{pipeline.queue_depth_b ?? '--'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Stuck stage</span>
+                <span className="font-semibold">{pipeline.stuck_stage ?? '--'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="card p-6">
+          <h3 className="text-base font-semibold">Decision Breakdown</h3>
+          <div className="mt-4 grid gap-4 text-sm">
+            <div>
+              <p className="muted text-xs">By symbol</p>
+              <div className="mt-2 grid gap-2">
+                {bySymbol.map((row) => (
+                  <div key={row.label} className="flex items-center justify-between">
+                    <span>{row.label}</span>
+                    <span className="font-semibold">{row.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="muted text-xs">By decision type</p>
+              <div className="mt-2 grid gap-2">
+                {byDecision.map((row) => (
+                  <div key={row.label} className="flex items-center justify-between">
+                    <span>{row.label}</span>
+                    <span className="font-semibold">{row.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="muted text-xs">By outcome</p>
+              <div className="mt-2 grid gap-2">
+                {byOutcome.map((row) => (
+                  <div key={row.label} className="flex items-center justify-between">
+                    <span>{row.label}</span>
+                    <span className="font-semibold">{row.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="card p-6">
+          <h3 className="text-base font-semibold">Timeframe Distribution</h3>
+          <div className="mt-4 grid gap-2 text-sm">
+            {byTimeframe.map((row) => (
+              <div key={row.label} className="flex items-center justify-between">
+                <span>{row.label}</span>
+                <span className="font-semibold">{row.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function Monitoring() {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('idle');
@@ -21,6 +305,14 @@ export default function Monitoring() {
   const [activeFilter, setActiveFilter] = useState('all');
   const [dataSource, setDataSource] = useState('unknown');
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [view, setView] = useState('overview');
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailStatus, setDetailStatus] = useState('idle');
+  const [detailData, setDetailData] = useState(null);
+  const [detailError, setDetailError] = useState(null);
+  const [detailType, setDetailType] = useState(null);
+  const [detailId, setDetailId] = useState(null);
+  const [relatedWebhooks, setRelatedWebhooks] = useState([]);
 
   const loadData = useCallback(async () => {
     setStatus('loading');
@@ -39,6 +331,87 @@ export default function Monitoring() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const openDetail = useCallback((type, id, eventSnapshot) => {
+    if (!type || !id) return;
+    setDetailType(type);
+    setDetailId(id);
+    setDetailOpen(true);
+    setDetailError(null);
+    if (eventSnapshot) {
+      setSelectedEvent(eventSnapshot);
+    }
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    setDetailOpen(false);
+    setDetailData(null);
+    setDetailStatus('idle');
+    setDetailError(null);
+    setRelatedWebhooks([]);
+  }, []);
+
+  const loadDetail = useCallback(async (type, id) => {
+    if (!type || !id) return;
+    setDetailStatus('loading');
+    try {
+      const response = await fetch(`/api/monitoring/detail?type=${type}&id=${id}`, {
+        cache: 'no-store',
+      });
+      if (!response.ok) throw new Error('Failed');
+      const payload = await response.json();
+      setDetailData(payload);
+      setDetailStatus('success');
+    } catch (error) {
+      setDetailStatus('error');
+      setDetailError('Failed to load transaction details.');
+    }
+  }, []);
+
+  const loadRelated = useCallback(async (symbol, timeframe) => {
+    if (!symbol || !timeframe) return;
+    try {
+      const response = await fetch(
+        `/api/monitoring/related?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`,
+        { cache: 'no-store' }
+      );
+      if (!response.ok) return;
+      const payload = await response.json();
+      setRelatedWebhooks(payload.related_webhooks || []);
+    } catch {
+      setRelatedWebhooks([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!detailOpen) return;
+    loadDetail(detailType, detailId);
+  }, [detailOpen, detailType, detailId, loadDetail]);
+
+  useEffect(() => {
+    if (!detailOpen) return;
+    const handler = (event) => {
+      if (event.key === 'Escape') {
+        closeDetail();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', handler);
+      document.body.style.overflow = '';
+    };
+  }, [detailOpen, closeDetail]);
+
+  useEffect(() => {
+    if (!detailOpen || !detailData?.order_data) return;
+    const status = String(detailData.order_data.order_status || '').toLowerCase();
+    if (!['pending', 'pending_execution'].includes(status)) return;
+    const interval = setInterval(() => {
+      loadDetail(detailType, detailId);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [detailOpen, detailData, detailType, detailId, loadDetail]);
 
   const summary = data?.webhooks?.summary_24h || {};
   const ws = data?.websocket || {};
@@ -61,6 +434,13 @@ export default function Monitoring() {
     return item.status === activeFilter;
   });
 
+  const detailSignal = detailData?.signal_data || {};
+  const detailOrder = detailData?.order_data || {};
+  const detailDecision = detailData?.decision_engine || {};
+  const detailExperiment = detailData?.experiment || {};
+  const detailStatusValue = detailData?.status || detailOrder.order_status || '--';
+  const detailTitle = detailSignal.symbol ? `${detailSignal.symbol} · ${detailSignal.timeframe || '--'}` : 'Transaction';
+
   return (
     <section className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -73,6 +453,22 @@ export default function Monitoring() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex gap-2">
+            {[
+              { id: 'overview', label: 'Overview' },
+              { id: 'decision-engines', label: 'Decision engines' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setView(item.id)}
+                className={`tab-button ${view === item.id ? 'tab-button-active' : 'bg-white/60 dark:bg-slate-900/50'}`}
+                aria-pressed={view === item.id}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
           <div className="flex gap-2">
             {limits.map((item) => (
               <button
@@ -102,6 +498,12 @@ export default function Monitoring() {
         <div className="card p-6 text-sm text-rose-500">Unable to load monitoring data.</div>
       )}
 
+      {view === 'decision-engines' && (
+        <DecisionEngineDetails detail={data?.decision_engine} onDecisionClick={(id) => openDetail('decision', id)} />
+      )}
+
+      {view === 'overview' && (
+      <>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <button
           type="button"
@@ -188,7 +590,7 @@ export default function Monitoring() {
                   <tr
                     key={item.event_id || item.request_id}
                     className="cursor-pointer text-slate-700 transition hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900/40"
-                    onClick={() => setSelectedEvent(item)}
+                    onClick={() => openDetail('webhook', item.event_id, item)}
                   >
                     <td className="py-3 text-xs text-slate-500">
                       {item.created_at ? new Date(item.created_at).toLocaleString() : '--'}
@@ -362,7 +764,8 @@ export default function Monitoring() {
               {recentSignals.slice(0, 6).map((item) => (
                 <div
                   key={item.signal_id}
-                  className="flex items-center justify-between rounded-2xl border border-slate-100 px-3 py-2 dark:border-slate-800"
+                  className="flex cursor-pointer items-center justify-between rounded-2xl border border-slate-100 px-3 py-2 transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/40"
+                  onClick={() => openDetail('signal', item.signal_id)}
                 >
                   <span className="font-medium">{item.symbol || '--'}</span>
                   <span className="muted">{item.timeframe || '--'}</span>
@@ -380,7 +783,8 @@ export default function Monitoring() {
               {recentRejections.slice(0, 6).map((item) => (
                 <div
                   key={item.signal_id}
-                  className="flex items-center justify-between rounded-2xl border border-slate-100 px-3 py-2 dark:border-slate-800"
+                  className="flex cursor-pointer items-center justify-between rounded-2xl border border-slate-100 px-3 py-2 transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/40"
+                  onClick={() => openDetail('signal', item.signal_id)}
                 >
                   <span className="font-medium">{item.symbol || '--'}</span>
                   <span className="muted">{item.timeframe || '--'}</span>
@@ -393,6 +797,306 @@ export default function Monitoring() {
           </div>
         </div>
       </div>
-    </section>
+      </>
+      )}
+      </section>
+      {detailOpen && (
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/40" onClick={closeDetail} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="drawer-title"
+            className="absolute right-0 top-0 flex h-full w-full max-w-[600px] flex-col bg-white shadow-xl dark:bg-slate-950"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 dark:border-slate-800">
+              <div>
+                <p className="text-xs text-slate-500">Webhook Details</p>
+                <h2 id="drawer-title" className="text-lg font-semibold">
+                  {detailTitle}
+                </h2>
+                <p className="text-xs text-slate-500">{detailData?.timestamp ? formatWhen(detailData.timestamp) : '--'}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200"
+                  onClick={() => copyText(detailData?.webhook_id || detailSignal.signal_id || detailOrder.order_id)}
+                >
+                  Copy ID
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200"
+                  onClick={() => copyText(JSON.stringify(detailData || {}, null, 2))}
+                >
+                  Export JSON
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200"
+                  onClick={closeDetail}
+                  aria-label="Close drawer"
+                >
+                  X
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              {detailStatus === 'loading' && (
+                <div className="rounded-2xl border border-slate-200 p-4 text-sm text-slate-500">
+                  Loading transaction details...
+                </div>
+              )}
+              {detailStatus === 'error' && (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">
+                  {detailError || 'Failed to load detail.'}
+                  <button
+                    type="button"
+                    className="mt-3 rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600"
+                    onClick={() => loadDetail(detailType, detailId)}
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {detailStatus === 'success' && (
+                <div className="flex flex-col gap-6">
+                  <div className="rounded-2xl border border-slate-100 bg-white/80 p-5 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-900/50">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusTone(detailStatusValue)}`}>
+                        {detailStatusValue}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        Processing: {detailData?.processing_time_ms ?? '--'} ms
+                      </span>
+                    </div>
+                    <div className="mt-4 grid gap-3 text-xs text-slate-500 sm:grid-cols-3">
+                      <div>
+                        <p className="text-xs uppercase">Decision</p>
+                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                          {detailDecision.decision || '--'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase">Confidence</p>
+                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                          {detailDecision.confidence_score ?? '--'}%
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase">Order status</p>
+                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                          {detailOrder.order_status || '--'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-100 p-5 dark:border-slate-800">
+                    <h3 className="text-sm font-semibold">Signal Data</h3>
+                    <div className="mt-3 grid gap-2 text-xs text-slate-500">
+                      <div className="flex items-center justify-between">
+                        <span>Symbol</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{detailSignal.symbol || '--'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Timeframe</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{detailSignal.timeframe || '--'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Signal Type</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{detailSignal.signal_type || '--'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Signal ID</span>
+                        <span className="font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                          {detailSignal.signal_id || '--'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-100 p-5 dark:border-slate-800">
+                    <h3 className="text-sm font-semibold">Decision Engine</h3>
+                    <div className="mt-3 grid gap-2 text-xs text-slate-500">
+                      <div className="flex items-center justify-between">
+                        <span>Engine</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{detailDecision.engine || '--'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Decision</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{detailDecision.decision || '--'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Strategy</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">
+                          {detailDecision.strategy_used || '--'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Processing</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">
+                          {detailDecision.decision_time_ms ?? '--'} ms
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-100 p-5 dark:border-slate-800">
+                    <h3 className="text-sm font-semibold">Order Details</h3>
+                    {detailOrder.order_id ? (
+                      <div className="mt-3 grid gap-2 text-xs text-slate-500">
+                        <div className="flex items-center justify-between">
+                          <span>Order</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">{detailOrder.order_id}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Type</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">{detailOrder.order_type}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Status</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">{detailOrder.order_status}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Placed</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">
+                            {formatWhen(detailOrder.placed_at)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Filled</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">
+                            {formatWhen(detailOrder.filled_at)}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-500">No order placed.</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-100 p-5 dark:border-slate-800">
+                    <h3 className="text-sm font-semibold">Experiment</h3>
+                    {detailExperiment.experiment_id ? (
+                      <div className="mt-3 grid gap-2 text-xs text-slate-500">
+                        <div className="flex items-center justify-between">
+                          <span>Experiment ID</span>
+                          <span className="font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                            {detailExperiment.experiment_id}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Variant</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">
+                            {detailExperiment.variant || '--'}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-500">No experiment attached.</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-100 p-5 text-xs dark:border-slate-800">
+                    <h3 className="text-sm font-semibold">Errors & Warnings</h3>
+                    <div className="mt-3 grid gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-amber-500">Warnings</p>
+                        <p className="text-xs text-slate-500">
+                          {detailData?.warnings?.length ? detailData.warnings.join(', ') : 'None'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-rose-500">Errors</p>
+                        <p className="text-xs text-slate-500">
+                          {detailData?.errors?.length ? detailData.errors.join(', ') : 'None'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-100 p-5 text-xs dark:border-slate-800">
+                    <h3 className="text-sm font-semibold">Processing Timeline</h3>
+                    <div className="mt-3 grid gap-2">
+                      {(detailData?.audit_trail || []).map((event, idx) => (
+                        <div key={`${event.event}-${idx}`} className="flex items-center justify-between">
+                          <span>{formatWhen(event.timestamp)}</span>
+                          <span className="text-slate-700 dark:text-slate-200">{event.event}</span>
+                          <span className="text-slate-400">{event.system}</span>
+                        </div>
+                      ))}
+                      {(detailData?.audit_trail || []).length === 0 && (
+                        <p className="text-xs text-slate-500">No audit trail available.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-100 p-5 text-xs dark:border-slate-800">
+                    <h3 className="text-sm font-semibold">Related Actions</h3>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200"
+                        onClick={() => loadRelated(detailSignal.symbol, detailSignal.timeframe)}
+                      >
+                        View Similar Signals
+                      </button>
+                      {detailOrder.order_id && (
+                        <button
+                          type="button"
+                          className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200"
+                          onClick={() => openDetail('order', detailOrder.order_id)}
+                        >
+                          View Order Details
+                        </button>
+                      )}
+                      {detailSignal.signal_id && (
+                        <button
+                          type="button"
+                          className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200"
+                          onClick={() => openDetail('signal', detailSignal.signal_id)}
+                        >
+                          View Signal
+                        </button>
+                      )}
+                    </div>
+                    {relatedWebhooks.length > 0 && (
+                      <div className="mt-3 grid gap-2">
+                        {relatedWebhooks.map((item) => (
+                          <button
+                            type="button"
+                            key={item.event_id}
+                            className="flex items-center justify-between rounded-xl border border-slate-100 px-3 py-2 text-left text-xs dark:border-slate-800"
+                            onClick={() => openDetail('webhook', item.event_id)}
+                          >
+                            <span>{formatWhen(item.created_at)}</span>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusTone(item.status)}`}>
+                              {item.status}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <details className="rounded-2xl border border-slate-100 p-5 text-xs dark:border-slate-800">
+                    <summary className="cursor-pointer text-sm font-semibold">Raw Webhook Payload</summary>
+                    <pre className="mt-3 max-h-60 overflow-auto rounded-xl bg-slate-50 p-3 text-[11px] text-slate-600 dark:bg-slate-900/60 dark:text-slate-200">
+                      {detailData?.raw_webhook_payload
+                        ? JSON.stringify(detailData.raw_webhook_payload, null, 2).slice(0, 100000)
+                        : 'No payload available.'}
+                    </pre>
+                  </details>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
