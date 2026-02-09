@@ -19,6 +19,8 @@ import ordersRoutes from './routes/orders.js';
 import historyRoutes from './routes/history.js';
 import testingRoutes from './routes/testing.js';
 import webhookSchemaRoutes from './routes/webhooks.js';
+import marketIntelRoutes from './routes/market-intel.js';
+import marketWebhookRoutes from './routes/market-webhooks.js';
 
 const app: Express = express();
 
@@ -57,11 +59,13 @@ app.use('/dashboard', dashboardRoutes);
 app.use('/monitoring', monitoringRoutes);
 app.use('/orders', ordersRoutes);
 app.use('/history', historyRoutes);
+app.use('/intel', marketIntelRoutes);
 app.use('/admin/cache', cacheInvalidation.createAdminRoutes());
 app.use('/api', optionsEnginesRoutes);
 app.use('/', engine2Routes);
 app.use('/api/v1/testing', testingRoutes);
 app.use('/api/v1/webhooks', webhookSchemaRoutes);
+app.use('/api/webhooks', marketWebhookRoutes);
 
 // Root endpoint
 app.get('/', (_req: Request, res: Response) => {

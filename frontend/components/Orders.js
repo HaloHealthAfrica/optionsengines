@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import { Filter, SlidersHorizontal } from 'lucide-react';
+import { useRealtime } from '../hooks/useRealtime';
 
 const tabs = [
   { id: 'active', label: 'Active Orders' },
@@ -26,6 +27,7 @@ export default function Orders() {
   const [filter, setFilter] = useState('all');
   const [selectedItem, setSelectedItem] = useState(null);
   const [dataSource, setDataSource] = useState('unknown');
+  const { positions: livePositions, riskState } = useRealtime();
 
   useEffect(() => {
     const loadOrders = async () => {
@@ -45,6 +47,12 @@ export default function Orders() {
     };
     loadOrders();
   }, []);
+
+  useEffect(() => {
+    if (Array.isArray(livePositions)) {
+      setPositions(livePositions);
+    }
+  }, [livePositions]);
 
   const rows = useMemo(() => {
     const source = activeTab === 'active' ? orders : activeTab === 'filled' ? trades : positions;
@@ -73,6 +81,17 @@ export default function Orders() {
           <p className="muted text-sm">Execution tracking and trade history.</p>
           <p className="muted text-xs">Data source: {dataSource}</p>
         </div>
+        {riskState && (
+          <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+            <p className="font-semibold text-slate-700 dark:text-slate-200">Risk Snapshot</p>
+            <div className="mt-1 flex flex-wrap gap-3">
+              <span>Open: {riskState.open_positions ?? 0}</span>
+              <span>Max: {riskState.max_open_positions ?? '--'}</span>
+              <span>Unrealized: {Number(riskState.unrealized_pnl ?? 0).toFixed(2)}</span>
+              <span>Realized: {Number(riskState.realized_pnl ?? 0).toFixed(2)}</span>
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60">
             <Filter size={14} className="text-slate-400" />

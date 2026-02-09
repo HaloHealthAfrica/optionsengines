@@ -33,6 +33,8 @@ interface Config {
   polygonWsEnabled: boolean;
   twelveDataApiKey: string;
   marketDataApiKey: string;
+  unusualWhalesApiKey: string;
+  unusualWhalesGammaUrl: string;
 
   // Performance
   slowRequestMs: number;
@@ -41,6 +43,8 @@ interface Config {
   // Rate Limiting
   alpacaRateLimit: number;
   twelveDataRateLimit: number;
+  unusualWhalesRateLimitPerMinute: number;
+  unusualWhalesRateLimitPerDay: number;
 
   // Worker Intervals
   signalProcessorInterval: number;
@@ -76,6 +80,9 @@ interface Config {
   // Orchestrator
   enableOrchestrator: boolean;
   enableDualPaperTrading: boolean;
+
+  // Market webhook pipeline
+  enableMarketWebhookPipeline: boolean;
 
   // Logging
   logLevel: string;
@@ -121,7 +128,7 @@ export const config: Config = {
   marketDataProvider: getEnvVar('MARKET_DATA_PROVIDER', 'alpaca'),
   marketDataProviderPriority: getEnvVar(
     'MARKET_DATA_PROVIDER_PRIORITY',
-    'alpaca,polygon,marketdata,twelvedata'
+    'alpaca,twelvedata'
   )
     .split(',')
     .map((value) => value.trim())
@@ -137,6 +144,8 @@ export const config: Config = {
   twelveDataApiKey: getEnvVar('TWELVE_DATA_API_KEY', ''),
   marketDataApiKey:
     getEnvVar('MARKET_DATA_API_KEY', '') || getEnvVar('MARKETDATA_API_KEY', ''),
+  unusualWhalesApiKey: getEnvVar('UNUSUAL_WHALES_API_KEY', ''),
+  unusualWhalesGammaUrl: getEnvVar('UNUSUAL_WHALES_GAMMA_URL', ''),
 
   // Performance
   slowRequestMs: getEnvVarNumber('SLOW_REQUEST_MS', 2000),
@@ -145,6 +154,8 @@ export const config: Config = {
   // Rate Limiting
   alpacaRateLimit: getEnvVarNumber('ALPACA_RATE_LIMIT', 200),
   twelveDataRateLimit: getEnvVarNumber('TWELVE_DATA_RATE_LIMIT', 800),
+  unusualWhalesRateLimitPerMinute: getEnvVarNumber('UNUSUAL_WHALES_RATE_LIMIT_PER_MINUTE', 120),
+  unusualWhalesRateLimitPerDay: getEnvVarNumber('UNUSUAL_WHALES_RATE_LIMIT_PER_DAY', 15000),
 
   // Worker Intervals
   signalProcessorInterval: getEnvVarNumber('SIGNAL_PROCESSOR_INTERVAL', 30000),
@@ -180,6 +191,9 @@ export const config: Config = {
   // Orchestrator
   enableOrchestrator: getEnvVarBoolean('ENABLE_ORCHESTRATOR', true),
   enableDualPaperTrading: getEnvVarBoolean('ENABLE_DUAL_PAPER_TRADING', false),
+
+  // Market webhook pipeline
+  enableMarketWebhookPipeline: getEnvVarBoolean('ENABLE_MARKET_WEBHOOK_PIPELINE', true),
 
   // Logging
   logLevel: getEnvVar('LOG_LEVEL', 'info'),

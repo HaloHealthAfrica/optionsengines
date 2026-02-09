@@ -1,6 +1,8 @@
 // Trading Orchestrator Agent - Core Type Definitions
 // These types define the data structures used throughout the orchestrator system
 
+import { MarketIntelContext } from '../types/index.js';
+
 /**
  * Signal - A normalized trading opportunity from TradingView webhooks
  */
@@ -31,6 +33,7 @@ export interface MarketContext {
   ask: number;
   volume: number;
   indicators: Record<string, number>; // Technical indicators (RSI, MACD, etc.)
+  marketIntel?: MarketIntelContext;
   context_hash: string; // SHA-256 of context for audit
   created_at?: Date;
 }

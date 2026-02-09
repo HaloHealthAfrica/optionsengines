@@ -11,7 +11,9 @@ type ShutdownDeps = {
   db: { close: () => Promise<void> };
   cache: { close: () => void };
   redisCache?: { disconnect: () => Promise<void> };
+  webhookIngestion?: { disconnect: () => Promise<void> };
   cacheWarmer?: { stop: () => Promise<void> };
+  stopRealtimeWebSocketServer?: () => void;
   logger?: typeof defaultLogger;
   exit?: (code: number) => void;
   timeoutMs?: number;
@@ -54,6 +56,12 @@ export function createShutdownHandler(deps: ShutdownDeps) {
       deps.cache.close();
       if (deps.redisCache) {
         await deps.redisCache.disconnect();
+      }
+      if (deps.webhookIngestion) {
+        await deps.webhookIngestion.disconnect();
+      }
+      if (deps.stopRealtimeWebSocketServer) {
+        deps.stopRealtimeWebSocketServer();
       }
       clearTimeout(shutdownTimeout);
       logger.info('Graceful shutdown completed');

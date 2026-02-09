@@ -4,6 +4,7 @@ import { marketData } from '../services/market-data.js';
 import { logger } from '../utils/logger.js';
 import { sleep } from '../utils/sleep.js';
 import { errorTracker } from '../services/error-tracker.service.js';
+import { publishPositionUpdate, publishRiskUpdate } from '../services/realtime-updates.service.js';
 
 interface OpenPosition {
   position_id: string;
@@ -109,6 +110,9 @@ export class PositionRefresherWorker {
              WHERE position_id = $5`,
             [currentPrice, unrealizedPnl, positionPnlPercent, new Date(), position.position_id]
           );
+
+          await publishPositionUpdate(position.position_id);
+          await publishRiskUpdate();
 
           updated += 1;
         } catch (error) {

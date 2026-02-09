@@ -33,6 +33,17 @@ export const MarketContextSchema = z.object({
   ask: z.number().positive(),
   volume: z.number().int().nonnegative(),
   indicators: z.record(z.number()),
+  marketIntel: z
+    .object({
+      gamma: z
+        .object({
+          regime: z.enum(['LONG_GAMMA', 'SHORT_GAMMA', 'NEUTRAL']),
+          zeroGammaLevel: z.number().optional(),
+          distanceATR: z.number().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   context_hash: z.string().length(64), // SHA-256 hash
   created_at: z.date().optional(),
 });

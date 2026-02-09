@@ -3,6 +3,7 @@ import { db } from '../services/database.service.js';
 import { marketData } from '../services/market-data.js';
 import { logger } from '../utils/logger.js';
 import { sleep } from '../utils/sleep.js';
+import { publishPositionUpdate, publishRiskUpdate } from '../services/realtime-updates.service.js';
 
 interface OpenPosition {
   position_id: string;
@@ -152,6 +153,8 @@ export class ExitMonitorWorker {
              WHERE position_id = $4`,
             ['closing', exitReason, now, position.position_id]
           );
+          await publishPositionUpdate(position.position_id);
+          await publishRiskUpdate();
 
           await db.query(
             `INSERT INTO orders (

@@ -33,12 +33,15 @@ export class MarketDataService {
     this.marketData = new MarketDataClient();
     this.twelveData = new TwelveDataClient();
 
-    const normalizedProviders = config.marketDataProviderPriority
+    const priorityInput = Array.isArray(config.marketDataProviderPriority)
+      ? config.marketDataProviderPriority
+      : [];
+    const normalizedProviders = priorityInput
       .map((value) => value.toLowerCase())
       .filter((value) => ['alpaca', 'polygon', 'marketdata', 'twelvedata'].includes(value));
     this.providerPriority = (normalizedProviders.length > 0
       ? normalizedProviders
-      : ['alpaca', 'polygon', 'marketdata', 'twelvedata']) as Provider[];
+      : ['alpaca', 'twelvedata']) as Provider[];
 
     // Initialize circuit breakers for all providers
     this.providerPriority.forEach((provider) => {

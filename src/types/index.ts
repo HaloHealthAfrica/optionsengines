@@ -218,6 +218,40 @@ export interface GexData {
   levels: GexStrikeLevel[];
 }
 
+export type GammaRegime = 'LONG_GAMMA' | 'SHORT_GAMMA' | 'NEUTRAL';
+export type GammaExpectedBehavior = 'MEAN_REVERT' | 'EXPANSION';
+
+export interface GammaByStrike {
+  strike: number;
+  netGamma: number;
+}
+
+export interface UnusualWhalesGammaSnapshot {
+  symbol: string;
+  netGamma: number;
+  zeroGammaLevel?: number;
+  gammaByStrike?: GammaByStrike[];
+  timestamp: Date;
+  source: 'unusualwhales';
+}
+
+export interface GammaRegimeInsight {
+  regime: GammaRegime;
+  zeroGammaLevel?: number;
+  distanceToZeroGammaATR?: number;
+  expectedBehavior: GammaExpectedBehavior;
+}
+
+export interface MarketIntelGammaContext {
+  regime: GammaRegime;
+  zeroGammaLevel?: number;
+  distanceATR?: number;
+}
+
+export interface MarketIntelContext {
+  gamma?: MarketIntelGammaContext;
+}
+
 export interface OptionsFlowEntry {
   optionSymbol: string;
   side: 'call' | 'put';
@@ -243,6 +277,7 @@ export interface MarketData {
   sessionContext: SessionContext;
   gex?: GexData | null;
   optionsFlow?: OptionsFlowSummary | null;
+  marketIntel?: MarketIntelContext;
   risk?: {
     positionLimitExceeded?: boolean;
     exposureExceeded?: boolean;

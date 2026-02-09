@@ -15,6 +15,7 @@ import { SignalSchema, MarketContextSchema } from './schemas.js';
 import { logger } from '../utils/logger.js';
 import { marketData } from '../services/market-data.js';
 import { indicators as indicatorService } from '../services/indicators.js';
+import { marketIntelService } from '../services/market-intel/market-intel.service.js';
 
 export class SignalProcessor {
   private pool: pg.Pool;
@@ -94,6 +95,7 @@ export class SignalProcessor {
     let currentPrice = 0;
     let lastVolume = 0;
     let latestIndicators: Record<string, number> = {};
+    let marketIntel: MarketContext['marketIntel'];
 
     try {
       currentPrice = await marketData.getStockPrice(signal.symbol);
@@ -154,6 +156,18 @@ export class SignalProcessor {
       };
     }
 
+    try {
+      const atr = Number.isFinite(latestIndicators.atr) ? latestIndicators.atr : undefined;
+      const price = Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : undefined;
+      marketIntel =
+        (await marketIntelService.getMarketIntelContext(signal.symbol, {
+          currentPrice: price,
+          atr,
+        })) ?? undefined;
+    } catch (error) {
+      logger.warn('Market intel unavailable for context', { error, symbol: signal.symbol });
+    }
+
     const context: MarketContext = {
       signal_id: signal.signal_id,
       timestamp: signal.timestamp,
@@ -163,6 +177,7 @@ export class SignalProcessor {
       ask: currentPrice,
       volume: lastVolume,
       indicators: latestIndicators,
+      marketIntel,
       context_hash: '', // Will be computed below
     };
 

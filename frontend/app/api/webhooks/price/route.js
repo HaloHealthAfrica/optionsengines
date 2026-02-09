@@ -1,18 +1,5 @@
 const BACKEND_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
-function resolveWebhookTarget(requestUrl, request) {
-  const url = new URL(requestUrl);
-  const typeParam = url.searchParams.get('type');
-  const headerType = request.headers.get('x-webhook-type');
-  const type = (typeParam || headerType || '').toLowerCase();
-
-  if (['flow', 'price', 'chain'].includes(type)) {
-    return `/api/webhooks/${type}`;
-  }
-
-  return '/webhook';
-}
-
 export async function POST(request) {
   const rawBody = await request.text();
   const signature = request.headers.get('x-webhook-signature');
@@ -26,8 +13,7 @@ export async function POST(request) {
     headers['x-webhook-signature'] = signature;
   }
 
-  const targetPath = resolveWebhookTarget(request.url, request);
-  const response = await fetch(`${BACKEND_URL}${targetPath}`, {
+  const response = await fetch(`${BACKEND_URL}/api/webhooks/price`, {
     method: 'POST',
     headers,
     body: rawBody,

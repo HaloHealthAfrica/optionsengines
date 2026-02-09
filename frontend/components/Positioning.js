@@ -6,6 +6,52 @@ import { Search } from 'lucide-react';
 const defaultSymbols = ['SPY', 'QQQ', 'AAPL', 'TSLA', 'MSFT', 'NVDA', 'AMD', 'META', 'NFLX', 'IWM'];
 const tabs = ['Overview', 'GEX Analysis', 'Max Pain', 'Options Flow', 'Signal Correlation'];
 
+function formatGammaRegime(regime) {
+  const value = String(regime || '').toUpperCase();
+  if (value === 'LONG_GAMMA') return 'Long Gamma';
+  if (value === 'SHORT_GAMMA') return 'Short Gamma';
+  if (value === 'NEUTRAL') return 'Neutral';
+  return '--';
+}
+
+function gammaBadgeClass(regime) {
+  const value = String(regime || '').toUpperCase();
+  if (value === 'LONG_GAMMA') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200';
+  if (value === 'SHORT_GAMMA') return 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200';
+  if (value === 'NEUTRAL') return 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200';
+  return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200';
+}
+
+function formatExpectedBehavior(value, regime) {
+  const fallback =
+    String(regime || '').toUpperCase() === 'LONG_GAMMA' ? 'MEAN_REVERT' : 'EXPANSION';
+  const behavior = String(value || fallback).toUpperCase();
+  if (behavior === 'MEAN_REVERT') return 'Mean Reversion';
+  if (behavior === 'EXPANSION') return 'Expansion';
+  return '--';
+}
+
+function formatZeroGamma(level) {
+  if (!Number.isFinite(Number(level))) return '--';
+  return Number(level).toFixed(2);
+}
+
+function formatDistanceATR(value) {
+  if (!Number.isFinite(Number(value))) return '--';
+  const rounded = Math.round(Number(value) * 100) / 100;
+  return `${rounded} ATR`;
+}
+
+function isNoTradeDay(gamma) {
+  if (!gamma || String(gamma.regime || '').toUpperCase() !== 'SHORT_GAMMA') {
+    return false;
+  }
+  if (!Number.isFinite(Number(gamma.distanceATR))) {
+    return false;
+  }
+  return Math.abs(Number(gamma.distanceATR)) <= 0.5;
+}
+
 export default function Positioning() {
   const [symbol, setSymbol] = useState('SPY');
   const [query, setQuery] = useState('');
@@ -165,6 +211,44 @@ export default function Positioning() {
                   <p className="text-sm text-slate-500 dark:text-slate-400">Max Pain Strike</p>
                   <p className="text-4xl font-semibold">{data.maxPain.strike}</p>
                   <p className="muted mt-2 text-xs">{data.maxPain.note}</p>
+                </div>
+              </div>
+            )}
+
+            {(activeTab === 'Overview' || activeTab === 'GEX Analysis') && (
+              <div className="card p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-lg font-semibold">Gamma Regime</h2>
+                  <span
+                    className={`rounded-full px-2 py-1 text-xs font-semibold ${gammaBadgeClass(
+                      data.gamma?.regime
+                    )}`}
+                  >
+                    {formatGammaRegime(data.gamma?.regime)}
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-3 text-sm">
+                  <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 dark:bg-slate-900/60">
+                    <div className="flex items-center justify-between">
+                      <span className="muted text-xs">Zero Gamma Level</span>
+                      <span className="font-semibold">{formatZeroGamma(data.gamma?.zeroGammaLevel)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="muted text-xs">Distance to Zero</span>
+                      <span className="font-semibold">{formatDistanceATR(data.gamma?.distanceATR)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="muted text-xs">Expected Behavior</span>
+                      <span className="font-semibold">
+                        {formatExpectedBehavior(data.gamma?.expectedBehavior, data.gamma?.regime)}
+                      </span>
+                    </div>
+                  </div>
+                  {isNoTradeDay(data.gamma) && (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+                      Market structure not supportive today
+                    </div>
+                  )}
                 </div>
               </div>
             )}

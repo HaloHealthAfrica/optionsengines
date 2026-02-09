@@ -33,6 +33,7 @@ type ConfigSummary = {
   enableVariantB: boolean;
   enableOrchestrator: boolean;
   enableDualPaperTrading: boolean;
+  enableMarketWebhookPipeline: boolean;
 };
 
 function maskDatabaseUrl(url: string): string {
@@ -89,6 +90,9 @@ export function logConfigSummary(summary: ConfigSummary = config): void {
     orchestrator: {
       enableOrchestrator: summary.enableOrchestrator,
       enableDualPaperTrading: summary.enableDualPaperTrading,
+    },
+    marketWebhooks: {
+      enableMarketWebhookPipeline: summary.enableMarketWebhookPipeline,
     },
   });
 }

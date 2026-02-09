@@ -4,6 +4,7 @@ import { marketData } from '../services/market-data.js';
 import { logger } from '../utils/logger.js';
 import { sleep } from '../utils/sleep.js';
 import { errorTracker } from '../services/error-tracker.service.js';
+import { publishPositionUpdate, publishRiskUpdate } from '../services/realtime-updates.service.js';
 
 interface PendingOrder {
   order_id: string;
@@ -162,8 +163,10 @@ export class PaperExecutorWorker {
                WHERE position_id = $4`,
               ['closed', fillTimestamp, realizedPnl, existingPosition.position_id]
             );
+            await publishPositionUpdate(existingPosition.position_id);
+            await publishRiskUpdate();
           } else {
-            await db.query(
+            const insertResult = await db.query(
               `INSERT INTO refactored_positions (
                 symbol,
                 option_symbol,
@@ -177,7 +180,8 @@ export class PaperExecutorWorker {
                 status,
                 entry_timestamp,
                 last_updated
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)`,
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+              RETURNING position_id`,
               [
                 order.symbol,
                 order.option_symbol,
@@ -192,6 +196,11 @@ export class PaperExecutorWorker {
                 fillTimestamp,
               ]
             );
+            const positionId = insertResult.rows[0]?.position_id;
+            if (positionId) {
+              await publishPositionUpdate(positionId);
+              await publishRiskUpdate();
+            }
           }
 
           filled += 1;

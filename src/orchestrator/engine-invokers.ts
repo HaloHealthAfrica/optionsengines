@@ -21,15 +21,32 @@ import { SatylandSubAgent } from '../agents/subagents/satyland-sub-agent.js';
 import { eventLogger } from '../services/event-logger.service.js';
 import { EnrichedSignal, MarketData, Indicators } from '../types/index.js';
 
+function applyGammaSizingMultiplier(
+  baseSize: number,
+  regime?: MarketContext['marketIntel'] extends infer T
+    ? T extends { gamma?: { regime?: infer R } }
+      ? R
+      : undefined
+    : undefined
+): number {
+  const normalized = String(regime || '').toUpperCase();
+  if (normalized === 'LONG_GAMMA') return baseSize * 1.25;
+  if (normalized === 'SHORT_GAMMA') return baseSize * 0.6;
+  return baseSize;
+}
+
 async function buildRecommendation(
   engine: 'A' | 'B',
-  signal: Signal
+  signal: Signal,
+  context?: MarketContext
 ): Promise<TradeRecommendation | null> {
   try {
     const { strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction);
     const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
 
-    const quantity = Math.max(1, Math.floor(config.maxPositionSize));
+    const baseSize = Math.max(1, Math.floor(config.maxPositionSize));
+    const adjustedSize = applyGammaSizingMultiplier(baseSize, context?.marketIntel?.gamma?.regime);
+    const quantity = Math.max(1, Math.floor(adjustedSize));
 
     return {
       experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
@@ -48,7 +65,10 @@ async function buildRecommendation(
   }
 }
 
-async function buildEngineBRecommendation(signal: Signal): Promise<TradeRecommendation | null> {
+async function buildEngineBRecommendation(
+  signal: Signal,
+  context?: MarketContext
+): Promise<TradeRecommendation | null> {
   try {
     const enrichment = await buildSignalEnrichment(signal);
     let candles: any[] = [];
@@ -117,6 +137,7 @@ async function buildEngineBRecommendation(signal: Signal): Promise<TradeRecommen
       },
       gex: enrichment.enrichedData.gex || null,
       optionsFlow: enrichment.enrichedData.optionsFlow || null,
+      marketIntel: context?.marketIntel,
       risk: {
         positionLimitExceeded,
         exposureExceeded: false,
@@ -180,7 +201,9 @@ async function buildEngineBRecommendation(signal: Signal): Promise<TradeRecommen
 
     const { strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction);
     const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
-    const quantity = Math.max(1, Math.floor(config.maxPositionSize));
+    const baseSize = Math.max(1, Math.floor(config.maxPositionSize));
+    const adjustedSize = applyGammaSizingMultiplier(baseSize, context?.marketIntel?.gamma?.regime);
+    const quantity = Math.max(1, Math.floor(adjustedSize));
 
     return {
       experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
@@ -200,11 +223,11 @@ async function buildEngineBRecommendation(signal: Signal): Promise<TradeRecommen
 }
 
 export function createEngineAInvoker() {
-  return async (signal: Signal, _context: MarketContext) =>
-    buildRecommendation('A', signal);
+  return async (signal: Signal, context: MarketContext) =>
+    buildRecommendation('A', signal, context);
 }
 
 export function createEngineBInvoker() {
-  return async (signal: Signal, _context: MarketContext) =>
-    buildEngineBRecommendation(signal);
+  return async (signal: Signal, context: MarketContext) =>
+    buildEngineBRecommendation(signal, context);
 }

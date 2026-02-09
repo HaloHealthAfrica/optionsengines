@@ -138,6 +138,20 @@ export async function backendGetMonitoringStatus(token, limit = 25, testFilter =
   return response.json();
 }
 
+export async function backendGetIntelLatest(token, symbol = 'SPY') {
+  const response = await backendFetch(`/intel/latest?symbol=${encodeURIComponent(symbol)}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch market intel snapshot');
+  }
+
+  return response.json();
+}
+
 export async function backendGetWebhookSchema(token) {
   const response = await backendFetch('/api/v1/webhooks/schema', {
     headers: {

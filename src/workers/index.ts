@@ -9,6 +9,7 @@ import { logger } from '../utils/logger.js';
 import { OrchestratorWorker } from './orchestrator-worker.js';
 import { createOrchestratorService } from '../orchestrator/container.js';
 import { createEngineAInvoker, createEngineBInvoker } from '../orchestrator/engine-invokers.js';
+import { MarketWebhookPipelineWorker } from './market-webhook-pipeline.js';
 
 const signalProcessor = new SignalProcessorWorker();
 const orderCreator = new OrderCreatorWorker();
@@ -22,6 +23,7 @@ const orchestrator = new OrchestratorWorker(
   }),
   config.orchestratorIntervalMs
 );
+const marketWebhookPipeline = new MarketWebhookPipelineWorker();
 
 let workersStarted = false;
 
@@ -40,6 +42,9 @@ export function startWorkers(): void {
   } else {
     signalProcessor.start(config.signalProcessorInterval);
     orderCreator.start(config.orderCreatorInterval);
+  }
+  if (config.enableMarketWebhookPipeline) {
+    marketWebhookPipeline.start();
   }
   paperExecutor.start(config.paperExecutorInterval);
   positionRefresher.start(config.positionRefresherInterval);
@@ -61,6 +66,9 @@ export async function stopWorkers(timeoutMs: number = 30000): Promise<void> {
     config.enableOrchestrator
       ? Promise.resolve()
       : orderCreator.stopAndDrain(timeoutMs),
+    config.enableMarketWebhookPipeline
+      ? marketWebhookPipeline.stopAndDrain(timeoutMs)
+      : Promise.resolve(),
     paperExecutor.stopAndDrain(timeoutMs),
     positionRefresher.stopAndDrain(timeoutMs),
     exitMonitor.stopAndDrain(timeoutMs),

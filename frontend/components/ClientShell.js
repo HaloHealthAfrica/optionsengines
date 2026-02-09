@@ -10,6 +10,7 @@ import Settings from './Settings';
 import Monitoring from './Monitoring';
 import DecisionEnginePage from './DecisionEnginePage';
 import TestingConsole from './TestingConsole';
+import IntelConsole from './IntelConsole';
 
 const tabs = [
   { id: 'dashboard', label: 'Dashboard' },
@@ -17,6 +18,7 @@ const tabs = [
   { id: 'orders', label: 'Orders' },
   { id: 'history', label: 'History' },
   { id: 'monitoring', label: 'Monitoring' },
+  { id: 'intel-console', label: 'Intel Console' },
   { id: 'decision-engines', label: 'Decision Engines' },
   { id: 'testing', label: 'Testing' },
   { id: 'settings', label: 'Settings' },
@@ -53,6 +55,8 @@ export default function ClientShell() {
         return <History />;
       case 'monitoring':
         return <Monitoring />;
+      case 'intel-console':
+        return <IntelConsole />;
       case 'decision-engines':
         return <DecisionEnginePage />;
       case 'testing':

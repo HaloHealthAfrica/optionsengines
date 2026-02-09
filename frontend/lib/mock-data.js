@@ -68,6 +68,12 @@ export const positioningData = {
     call: '$1.8B',
     put: '$600M',
   },
+  gamma: {
+    regime: 'LONG_GAMMA',
+    zeroGammaLevel: 445.2,
+    expectedBehavior: 'MEAN_REVERT',
+    distanceATR: 0.35,
+  },
   optionsFlow: {
     premium: '$420M',
     bullish: 72,
@@ -268,5 +274,27 @@ export function getPositioningForSymbol(symbol) {
   return {
     symbol,
     ...positioningData,
+  };
+}
+
+export function getMarketIntelSnapshot(symbol) {
+  const gamma = positioningData.gamma;
+  const noTradeDay =
+    gamma?.regime === 'SHORT_GAMMA' &&
+    Number.isFinite(Number(gamma?.distanceATR)) &&
+    Math.abs(Number(gamma?.distanceATR)) <= 0.5;
+
+  return {
+    symbol,
+    timestamp: new Date().toISOString(),
+    allowTrading: !noTradeDay,
+    message: noTradeDay ? 'Market structure not supportive today' : undefined,
+    gamma: {
+      regime: gamma?.regime ?? 'NEUTRAL',
+      zeroGammaLevel: gamma?.zeroGammaLevel,
+      distanceATR: gamma?.distanceATR,
+      expectedBehavior: gamma?.expectedBehavior ?? 'EXPANSION',
+      noTradeDay,
+    },
   };
 }
