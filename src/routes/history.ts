@@ -104,6 +104,7 @@ router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
       winRate: `${winRate.toFixed(1)}%`,
       profitFactor: profitFactor.toFixed(2),
       avgHold: formatDays(avgHoldDays),
+      totalTrades: total,
     },
     timeline,
     distribution,

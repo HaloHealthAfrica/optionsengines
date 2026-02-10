@@ -102,23 +102,119 @@ export async function backendGetDashboard(token) {
   return data;
 }
 
+function formatNotional(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return '--';
+  const sign = numberValue < 0 ? '-' : '';
+  const absValue = Math.abs(numberValue);
+
+  if (absValue >= 1_000_000_000) {
+    return `${sign}$${(absValue / 1_000_000_000).toFixed(1)}B`;
+  }
+  if (absValue >= 1_000_000) {
+    return `${sign}$${(absValue / 1_000_000).toFixed(1)}M`;
+  }
+  if (absValue >= 1_000) {
+    return `${sign}$${(absValue / 1_000).toFixed(1)}K`;
+  }
+  return `${sign}$${absValue.toFixed(0)}`;
+}
+
+function formatStrike(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return '--';
+  return `$${numberValue.toFixed(2)}`;
+}
+
+function clamp(num, min, max) {
+  return Math.min(max, Math.max(min, num));
+}
+
 export async function backendGetPositioning(token, symbol = 'SPY') {
   console.log('[Backend API] Fetching positioning data for:', symbol);
-  
-  const response = await backendFetch(`/positioning/gex?symbol=${symbol}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-  
-  if (!response.ok) {
-    console.error('[Backend API] Positioning fetch failed:', response.status);
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+  };
+
+  const [gexResponse, flowResponse, maxPainResponse, correlationResponse] = await Promise.all([
+    backendFetch(`/positioning/gex?symbol=${symbol}`, { headers }),
+    backendFetch(`/positioning/options-flow?symbol=${symbol}&limit=100`, { headers }),
+    backendFetch(`/positioning/max-pain?symbol=${symbol}`, { headers }),
+    backendFetch(`/positioning/signal-correlation?symbol=${symbol}`, { headers }),
+  ]);
+
+  if (!gexResponse.ok) {
+    console.error('[Backend API] Positioning GEX fetch failed:', gexResponse.status);
     throw new Error('Failed to fetch positioning data');
   }
-  
-  const data = await response.json();
+
+  const gexPayload = await gexResponse.json();
+  const flowPayload = flowResponse.ok ? await flowResponse.json() : { data: { entries: [] } };
+  const maxPainPayload = maxPainResponse.ok ? await maxPainResponse.json() : { data: null };
+  const correlationPayload = correlationResponse.ok ? await correlationResponse.json() : { data: null };
+
+  const gex = gexPayload?.data || {};
+  const flow = flowPayload?.data || {};
+  const maxPain = maxPainPayload?.data || {};
+  const correlation = correlationPayload?.data || {};
+
+  const callVolume = Array.isArray(flow.entries)
+    ? flow.entries.filter((entry) => entry.side === 'call').reduce((sum, entry) => sum + Number(entry.volume || 0), 0)
+    : 0;
+  const putVolume = Array.isArray(flow.entries)
+    ? flow.entries.filter((entry) => entry.side === 'put').reduce((sum, entry) => sum + Number(entry.volume || 0), 0)
+    : 0;
+  const totalVolume = callVolume + putVolume;
+  const bullish = totalVolume > 0 ? Math.round((callVolume / totalVolume) * 100) : 0;
+  const bearish = totalVolume > 0 ? 100 - bullish : 0;
+  const totalPremium = Array.isArray(flow.entries)
+    ? flow.entries.reduce((sum, entry) => sum + Number(entry.premium || 0), 0)
+    : 0;
+
+  const dealerPosition = String(gex.dealerPosition || '').toLowerCase();
+  const gammaRegime =
+    dealerPosition === 'long_gamma'
+      ? 'LONG_GAMMA'
+      : dealerPosition === 'short_gamma'
+        ? 'SHORT_GAMMA'
+        : 'NEUTRAL';
+  const expectedBehavior = gammaRegime === 'LONG_GAMMA' ? 'MEAN_REVERT' : 'EXPANSION';
+
+  const correlationScore = clamp(Number(correlation.correlationScore || 0), 0, 1);
+  const correlationValues = [
+    { label: 'GEX vs Price', value: correlationScore, color: 'bg-sky-400' },
+    { label: 'Flow vs Momentum', value: clamp(correlationScore * 0.9, 0, 1), color: 'bg-emerald-400' },
+    { label: 'Volume vs Volatility', value: clamp(correlationScore * 0.75, 0, 1), color: 'bg-fuchsia-400' },
+  ];
+
+  const response = {
+    symbol,
+    gex: {
+      total: formatNotional(gex.netGex ?? gex.totalCallGex + gex.totalPutGex),
+      call: formatNotional(gex.totalCallGex),
+      put: formatNotional(gex.totalPutGex),
+    },
+    gamma: {
+      regime: gammaRegime,
+      zeroGammaLevel: gex.zeroGammaLevel ?? null,
+      expectedBehavior,
+      distanceATR: null,
+    },
+    optionsFlow: {
+      premium: formatNotional(totalPremium),
+      bullish,
+      bearish,
+    },
+    maxPain: {
+      strike: formatStrike(maxPain.maxPainStrike),
+      note: maxPain.maxPainStrike ? 'Highest open interest concentration' : 'No max pain data',
+    },
+    correlation: correlationValues,
+  };
+
   console.log('[Backend API] Positioning data received');
-  return data;
+  return response;
 }
 
 export async function backendGetMonitoringStatus(token, limit = 25, testFilter = 'all') {

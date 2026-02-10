@@ -4,6 +4,9 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCcw } from 'lucide-react';
 import MetricCard from './MetricCard';
+import DataSourceBanner from './DataSourceBanner';
+import DataFreshnessIndicator from './DataFreshnessIndicator';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 const Chart = dynamic(() => import('./Chart'), { ssr: false });
 
@@ -14,6 +17,7 @@ export default function Dashboard() {
   const [status, setStatus] = useState('idle');
   const [range, setRange] = useState('6M');
   const [dataSource, setDataSource] = useState('unknown');
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   const loadData = useCallback(async () => {
     setStatus('loading');
@@ -24,6 +28,7 @@ export default function Dashboard() {
       const payload = await response.json();
       setData(payload);
       setStatus('success');
+      setLastUpdated(Date.now());
     } catch (error) {
       setStatus('error');
     }
@@ -32,6 +37,8 @@ export default function Dashboard() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useAutoRefresh(loadData, 30000, true);
 
   const filteredPerformance = useMemo(() => {
     if (!data?.performance) return [];
@@ -76,6 +83,9 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      <DataSourceBanner source={dataSource} />
+      <DataFreshnessIndicator lastUpdated={lastUpdated} />
 
       {status === 'error' && (
         <div className="card p-6 text-sm text-rose-500">

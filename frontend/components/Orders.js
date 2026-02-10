@@ -1,8 +1,11 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { Filter, SlidersHorizontal } from 'lucide-react';
 import { useRealtime } from '../hooks/useRealtime';
+import DataSourceBanner from './DataSourceBanner';
+import DataFreshnessIndicator from './DataFreshnessIndicator';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 const tabs = [
   { id: 'active', label: 'Active Orders' },
@@ -27,10 +30,10 @@ export default function Orders() {
   const [filter, setFilter] = useState('all');
   const [selectedItem, setSelectedItem] = useState(null);
   const [dataSource, setDataSource] = useState('unknown');
+  const [lastUpdated, setLastUpdated] = useState(null);
   const { positions: livePositions, riskState } = useRealtime();
 
-  useEffect(() => {
-    const loadOrders = async () => {
+  const loadOrders = useCallback(async () => {
       setStatus('loading');
       try {
         const response = await fetch('/api/orders');
@@ -41,18 +44,39 @@ export default function Orders() {
         setTrades(payload.trades || []);
         setPositions(payload.positions || []);
         setStatus('success');
+        setLastUpdated(Date.now());
       } catch (error) {
         setStatus('error');
       }
-    };
+    }, []);
+
+  useEffect(() => {
     loadOrders();
-  }, []);
+  }, [loadOrders]);
+
+  useAutoRefresh(loadOrders, 30000, true);
 
   useEffect(() => {
     if (Array.isArray(livePositions)) {
       setPositions(livePositions);
     }
   }, [livePositions]);
+
+  const duplicateWarning = useMemo(() => {
+    const seen = new Set();
+    const duplicates = new Set();
+    const all = [...orders, ...trades];
+    all.forEach((item) => {
+      const id = item?.id || item?.order_id;
+      if (!id) return;
+      if (seen.has(id)) {
+        duplicates.add(id);
+      } else {
+        seen.add(id);
+      }
+    });
+    return duplicates.size ? Array.from(duplicates) : null;
+  }, [orders, trades]);
 
   const rows = useMemo(() => {
     const source = activeTab === 'active' ? orders : activeTab === 'filled' ? trades : positions;
@@ -121,6 +145,14 @@ export default function Orders() {
           </div>
         </div>
       </div>
+
+      <DataSourceBanner source={dataSource} />
+      <DataFreshnessIndicator lastUpdated={lastUpdated} />
+      {duplicateWarning && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+          Duplicate order IDs detected: {duplicateWarning.join(', ')}
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Orders tabs">
         {tabs.map((tab) => (

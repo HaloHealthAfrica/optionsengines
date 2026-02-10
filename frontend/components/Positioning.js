@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
+import DataSourceBanner from './DataSourceBanner';
+import DataFreshnessIndicator from './DataFreshnessIndicator';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 const defaultSymbols = ['SPY', 'QQQ', 'AAPL', 'TSLA', 'MSFT', 'NVDA', 'AMD', 'META', 'NFLX', 'IWM'];
 const tabs = ['Overview', 'GEX Analysis', 'Max Pain', 'Options Flow', 'Signal Correlation'];
@@ -58,6 +61,8 @@ export default function Positioning() {
   const [activeTab, setActiveTab] = useState('Overview');
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('idle');
+  const [dataSource, setDataSource] = useState('unknown');
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -68,21 +73,29 @@ export default function Positioning() {
     return () => clearTimeout(timer);
   }, [query]);
 
-  useEffect(() => {
-    const fetchData = async () => {
+  const fetchData = useMemo(
+    () => async () => {
       setStatus('loading');
       try {
         const response = await fetch(`/api/positioning/${symbol}`);
         if (!response.ok) throw new Error('Failed to load positioning');
+        setDataSource(response.headers.get('x-data-source') || 'unknown');
         const payload = await response.json();
         setData(payload);
         setStatus('success');
+        setLastUpdated(Date.now());
       } catch (error) {
         setStatus('error');
       }
-    };
+    },
+    [symbol]
+  );
+
+  useEffect(() => {
     fetchData();
-  }, [symbol]);
+  }, [fetchData]);
+
+  useAutoRefresh(fetchData, 30000, true);
 
   const suggestions = useMemo(() => {
     if (!query) return defaultSymbols;
@@ -95,6 +108,7 @@ export default function Positioning() {
         <div>
           <h1 className="text-2xl font-semibold">Market Positioning</h1>
           <p className="muted text-sm">Real-time sentiment, flow, and GEX context.</p>
+          <p className="muted text-xs">Data source: {dataSource}</p>
         </div>
         <div className="relative w-full max-w-xs">
           <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
@@ -129,6 +143,9 @@ export default function Positioning() {
           )}
         </div>
       </div>
+
+      <DataSourceBanner source={dataSource} />
+      <DataFreshnessIndicator lastUpdated={lastUpdated} />
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Positioning views">
         {tabs.map((tab) => (

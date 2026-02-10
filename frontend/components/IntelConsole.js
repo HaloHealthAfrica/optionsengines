@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, RefreshCcw } from 'lucide-react';
 import { useRealtime } from '../hooks/useRealtime';
+import DataSourceBanner from './DataSourceBanner';
+import DataFreshnessIndicator from './DataFreshnessIndicator';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 const defaultSymbols = ['SPY', 'QQQ', 'AAPL', 'TSLA', 'MSFT', 'NVDA', 'AMD', 'META', 'NFLX', 'IWM'];
 
@@ -47,6 +50,8 @@ export default function IntelConsole() {
   const [query, setQuery] = useState('');
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('idle');
+  const [dataSource, setDataSource] = useState('unknown');
+  const [lastUpdated, setLastUpdated] = useState(null);
   const { intel } = useRealtime({ symbol });
 
   useEffect(() => {
@@ -63,9 +68,11 @@ export default function IntelConsole() {
     try {
       const response = await fetch(`/api/intel/latest?symbol=${encodeURIComponent(ticker)}`);
       if (!response.ok) throw new Error('Failed to load intel snapshot');
+      setDataSource(response.headers.get('x-data-source') || 'unknown');
       const payload = await response.json();
       setData(payload);
       setStatus('success');
+      setLastUpdated(Date.now());
     } catch (error) {
       setStatus('error');
     }
@@ -75,10 +82,13 @@ export default function IntelConsole() {
     fetchSnapshot(symbol);
   }, [symbol]);
 
+  useAutoRefresh(() => fetchSnapshot(symbol), 30000, true);
+
   useEffect(() => {
     if (intel && intel.symbol === symbol) {
       setData(intel);
       setStatus('success');
+      setLastUpdated(Date.now());
     }
   }, [intel, symbol]);
 
@@ -96,6 +106,7 @@ export default function IntelConsole() {
         <div>
           <h1 className="text-2xl font-semibold">Market Intel Console</h1>
           <p className="muted text-sm">High-conviction context from GEX and gamma regime.</p>
+          <p className="muted text-xs">Data source: {dataSource}</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -139,6 +150,9 @@ export default function IntelConsole() {
           </div>
         </div>
       </div>
+
+      <DataSourceBanner source={dataSource} />
+      <DataFreshnessIndicator lastUpdated={lastUpdated} />
 
       {status === 'error' && (
         <div className="card border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100">

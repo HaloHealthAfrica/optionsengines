@@ -1,8 +1,11 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import MetricCard from './MetricCard';
+import DataSourceBanner from './DataSourceBanner';
+import DataFreshnessIndicator from './DataFreshnessIndicator';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 const WinLossChart = dynamic(() => import('./WinLossChart'), { ssr: false });
 
@@ -10,9 +13,9 @@ export default function History() {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('idle');
   const [dataSource, setDataSource] = useState('unknown');
+  const [lastUpdated, setLastUpdated] = useState(null);
 
-  useEffect(() => {
-    const loadData = async () => {
+  const loadData = useCallback(async () => {
       setStatus('loading');
       try {
         const response = await fetch('/api/history/stats');
@@ -21,12 +24,43 @@ export default function History() {
         const payload = await response.json();
         setData(payload);
         setStatus('success');
+        setLastUpdated(Date.now());
       } catch (error) {
         setStatus('error');
       }
-    };
+    }, []);
+
+  useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
+
+  useAutoRefresh(loadData, 30000, true);
+
+  const pnlValidation = useMemo(() => {
+    const totalTrades = Number(data?.stats?.totalTrades ?? 0);
+    const timeline = Array.isArray(data?.timeline) ? data.timeline : [];
+    if (!timeline.length || totalTrades > timeline.length) {
+      return null;
+    }
+
+    const parseCurrency = (value) => {
+      if (!value) return 0;
+      const numeric = String(value).replace(/[^0-9.-]/g, '');
+      const parsed = Number(numeric);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const timelineTotal = timeline.reduce((sum, item) => sum + parseCurrency(item.value), 0);
+    const statsTotal = parseCurrency(data?.stats?.totalPnl);
+    const diff = Math.abs(timelineTotal - statsTotal);
+    if (diff <= 5) return null;
+
+    return {
+      timelineTotal,
+      statsTotal,
+      diff,
+    };
+  }, [data]);
 
   return (
     <section className="flex flex-col gap-6">
@@ -35,6 +69,16 @@ export default function History() {
         <p className="muted text-sm">Performance analytics and experiment tracking.</p>
         <p className="muted text-xs">Data source: {dataSource}</p>
       </div>
+
+      <DataSourceBanner source={dataSource} />
+      <DataFreshnessIndicator lastUpdated={lastUpdated} />
+
+      {pnlValidation && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+          P&L validation mismatch: timeline totals ({pnlValidation.timelineTotal.toFixed(2)}) vs stats (
+          {pnlValidation.statsTotal.toFixed(2)}).
+        </div>
+      )}
 
       {status === 'error' && (
         <div className="card p-6 text-sm text-rose-500">Unable to load analytics.</div>

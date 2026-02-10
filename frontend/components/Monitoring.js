@@ -1,7 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, CheckCircle2, RadioTower, RefreshCcw } from 'lucide-react';
+import DataSourceBanner from './DataSourceBanner';
+import DataFreshnessIndicator from './DataFreshnessIndicator';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 const limits = [10, 25];
 
@@ -358,6 +361,7 @@ export default function Monitoring({ initialView = 'overview' }) {
   const [activeFilter, setActiveFilter] = useState('all');
   const [testFilter, setTestFilter] = useState('all');
   const [dataSource, setDataSource] = useState('unknown');
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [view, setView] = useState(initialView);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -379,6 +383,9 @@ export default function Monitoring({ initialView = 'overview' }) {
   const [lastTestAt, setLastTestAt] = useState(null);
   const [activeTestSession, setActiveTestSession] = useState(null);
   const [testError, setTestError] = useState(null);
+  const [health, setHealth] = useState(null);
+  const [healthStatus, setHealthStatus] = useState('idle');
+  const [healthUpdated, setHealthUpdated] = useState(null);
 
   const loadData = useCallback(async () => {
     setStatus('loading');
@@ -392,6 +399,7 @@ export default function Monitoring({ initialView = 'overview' }) {
       const payload = await response.json();
       setData(payload);
       setStatus('success');
+      setLastUpdated(Date.now());
     } catch (error) {
       setStatus('error');
     }
@@ -400,6 +408,36 @@ export default function Monitoring({ initialView = 'overview' }) {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useAutoRefresh(loadData, 30000, true);
+
+  const loadHealth = useCallback(async () => {
+    setHealthStatus('loading');
+    try {
+      const response = await fetch('/api/health/status', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Failed');
+      const payload = await response.json();
+      setHealth(payload);
+      setHealthStatus('success');
+      setHealthUpdated(Date.now());
+    } catch (error) {
+      setHealthStatus('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (view === 'health') {
+      loadHealth();
+    }
+  }, [view, loadHealth]);
+
+  useAutoRefresh(loadHealth, 30000, view === 'health');
+
+  const healthSummary = useMemo(() => {
+    const endpoints = Array.isArray(health?.endpoints) ? health.endpoints : [];
+    const okCount = endpoints.filter((item) => item.ok).length;
+    return { endpoints, okCount, total: endpoints.length };
+  }, [health]);
 
   useEffect(() => {
     if (!activeTestSession) return;
@@ -580,6 +618,7 @@ export default function Monitoring({ initialView = 'overview' }) {
             {[
               { id: 'overview', label: 'Overview' },
               { id: 'decision-engines', label: 'Decision engines' },
+              { id: 'health', label: 'Health' },
             ].map((item) => (
               <button
                 key={item.id}
@@ -634,12 +673,98 @@ export default function Monitoring({ initialView = 'overview' }) {
         </div>
       </div>
 
+      <DataSourceBanner source={dataSource} />
+      <DataFreshnessIndicator lastUpdated={lastUpdated} />
+
       {status === 'error' && (
         <div className="card p-6 text-sm text-rose-500">Unable to load monitoring data.</div>
       )}
 
       {view === 'decision-engines' && (
         <DecisionEngineDetails detail={data?.decision_engine} onDecisionClick={(id) => openDetail('decision', id)} />
+      )}
+
+      {view === 'health' && (
+        <div className="flex flex-col gap-6">
+          <div className="card p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Health Dashboard</h2>
+                <p className="muted text-sm">Endpoint availability and provider status.</p>
+              </div>
+              <button
+                type="button"
+                onClick={loadHealth}
+                className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:-translate-y-0.5 dark:border-slate-700 dark:text-slate-300"
+              >
+                Refresh Health
+              </button>
+            </div>
+
+            <div className="mt-3">
+              <DataFreshnessIndicator lastUpdated={healthUpdated} />
+            </div>
+
+            {healthStatus === 'error' && (
+              <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-600 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100">
+                Unable to load health status.
+              </div>
+            )}
+
+            {healthStatus !== 'error' && (
+              <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {(healthSummary.endpoints || []).map((item) => (
+                  <div key={item.name} className="rounded-2xl border border-slate-100 p-4 dark:border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold">{item.name}</p>
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                          item.ok
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200'
+                            : 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200'
+                        }`}
+                      >
+                        {item.ok ? 'Healthy' : 'Down'}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                      Status: {item.status || '--'} · {item.latency_ms ?? '--'} ms
+                    </p>
+                    {item.error && (
+                      <p className="mt-1 text-xs text-rose-500">Error: {item.error}</p>
+                    )}
+                  </div>
+                ))}
+                {healthSummary.total === 0 && (
+                  <div className="rounded-2xl border border-slate-100 p-4 text-sm text-slate-500 dark:border-slate-800">
+                    No endpoint checks available yet.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {health?.providers && (
+            <div className="card p-6">
+              <h3 className="text-base font-semibold">Provider Health</h3>
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {Object.entries(health.providers.circuit_breakers || {}).map(([provider, info]) => (
+                  <div key={provider} className="rounded-2xl border border-slate-100 p-4 dark:border-slate-800">
+                    <p className="text-sm font-semibold capitalize">{provider}</p>
+                    <p className="mt-2 text-xs text-slate-500">
+                      State: {info.state || '--'} · Failures: {info.failures ?? 0}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              {(health.providers.down || []).length > 0 && (
+                <p className="mt-4 text-xs text-rose-500">
+                  Down providers: {health.providers.down.join(', ')}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {view === 'overview' && (
