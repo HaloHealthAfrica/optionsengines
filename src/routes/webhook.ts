@@ -98,15 +98,46 @@ export async function isDuplicate(
   return result.rows.length > 0;
 }
 
-export function normalizeDirection(payload: WebhookPayload): 'long' | 'short' | null {
-  const rawDirection =
+type DirectionCandidate = string | null | undefined;
+
+function detectIndicatorSource(payload: WebhookPayload): string {
+  const metaEngine = (payload as any)?.meta?.engine;
+  const journalEngine = (payload as any)?.journal?.engine;
+  if (metaEngine === 'SATY_PO') return 'SATY_PHASE';
+  if (journalEngine === 'STRAT_V6_FULL') return 'STRAT';
+  if ((payload as any)?.timeframes && (payload as any)?.bias && (payload as any)?.ticker) return 'TREND';
+  if ((payload as any)?.indicator && ['ORB', 'Stretch', 'BHCH', 'EMA'].includes((payload as any)?.indicator)) {
+    return 'ORB';
+  }
+  if ((payload as any)?.trend && (payload as any)?.score !== undefined && (payload as any)?.signal) {
+    return 'SIGNALS';
+  }
+  return 'UNKNOWN / GENERIC_TV';
+}
+
+function extractDirectionCandidate(payload: WebhookPayload): DirectionCandidate {
+  const anyPayload = payload as any;
+
+  return (
     payload.direction ??
     payload.side ??
     payload.trend ??
     payload.bias ??
     payload.signal?.type ??
-    payload.signal?.direction;
-  const normalized = rawDirection?.toString().toLowerCase();
+    payload.signal?.direction ??
+    anyPayload.signal?.side ??
+    anyPayload.regime_context?.local_bias ??
+    anyPayload.execution_guidance?.bias ??
+    anyPayload.order_action ??
+    anyPayload.strategy?.order_action ??
+    anyPayload.action ??
+    anyPayload.event?.phase_name
+  );
+}
+
+export function normalizeDirection(payload: WebhookPayload): 'long' | 'short' | null {
+  const rawDirection = extractDirectionCandidate(payload);
+  const normalized = rawDirection?.toString().trim().toLowerCase();
 
   if (!normalized) {
     if (payload.action === 'BUY') return 'long';
@@ -114,18 +145,13 @@ export function normalizeDirection(payload: WebhookPayload): 'long' | 'short' | 
     return null;
   }
 
-  if (normalized === 'long' || normalized === 'bull' || normalized === 'bullish' || normalized === 'up') {
+  if (['long', 'bull', 'bullish', 'up', 'buy', 'call', 'markup'].includes(normalized)) {
     return 'long';
   }
-  if (normalized === 'short' || normalized === 'bear' || normalized === 'bearish' || normalized === 'down') {
+  if (['short', 'bear', 'bearish', 'down', 'sell', 'put', 'markdown'].includes(normalized)) {
     return 'short';
   }
-  if (normalized === 'call' || normalized === 'buy' || normalized === 'longs') {
-    return 'long';
-  }
-  if (normalized === 'put' || normalized === 'sell' || normalized === 'shorts') {
-    return 'short';
-  }
+
   return null;
 }
 
@@ -247,6 +273,7 @@ export async function processWebhookPayload(input: {
   let variantForLog: 'A' | 'B' | undefined;
   let testMetaForLog: TestMetadata | null = null;
   let webhookEventId: string | null = null;
+  let logBody: unknown = null;
 
   const logWebhookEvent = async (input: {
     status: 'accepted' | 'duplicate' | 'invalid_signature' | 'invalid_payload' | 'error';
@@ -267,8 +294,9 @@ export async function processWebhookPayload(input: {
           processing_time_ms,
           is_test,
           test_session_id,
-          test_scenario
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          test_scenario,
+          raw_payload
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
         RETURNING event_id`,
         [
           requestId,
@@ -284,6 +312,7 @@ export async function processWebhookPayload(input: {
           testMetaForLog?.isTest || false,
           testMetaForLog?.testSessionId || null,
           testMetaForLog?.testScenario || null,
+          JSON.stringify(logBody ?? null),
         ]
       );
       webhookEventId = result.rows[0]?.event_id || webhookEventId;
@@ -294,7 +323,7 @@ export async function processWebhookPayload(input: {
 
   try {
     // Log incoming request
-    const logBody =
+    logBody =
       input.payload && typeof input.payload === 'object' && 'secret' in (input.payload as Record<string, any>)
         ? { ...(input.payload as Record<string, any>), secret: '[REDACTED]' }
         : input.payload;
@@ -402,6 +431,12 @@ export async function processWebhookPayload(input: {
     const normalizedDirection = normalizeDirection(payload);
 
     if (!normalizedDirection) {
+      logger.warn('Missing or invalid direction', {
+        requestId,
+        detected_source: detectIndicatorSource(payload),
+        direction_candidate: extractDirectionCandidate(payload) ?? null,
+        payload_keys: payload && typeof payload === 'object' ? Object.keys(payload) : [],
+      });
       await logWebhookEvent({ status: 'invalid_payload', errorMessage: 'Missing or invalid direction' });
       return {
         httpStatus: 400,
