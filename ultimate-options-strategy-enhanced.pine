@@ -1,0 +1,814 @@
+//@version=5
+indicator("Ultimate Options Strategy Suite - Enhanced Webhook v3", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
+
+// === INPUTS ===
+group0 = "🔑 Webhook Configuration"
+enableSignalsWebhook = input.bool(true, "Enable Signals Webhook", group=group0)
+signalsWebhookUrl = input.string("https://optionstrat.vercel.app/api/phase25/webhooks/signals", "Webhook URL", group=group0)
+signalsApiKey = input.string("your_signals_api_key_here", "API Key", group=group0, tooltip="Your secret API key for the signals endpoint")
+enableTestMode = input.bool(false, "🧪 TEST MODE - Fire alert every bar", group=group0, tooltip="Enable to test webhook connection")
+
+group1 = "Strategy Toggles"
+showStratFVG = input.bool(true, "Enable Strat + FVG + BOS", group=group1)
+showRibbonTrend = input.bool(true, "Enable Pivot Ribbon + EMA Trend", group=group1)
+showGammaZones = input.bool(true, "Enable Gamma Exposure Zones", group=group1)
+showVWAPPML = input.bool(true, "Enable VWAP + PMH/PML Setup", group=group1)
+showMiyagiBias = input.bool(true, "Enable 12HR/4HR/5M Multi-Timeframe Setup", group=group1)
+showAIScore = input.bool(true, "Enable AI Confluence Scoring", group=group1)
+showGolfEMA = input.bool(true, "Enable Golf EMA2-HLC3", group=group1)
+showDebugPanel = input.bool(true, "📊 Show Debug Panel", group=group1, tooltip="Shows why signals are/aren't firing")
+
+group2 = "Parameters"
+atrPeriod = input.int(14, "ATR Period", group=group2)
+fvgMinSize = input.float(0.5, "FVG Min Size (ATR multiplier)", step=0.1, group=group2)
+bosLookback = input.int(10, "BOS Lookback Period", group=group2)
+gammaLength = input.int(20, "Gamma Zone Length", group=group2)
+aiScoreThreshold = input.int(6, "AI Score Alert Threshold", minval=1, maxval=10, group=group2)
+
+group3 = "Trading Signal Settings"
+minScoreForSignal = input.float(4.0, "Minimum AI Score for Trade Signals", minval=0, maxval=10.5, step=0.5, group=group3)
+extremeScoreThreshold = input.float(7.0, "Extreme Score Threshold", minval=5, maxval=10.5, step=0.5, group=group3)
+requireVWAPConfirmation = input.bool(false, "Require VWAP Confirmation", group=group3)
+requireGolfConfirmation = input.bool(false, "Require Golf EMA Confirmation", group=group3)
+requireTriggerCondition = input.bool(false, "Require Trigger Condition (MTF/Strat/PMH/FVG)", group=group3)
+
+group4 = "Risk Management"
+defaultStopATR = input.float(1.5, "Default Stop Loss (ATR multiplier)", step=0.1, group=group4)
+target1RR = input.float(2.0, "Target 1 Risk:Reward Ratio", step=0.5, group=group4)
+target2RR = input.float(4.0, "Target 2 Risk:Reward Ratio", step=0.5, group=group4)
+
+group5 = "Account Settings (for Position Sizing)"
+accountSize = input.float(10000, "Account Size ($)", minval=100, group=group5)
+riskPerTrade = input.float(2.0, "Risk Per Trade (%)", minval=0.1, maxval=10, step=0.1, group=group5)
+contractMultiplier = input.float(100, "Options Contract Multiplier", group=group5)
+
+// === TIMEFRAME VALIDATION ===
+getValidTimeframe() =>
+    tf = timeframe.period
+    if tf == "1" or tf == "2" or tf == "3"
+        "3"
+    else if tf == "4" or tf == "5"
+        "5"
+    else if tf == "10" or tf == "15"
+        "15"
+    else if tf == "20" or tf == "30"
+        "30"
+    else if tf == "45" or tf == "60"
+        "60"
+    else if tf == "120" or tf == "180" or tf == "240"
+        "240"
+    else if tf == "D" or tf == "1D" or tf == "W" or tf == "1W" or tf == "M" or tf == "1M"
+        "240"
+    else
+        "15"
+
+validTimeframe = getValidTimeframe()
+
+// === MARKET SESSION ===
+getMarketSession() =>
+    hourNY = hour(time, "America/New_York")
+    minuteNY = minute(time)
+    
+    if hourNY < 9 or (hourNY == 9 and minuteNY < 30)
+        "PRE"
+    else if hourNY >= 16
+        "POST"
+    else if hourNY == 9 and minuteNY >= 30 and hourNY < 10
+        "OPEN"
+    else if hourNY >= 15
+        "POWER_HOUR"
+    else
+        "REGULAR"
+
+marketSession = getMarketSession()
+
+// === GOLF EMA2-HLC3 ===
+GHLC3 = ta.sma((close[1] + high[1] + low[1]) / 3, 5)
+ema2 = ta.ema(close, 2)
+
+plot(showGolfEMA ? GHLC3 : na, "GHLC3", color=color.new(color.rgb(132, 134, 120), 30), style=plot.style_area)
+plot(showGolfEMA ? ema2 : na, "EMA2", color=color.white, linewidth=2)
+
+golfC1 = ema2 > GHLC3 and close >= open
+golfC2 = ema2 < GHLC3 and close <= open
+golfC3 = ema2 > GHLC3 and close <= open
+golfC4 = ema2 < GHLC3 and close >= open
+
+barcolor(showGolfEMA ? (golfC1 ? color.green : golfC2 ? color.red : golfC3 ? color.lime : golfC4 ? color.rgb(255, 162, 162) : na) : na)
+
+// === COMMON UTILITIES ===
+atr = ta.atr(atrPeriod)
+vwap = ta.vwap
+
+// === VOLUME ANALYSIS ===
+avgVolume = ta.sma(volume, 20)
+volumeRatio = nz(volume / avgVolume, 1.0)
+candleSizeATR = nz((high - low) / atr, 1.0)
+
+// === RSI & MACD ===
+rsiValue = ta.rsi(close, 14)
+[macdLine, signalLine, histLine] = ta.macd(close, 12, 26, 9)
+macdBullish = macdLine > signalLine
+macdBearish = macdLine < signalLine
+
+// === STRATEGY 1: STRAT + FVG + BOS ===
+isInside = high < high[1] and low > low[1]
+isOutside = high > high[1] and low < low[1]
+isUpBar = close > open and high > high[1]
+isDownBar = close < open and low < low[1]
+
+strat132 = isInside[1] and isOutside and isUpBar
+strat212 = isUpBar[1] and isInside and isUpBar
+strat312 = isOutside[1] and isInside and isUpBar
+
+bullishFVG = low > high[2] and (low - high[2]) > fvgMinSize * atr
+bearishFVG = high < low[2] and (low[2] - high) > fvgMinSize * atr
+
+highestHigh = ta.highest(high, bosLookback)
+lowestLow = ta.lowest(low, bosLookback)
+bullishBOS = close > highestHigh[1]
+bearishBOS = close < lowestLow[1]
+
+stratBullish = showStratFVG and (strat132 or strat212 or strat312)
+stratBearish = showStratFVG and bearishFVG and bearishBOS
+
+plotshape(stratBullish, title="Strat Bull", location=location.belowbar, color=color.green, style=shape.triangleup, text="STRAT↑", size=size.small)
+plotshape(stratBearish, title="Strat Bear", location=location.abovebar, color=color.red, style=shape.triangledown, text="STRAT↓", size=size.small)
+
+if showStratFVG and bullishFVG
+    box.new(bar_index[2], high[2], bar_index, low, bgcolor=color.new(color.green, 80), border_color=color.green)
+if showStratFVG and bearishFVG
+    box.new(bar_index[2], low[2], bar_index, high, bgcolor=color.new(color.red, 80), border_color=color.red)
+
+// === STRATEGY 2: PIVOT RIBBON + EMA TREND BIAS ===
+emaFast = ta.ema(close, 8)
+emaMid = ta.ema(close, 13)
+emaSlow = ta.ema(close, 21)
+ema50 = ta.ema(close, 50)
+
+trendUp = emaFast > emaMid and emaMid > emaSlow and emaSlow > ema50
+trendDown = emaFast < emaMid and emaMid < emaSlow and emaSlow < ema50
+
+trendBullish = emaFast > emaSlow
+trendBearish = emaFast < emaSlow
+
+trendStrength = 0.0
+if trendUp
+    trendStrength := math.min(100, math.max(0, math.abs((emaFast - ema50) / atr) * 25))
+else if trendDown
+    trendStrength := math.min(100, math.max(0, math.abs((ema50 - emaFast) / atr) * 25))
+
+pivotHigh = ta.pivothigh(high, 5, 5)
+pivotLow = ta.pivotlow(low, 5, 5)
+
+plotshape(showRibbonTrend and not na(pivotHigh), title="Pivot High", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.tiny, offset=-5)
+plotshape(showRibbonTrend and not na(pivotLow), title="Pivot Low", location=location.belowbar, color=color.green, style=shape.triangleup, size=size.tiny, offset=-5)
+
+plot(showRibbonTrend ? emaFast : na, title="EMA 8", color=color.new(color.blue, 0), linewidth=2)
+plot(showRibbonTrend ? emaMid : na, title="EMA 13", color=color.new(color.aqua, 20), linewidth=1)
+plot(showRibbonTrend ? emaSlow : na, title="EMA 21", color=color.new(color.orange, 0), linewidth=2)
+plot(showRibbonTrend ? ema50 : na, title="EMA 50", color=color.new(color.yellow, 0), linewidth=1)
+
+bgcolor(showRibbonTrend and trendUp ? color.new(color.green, 92) : na)
+bgcolor(showRibbonTrend and trendDown ? color.new(color.red, 92) : na)
+
+// === STRATEGY 3: GAMMA EXPOSURE ZONES ===
+gammaBase = ta.sma(volume * close, gammaLength)
+gammaUpper = gammaBase + 2 * ta.stdev(volume * close, gammaLength)
+gammaLower = gammaBase - 2 * ta.stdev(volume * close, gammaLength)
+
+priceGammaHigh = ta.sma(high, gammaLength) + nz((gammaUpper - gammaBase) / gammaBase, 0) * atr
+priceGammaLow = ta.sma(low, gammaLength) - nz((gammaBase - gammaLower) / gammaBase, 0) * atr
+
+p1 = plot(showGammaZones ? priceGammaHigh : na, title="Gamma High", color=color.new(color.purple, 70))
+p2 = plot(showGammaZones ? priceGammaLow : na, title="Gamma Low", color=color.new(color.purple, 70))
+fill(p1, p2, color=color.new(color.purple, 90))
+
+// === STRATEGY 4: VWAP + PMH/PML BREAKOUT ===
+pmh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
+pml = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_on)
+dayOpen = request.security(syminfo.tickerid, "D", open, lookahead=barmerge.lookahead_on)
+dayClose = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_on)
+
+breakPMH = ta.crossover(close, pmh) and close > vwap
+breakPML = ta.crossunder(close, pml) and close < vwap
+
+plot(showVWAPPML ? vwap : na, title="VWAP", color=color.blue, linewidth=2)
+plot(showVWAPPML ? pmh : na, title="PMH", color=color.green, style=plot.style_circles)
+plot(showVWAPPML ? pml : na, title="PML", color=color.red, style=plot.style_circles)
+
+plotshape(showVWAPPML and breakPMH, location=location.belowbar, style=shape.triangleup, color=color.lime, title="Break PMH", text="PMH↑", size=size.small)
+plotshape(showVWAPPML and breakPML, location=location.abovebar, style=shape.triangledown, color=color.red, title="Break PML", text="PML↓", size=size.small)
+
+// === STRATEGY 5: MULTI-TIMEFRAME ANALYSIS ===
+bias12HR = request.security(syminfo.tickerid, "720", close > open and close > ta.ema(close, 21), lookahead=barmerge.lookahead_off)
+trend4HR = request.security(syminfo.tickerid, "240", ta.ema(close, 8) > ta.ema(close, 21), lookahead=barmerge.lookahead_off)
+momentum4HR_raw = request.security(syminfo.tickerid, "240", ta.rsi(close, 14), lookahead=barmerge.lookahead_off)
+momentum4HR = nz(momentum4HR_raw, 50)
+
+trend1HR = request.security(syminfo.tickerid, "60", ta.ema(close, 8) > ta.ema(close, 21), lookahead=barmerge.lookahead_off)
+momentum1HR_raw = request.security(syminfo.tickerid, "60", ta.rsi(close, 14), lookahead=barmerge.lookahead_off)
+momentum1HR = nz(momentum1HR_raw, 50)
+
+ema5Fast = ta.ema(close, 5)
+ema5Slow = ta.ema(close, 13)
+entry5M = ta.crossover(ema5Fast, ema5Slow) and close > vwap
+
+mtfBullishStrict = showMiyagiBias and bias12HR and trend4HR and momentum4HR > 50 and entry5M
+mtfBullishRelaxed = showMiyagiBias and ((bias12HR and trend4HR) or (trend4HR and trend1HR) or (bias12HR and trend1HR))
+mtfBearishStrict = showMiyagiBias and not bias12HR and not trend4HR and momentum4HR < 50 and ta.crossunder(ema5Fast, ema5Slow) and close < vwap
+mtfBearishRelaxed = showMiyagiBias and ((not bias12HR and not trend4HR) or (not trend4HR and not trend1HR))
+
+mtfBullish = mtfBullishStrict or mtfBullishRelaxed
+mtfBearish = mtfBearishStrict or mtfBearishRelaxed
+
+plotshape(mtfBullishStrict, title="MTF Bull Strict", location=location.belowbar, style=shape.labelup, color=color.yellow, text="MTF↑", size=size.normal)
+plotshape(mtfBearishStrict, title="MTF Bear Strict", location=location.abovebar, style=shape.labeldown, color=color.orange, text="MTF↓", size=size.normal)
+
+// === STRATEGY 6: AI CONFLUENCE SCORING ===
+stratScore = stratBullish ? 2.0 : (bullishFVG or bullishBOS) ? 1.0 : 0.0
+trendScore = trendUp ? 2.0 : trendBullish ? 1.5 : emaFast > emaSlow ? 1.0 : 0.0
+gammaScore = close > priceGammaHigh ? 1.5 : close > (priceGammaHigh + priceGammaLow) / 2 ? 0.75 : 0.0
+vwapScore = breakPMH ? 2.0 : (close > vwap and close > dayOpen) ? 1.0 : close > vwap ? 0.5 : 0.0
+mtfScore = mtfBullishStrict ? 2.0 : mtfBullishRelaxed ? 1.5 : (bias12HR and trend4HR) ? 1.0 : (bias12HR or trend4HR) ? 0.5 : 0.0
+golfScore = golfC1 ? 0.5 : golfC3 ? 0.25 : 0.0
+
+stratScoreBear = stratBearish ? 2.0 : (bearishFVG or bearishBOS) ? 1.0 : 0.0
+trendScoreBear = trendDown ? 2.0 : trendBearish ? 1.5 : emaFast < emaSlow ? 1.0 : 0.0
+gammaScoreBear = close < priceGammaLow ? 1.5 : close < (priceGammaHigh + priceGammaLow) / 2 ? 0.75 : 0.0
+vwapScoreBear = breakPML ? 2.0 : (close < vwap and close < dayOpen) ? 1.0 : close < vwap ? 0.5 : 0.0
+mtfScoreBear = mtfBearishStrict ? 2.0 : mtfBearishRelaxed ? 1.5 : (not bias12HR and not trend4HR) ? 1.0 : (not bias12HR or not trend4HR) ? 0.5 : 0.0
+golfScoreBear = golfC2 ? 0.5 : golfC4 ? 0.25 : 0.0
+
+scoreBull = math.min(10.5, math.max(0, stratScore + trendScore + gammaScore + vwapScore + mtfScore + golfScore))
+scoreBear = math.min(10.5, math.max(0, stratScoreBear + trendScoreBear + gammaScoreBear + vwapScoreBear + mtfScoreBear + golfScoreBear))
+score = math.max(scoreBull, scoreBear)
+
+var label scoreLabel = na
+if showAIScore and barstate.islast
+    label.delete(scoreLabel)
+    scoreLabel := label.new(bar_index, high + atr * 0.5,
+                           text="AI Score: " + str.tostring(score, "#.#") + "/10.5\nBull: " + str.tostring(scoreBull, "#.#") + " | Bear: " + str.tostring(scoreBear, "#.#"),
+                          color=score >= aiScoreThreshold ? color.green : score >= 4 ? color.yellow : color.red,
+                          textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// === TRADE SIGNAL DETECTION ===
+stopLoss = 0.0
+stopReason = ""
+if bullishFVG
+    stopLoss := high[2] - (fvgMinSize * atr)
+    stopReason := "FVG_SUPPORT"
+else if close > vwap
+    stopLoss := vwap - (0.5 * atr)
+    stopReason := "VWAP"
+else if golfC1 or golfC3
+    stopLoss := GHLC3 - (0.3 * atr)
+    stopReason := "GOLF_EMA"
+else
+    stopLoss := close - (defaultStopATR * atr)
+    stopReason := "ATR_BASED"
+
+riskAmount = math.max(close - stopLoss, 0.01)
+target1 = close + (riskAmount * target1RR)
+target2 = close + (riskAmount * target2RR)
+
+longVWAPCheck = requireVWAPConfirmation ? close > vwap : true
+longGolfCheck = requireGolfConfirmation ? (golfC1 or golfC3) : true
+longTrendOK = not trendDown
+
+hasTriggerLong = mtfBullish or stratBullish or breakPMH or (bullishFVG and bullishBOS) or bullishBOS
+triggerCheckLong = requireTriggerCondition ? hasTriggerLong : true
+
+longSignal = scoreBull >= minScoreForSignal and longVWAPCheck and longGolfCheck and longTrendOK and triggerCheckLong
+
+signalQuality = scoreBull >= extremeScoreThreshold ? "EXTREME" : scoreBull >= 5.5 ? "HIGH" : "MEDIUM"
+positionSizeMultiplier = scoreBull >= extremeScoreThreshold ? 2.0 : scoreBull >= 5.5 ? 1.5 : 1.0
+
+// SHORT SIGNALS
+stopLossShort = 0.0
+stopReasonShort = ""
+if bearishFVG
+    stopLossShort := low[2] + (fvgMinSize * atr)
+    stopReasonShort := "FVG_RESISTANCE"
+else if close < vwap
+    stopLossShort := vwap + (0.5 * atr)
+    stopReasonShort := "VWAP"
+else if golfC2
+    stopLossShort := GHLC3 + (0.3 * atr)
+    stopReasonShort := "GOLF_EMA"
+else
+    stopLossShort := close + (defaultStopATR * atr)
+    stopReasonShort := "ATR_BASED"
+
+riskAmountShort = math.max(stopLossShort - close, 0.01)
+target1Short = close - (riskAmountShort * target1RR)
+target2Short = close - (riskAmountShort * target2RR)
+
+shortVWAPCheck = requireVWAPConfirmation ? close < vwap : true
+shortGolfCheck = requireGolfConfirmation ? golfC2 : true
+shortTrendOK = not trendUp
+
+hasTriggerShort = mtfBearish or stratBearish or breakPML or (bearishFVG and bearishBOS) or bearishBOS
+triggerCheckShort = requireTriggerCondition ? hasTriggerShort : true
+
+shortSignal = scoreBear >= minScoreForSignal and shortVWAPCheck and shortGolfCheck and shortTrendOK and triggerCheckShort
+
+signalQualityShort = scoreBear >= extremeScoreThreshold ? "EXTREME" : scoreBear >= 5.5 ? "HIGH" : "MEDIUM"
+positionSizeMultiplierShort = scoreBear >= extremeScoreThreshold ? 2.0 : scoreBear >= 5.5 ? 1.5 : 1.0
+
+// Display signals
+plotshape(longSignal, title="LONG SIGNAL", location=location.belowbar, color=color.new(color.lime, 0), style=shape.labelup, text="LONG", size=size.large)
+plotshape(shortSignal, title="SHORT SIGNAL", location=location.abovebar, color=color.new(color.red, 0), style=shape.labeldown, text="SHORT", size=size.large)
+
+var line stopLine = na
+var line target1Line = na
+var line target2Line = na
+
+if longSignal
+    line.delete(stopLine)
+    line.delete(target1Line)
+    line.delete(target2Line)
+    stopLine := line.new(bar_index, stopLoss, bar_index + 20, stopLoss, color=color.red, width=2, style=line.style_dashed)
+    target1Line := line.new(bar_index, target1, bar_index + 20, target1, color=color.green, width=1, style=line.style_dotted)
+    target2Line := line.new(bar_index, target2, bar_index + 20, target2, color=color.green, width=2, style=line.style_dotted)
+
+if shortSignal
+    line.delete(stopLine)
+    line.delete(target1Line)
+    line.delete(target2Line)
+    stopLine := line.new(bar_index, stopLossShort, bar_index + 20, stopLossShort, color=color.red, width=2, style=line.style_dashed)
+    target1Line := line.new(bar_index, target1Short, bar_index + 20, target1Short, color=color.green, width=1, style=line.style_dotted)
+    target2Line := line.new(bar_index, target2Short, bar_index + 20, target2Short, color=color.green, width=2, style=line.style_dotted)
+
+// === HELPER CALCULATIONS ===
+dayOfWeekNum = dayofweek
+dayOfWeekStr = dayOfWeekNum == 1 ? "SUNDAY" : dayOfWeekNum == 2 ? "MONDAY" : dayOfWeekNum == 3 ? "TUESDAY" : dayOfWeekNum == 4 ? "WEDNESDAY" : dayOfWeekNum == 5 ? "THURSDAY" : dayOfWeekNum == 6 ? "FRIDAY" : "SATURDAY"
+candleDirection = close >= open ? "GREEN" : "RED"
+trendAlignment = trendUp ? "BULLISH" : trendDown ? "BEARISH" : "NEUTRAL"
+macdSignalStr = macdBullish ? "BULLISH" : macdBearish ? "BEARISH" : "NEUTRAL"
+bias4HRStr = trend4HR ? "LONG" : "SHORT"
+bias1HRStr = trend1HR ? "LONG" : "SHORT"
+
+dayChangePct = nz(((close - dayClose) / dayClose) * 100, 0)
+priceVsVwapPct = nz(((close - vwap) / vwap) * 100, 0)
+distanceToPmhPct = nz(((pmh - close) / close) * 100, 0)
+distanceToPmlPct = nz(((close - pml) / close) * 100, 0)
+stopDistancePct = math.max(0.01, nz((riskAmount / close) * 100, 1))
+stopDistancePctShort = math.max(0.01, nz((riskAmountShort / close) * 100, 1))
+
+maxRiskDollars = math.max(1, accountSize * (riskPerTrade / 100))
+recommendedShares = math.max(1, riskAmount > 0 ? math.floor(maxRiskDollars / riskAmount) : 1)
+recommendedSharesShort = math.max(1, riskAmountShort > 0 ? math.floor(maxRiskDollars / riskAmountShort) : 1)
+recommendedContracts = math.max(1, riskAmount > 0 ? math.floor(maxRiskDollars / (riskAmount * contractMultiplier)) : 1)
+recommendedContractsShort = math.max(1, riskAmountShort > 0 ? math.floor(maxRiskDollars / (riskAmountShort * contractMultiplier)) : 1)
+maxLossDollars = math.max(0.01, recommendedShares * riskAmount)
+maxLossDollarsShort = math.max(0.01, recommendedSharesShort * riskAmountShort)
+
+rrRatioT1 = math.max(0.1, riskAmount > 0 ? (target1 - close) / riskAmount : target1RR)
+rrRatioT2 = math.max(0.1, riskAmount > 0 ? (target2 - close) / riskAmount : target2RR)
+rrRatioT1Short = math.max(0.1, riskAmountShort > 0 ? (close - target1Short) / riskAmountShort : target1RR)
+rrRatioT2Short = math.max(0.1, riskAmountShort > 0 ? (close - target2Short) / riskAmountShort : target2RR)
+
+safeAtr = math.max(0.01, nz(atr, 0.01))
+safeVwap = math.max(0.01, nz(vwap, close))
+safePmh = math.max(0.01, nz(pmh, high))
+safePml = math.max(0.01, nz(pml, low))
+safeDayOpen = math.max(0.01, nz(dayOpen, open))
+safeVolumeRatio = math.max(0.01, nz(volumeRatio, 1))
+safeCandleSizeATR = math.max(0.01, nz(candleSizeATR, 1))
+safeEmaFast = math.max(0.01, nz(emaFast, close))
+safeEmaSlow = math.max(0.01, nz(emaSlow, close))
+safeEma50 = math.max(0.01, nz(ema50, close))
+safeTrendStrength = math.max(0, math.min(100, nz(trendStrength, 50)))
+safeRsi = math.max(0, math.min(100, nz(rsiValue, 50)))
+safeMomentum4HR = math.max(0, math.min(100, nz(momentum4HR, 50)))
+
+// Generate pattern name
+getPatternName(isBull) =>
+    pattern = ""
+    if isBull
+        if strat132
+            pattern := "STRAT_132"
+        else if strat212
+            pattern := "STRAT_212"
+        else if strat312
+            pattern := "STRAT_312"
+        else if bullishFVG
+            pattern := "FVG_BULL"
+        else if breakPMH
+            pattern := "PMH_BREAKOUT"
+        else if mtfBullishStrict
+            pattern := "MTF_STRICT_BULL"
+        else
+            pattern := "CONFLUENCE_BULL"
+    else
+        if stratBearish
+            pattern := "STRAT_BEAR"
+        else if bearishFVG
+            pattern := "FVG_BEAR"
+        else if breakPML
+            pattern := "PML_BREAKDOWN"
+        else if mtfBearishStrict
+            pattern := "MTF_STRICT_BEAR"
+        else
+            pattern := "CONFLUENCE_BEAR"
+    pattern
+
+patternLong = getPatternName(true)
+patternShort = getPatternName(false)
+
+// Components
+componentsLong = ""
+if mtfBullish
+    componentsLong := componentsLong + (str.length(componentsLong) > 0 ? "," : "") + '"MTF_ALIGN"'
+if stratBullish
+    componentsLong := componentsLong + (str.length(componentsLong) > 0 ? "," : "") + '"STRAT_SETUP"'
+if breakPMH
+    componentsLong := componentsLong + (str.length(componentsLong) > 0 ? "," : "") + '"PMH_BREAK"'
+if bullishFVG
+    componentsLong := componentsLong + (str.length(componentsLong) > 0 ? "," : "") + '"FVG_BULL"'
+if bullishBOS
+    componentsLong := componentsLong + (str.length(componentsLong) > 0 ? "," : "") + '"BOS_BULL"'
+if golfC1
+    componentsLong := componentsLong + (str.length(componentsLong) > 0 ? "," : "") + '"GOLF_STRONG"'
+if trendUp or trendBullish
+    componentsLong := componentsLong + (str.length(componentsLong) > 0 ? "," : "") + '"TREND_ALIGN"'
+if close > vwap
+    componentsLong := componentsLong + (str.length(componentsLong) > 0 ? "," : "") + '"VWAP_BOUNCE"'
+if gammaScore > 0
+    componentsLong := componentsLong + (str.length(componentsLong) > 0 ? "," : "") + '"GAMMA_BULL"'
+if str.length(componentsLong) == 0
+    componentsLong := '"SCORE_BASED"'
+
+componentsShort = ""
+if mtfBearish
+    componentsShort := componentsShort + (str.length(componentsShort) > 0 ? "," : "") + '"MTF_ALIGN"'
+if stratBearish
+    componentsShort := componentsShort + (str.length(componentsShort) > 0 ? "," : "") + '"STRAT_SETUP"'
+if breakPML
+    componentsShort := componentsShort + (str.length(componentsShort) > 0 ? "," : "") + '"PML_BREAK"'
+if bearishFVG
+    componentsShort := componentsShort + (str.length(componentsShort) > 0 ? "," : "") + '"FVG_BEAR"'
+if bearishBOS
+    componentsShort := componentsShort + (str.length(componentsShort) > 0 ? "," : "") + '"BOS_BEAR"'
+if golfC2
+    componentsShort := componentsShort + (str.length(componentsShort) > 0 ? "," : "") + '"GOLF_STRONG"'
+if trendDown or trendBearish
+    componentsShort := componentsShort + (str.length(componentsShort) > 0 ? "," : "") + '"TREND_ALIGN"'
+if close < vwap
+    componentsShort := componentsShort + (str.length(componentsShort) > 0 ? "," : "") + '"VWAP_BOUNCE"'
+if gammaScoreBear > 0
+    componentsShort := componentsShort + (str.length(componentsShort) > 0 ? "," : "") + '"GAMMA_BEAR"'
+if str.length(componentsShort) == 0
+    componentsShort := '"SCORE_BASED"'
+
+// Generate signal_id (unique hash)
+generateSignalId(direction) =>
+    str.tostring(syminfo.ticker) + "_" + direction + "_" + str.tostring(time) + "_" + str.tostring(close, "#.##")
+
+signalIdLong = generateSignalId("LONG")
+signalIdShort = generateSignalId("SHORT")
+
+// ============================================================================
+// === ENHANCED JSON BUILDERS WITH ALL REQUIRED FIELDS ===
+// ============================================================================
+
+buildJsonLong() =>
+    json = '{'
+    // === REQUIRED TOP-LEVEL FIELDS (Phase 2.5 Parser) ===
+    json := json + '"source":"SIGNALS",'
+    json := json + '"indicator":"Ultimate_Options_Strategy",'
+    json := json + '"version":"3.0",'
+    json := json + '"signal_id":"' + signalIdLong + '",'
+    json := json + '"direction":"LONG",'
+    json := json + '"ticker":"' + syminfo.ticker + '",'
+    json := json + '"exchange":"' + syminfo.prefix + '",'
+    json := json + '"timeframe":"' + validTimeframe + '",'
+    json := json + '"trigger_timeframe":"' + validTimeframe + '",'
+    json := json + '"current_price":' + str.tostring(close, "#.##") + ','
+    json := json + '"price":' + str.tostring(close, "#.##") + ','
+    json := json + '"timestamp":' + str.tostring(math.round(time / 1000)) + ','
+    json := json + '"confidence":' + str.tostring(math.min(100, scoreBull * 10), "#.#") + ','
+    json := json + '"pattern":"' + patternLong + '",'
+    json := json + '"setup":"' + patternLong + '",'
+    json := json + '"market_session":"' + marketSession + '",'
+    json := json + '"session":"' + marketSession + '",'
+    
+    // === SIGNAL OBJECT ===
+    json := json + '"signal":{'
+    json := json + '"type":"LONG",'
+    json := json + '"side":"LONG",'
+    json := json + '"timeframe":"' + validTimeframe + '",'
+    json := json + '"quality":"' + signalQuality + '",'
+    json := json + '"ai_score":' + str.tostring(scoreBull, "#.#") + ','
+    json := json + '"timestamp":' + str.tostring(math.round(time / 1000)) + ','
+    json := json + '"bar_time":"' + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ss'Z'", "UTC") + '"'
+    json := json + '},'
+    
+    // === INSTRUMENT OBJECT ===
+    json := json + '"instrument":{'
+    json := json + '"exchange":"' + syminfo.prefix + '",'
+    json := json + '"ticker":"' + syminfo.ticker + '",'
+    json := json + '"symbol":"' + syminfo.ticker + '",'
+    json := json + '"current_price":' + str.tostring(close, "#.##")
+    json := json + '},'
+    
+    // === ENTRY OBJECT ===
+    json := json + '"entry":{'
+    json := json + '"price":' + str.tostring(close, "#.##") + ','
+    json := json + '"entry_price":' + str.tostring(close, "#.##") + ','
+    json := json + '"stop_loss":' + str.tostring(stopLoss, "#.##") + ','
+    json := json + '"target_1":' + str.tostring(target1, "#.##") + ','
+    json := json + '"target_2":' + str.tostring(target2, "#.##") + ','
+    json := json + '"stop_reason":"' + stopReason + '"'
+    json := json + '},'
+    
+    // === RISK OBJECT (ENHANCED) ===
+    json := json + '"risk":{'
+    json := json + '"stop_loss":' + str.tostring(stopLoss, "#.##") + ','
+    json := json + '"target_1":' + str.tostring(target1, "#.##") + ','
+    json := json + '"target_2":' + str.tostring(target2, "#.##") + ','
+    json := json + '"rr_ratio":' + str.tostring(rrRatioT1, "#.#") + ','
+    json := json + '"rr_ratio_t1":' + str.tostring(rrRatioT1, "#.#") + ','
+    json := json + '"rr_ratio_t2":' + str.tostring(rrRatioT2, "#.#") + ','
+    json := json + '"amount":' + str.tostring(maxRiskDollars, "#.##") + ','
+    json := json + '"stop_distance_pct":' + str.tostring(stopDistancePct, "#.##") + ','
+    json := json + '"recommended_shares":' + str.tostring(recommendedShares) + ','
+    json := json + '"recommended_contracts":' + str.tostring(recommendedContracts) + ','
+    json := json + '"risk_per_contract":' + str.tostring(riskAmount, "#.##") + ','
+    json := json + '"position_multiplier":' + str.tostring(positionSizeMultiplier, "#.#") + ','
+    json := json + '"account_risk_pct":' + str.tostring(riskPerTrade, "#.#") + ','
+    json := json + '"max_loss_dollars":' + str.tostring(maxLossDollars, "#.##")
+    json := json + '},'
+    
+    // === MARKET CONTEXT ===
+    json := json + '"market_context":{'
+    json := json + '"vwap":' + str.tostring(safeVwap, "#.##") + ','
+    json := json + '"pmh":' + str.tostring(safePmh, "#.##") + ','
+    json := json + '"pml":' + str.tostring(safePml, "#.##") + ','
+    json := json + '"day_open":' + str.tostring(safeDayOpen, "#.##") + ','
+    json := json + '"day_change_pct":' + str.tostring(dayChangePct, "#.##") + ','
+    json := json + '"price_vs_vwap_pct":' + str.tostring(priceVsVwapPct, "#.##") + ','
+    json := json + '"distance_to_pmh_pct":' + str.tostring(distanceToPmhPct, "#.##") + ','
+    json := json + '"distance_to_pml_pct":' + str.tostring(distanceToPmlPct, "#.##") + ','
+    json := json + '"atr":' + str.tostring(safeAtr, "#.##") + ','
+    json := json + '"volume_vs_avg":' + str.tostring(safeVolumeRatio, "#.##") + ','
+    json := json + '"candle_direction":"' + candleDirection + '",'
+    json := json + '"candle_size_atr":' + str.tostring(safeCandleSizeATR, "#.#")
+    json := json + '},'
+    
+    // === TREND DATA ===
+    json := json + '"trend_data":{'
+    json := json + '"ema_8":' + str.tostring(safeEmaFast, "#.##") + ','
+    json := json + '"ema_21":' + str.tostring(safeEmaSlow, "#.##") + ','
+    json := json + '"ema_50":' + str.tostring(safeEma50, "#.##") + ','
+    json := json + '"alignment":"' + trendAlignment + '",'
+    json := json + '"strength":' + str.tostring(safeTrendStrength, "#") + ','
+    json := json + '"rsi":' + str.tostring(safeRsi, "#.#") + ','
+    json := json + '"macd_signal":"' + macdSignalStr + '"'
+    json := json + '},'
+    
+    // === MTF CONTEXT (ENHANCED) ===
+    json := json + '"mtf_context":{'
+    json := json + '"12h_bias":"' + (bias12HR ? "LONG" : "SHORT") + '",'
+    json := json + '"4h_bias":"' + bias4HRStr + '",'
+    json := json + '"4h_rsi":' + str.tostring(safeMomentum4HR, "#.#") + ','
+    json := json + '"1h_bias":"' + bias1HRStr + '",'
+    json := json + '"1h_rsi":' + str.tostring(momentum1HR, "#.#") + ','
+    json := json + '"local_trend":"' + trendAlignment + '",'
+    json := json + '"macro_bias":"' + (bias12HR ? "BULLISH" : "BEARISH") + '"'
+    json := json + '},'
+    
+    // === SCORE BREAKDOWN ===
+    json := json + '"score_breakdown":{'
+    json := json + '"total":' + str.tostring(scoreBull, "#.#") + ','
+    json := json + '"strat":' + str.tostring(stratScore, "#.#") + ','
+    json := json + '"trend":' + str.tostring(trendScore, "#.#") + ','
+    json := json + '"gamma":' + str.tostring(gammaScore, "#.#") + ','
+    json := json + '"vwap":' + str.tostring(vwapScore, "#.#") + ','
+    json := json + '"mtf":' + str.tostring(mtfScore, "#.#") + ','
+    json := json + '"golf":' + str.tostring(golfScore, "#.#")
+    json := json + '},'
+    
+    // === COMPONENTS ARRAY ===
+    json := json + '"components":[' + componentsLong + '],'
+    
+    // === TIME CONTEXT ===
+    json := json + '"time_context":{'
+    json := json + '"market_session":"' + marketSession + '",'
+    json := json + '"day_of_week":"' + dayOfWeekStr + '",'
+    json := json + '"bar_time":"' + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ss'Z'", "UTC") + '"'
+    json := json + '}}'
+    
+    json
+
+buildJsonShort() =>
+    json = '{'
+    // === REQUIRED TOP-LEVEL FIELDS (Phase 2.5 Parser) ===
+    json := json + '"source":"SIGNALS",'
+    json := json + '"indicator":"Ultimate_Options_Strategy",'
+    json := json + '"version":"3.0",'
+    json := json + '"signal_id":"' + signalIdShort + '",'
+    json := json + '"direction":"SHORT",'
+    json := json + '"ticker":"' + syminfo.ticker + '",'
+    json := json + '"exchange":"' + syminfo.prefix + '",'
+    json := json + '"timeframe":"' + validTimeframe + '",'
+    json := json + '"trigger_timeframe":"' + validTimeframe + '",'
+    json := json + '"current_price":' + str.tostring(close, "#.##") + ','
+    json := json + '"price":' + str.tostring(close, "#.##") + ','
+    json := json + '"timestamp":' + str.tostring(math.round(time / 1000)) + ','
+    json := json + '"confidence":' + str.tostring(math.min(100, scoreBear * 10), "#.#") + ','
+    json := json + '"pattern":"' + patternShort + '",'
+    json := json + '"setup":"' + patternShort + '",'
+    json := json + '"market_session":"' + marketSession + '",'
+    json := json + '"session":"' + marketSession + '",'
+    
+    // === SIGNAL OBJECT ===
+    json := json + '"signal":{'
+    json := json + '"type":"SHORT",'
+    json := json + '"side":"SHORT",'
+    json := json + '"timeframe":"' + validTimeframe + '",'
+    json := json + '"quality":"' + signalQualityShort + '",'
+    json := json + '"ai_score":' + str.tostring(scoreBear, "#.#") + ','
+    json := json + '"timestamp":' + str.tostring(math.round(time / 1000)) + ','
+    json := json + '"bar_time":"' + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ss'Z'", "UTC") + '"'
+    json := json + '},'
+    
+    // === INSTRUMENT OBJECT ===
+    json := json + '"instrument":{'
+    json := json + '"exchange":"' + syminfo.prefix + '",'
+    json := json + '"ticker":"' + syminfo.ticker + '",'
+    json := json + '"symbol":"' + syminfo.ticker + '",'
+    json := json + '"current_price":' + str.tostring(close, "#.##")
+    json := json + '},'
+    
+    // === ENTRY OBJECT ===
+    json := json + '"entry":{'
+    json := json + '"price":' + str.tostring(close, "#.##") + ','
+    json := json + '"entry_price":' + str.tostring(close, "#.##") + ','
+    json := json + '"stop_loss":' + str.tostring(stopLossShort, "#.##") + ','
+    json := json + '"target_1":' + str.tostring(target1Short, "#.##") + ','
+    json := json + '"target_2":' + str.tostring(target2Short, "#.##") + ','
+    json := json + '"stop_reason":"' + stopReasonShort + '"'
+    json := json + '},'
+    
+    // === RISK OBJECT (ENHANCED) ===
+    json := json + '"risk":{'
+    json := json + '"stop_loss":' + str.tostring(stopLossShort, "#.##") + ','
+    json := json + '"target_1":' + str.tostring(target1Short, "#.##") + ','
+    json := json + '"target_2":' + str.tostring(target2Short, "#.##") + ','
+    json := json + '"rr_ratio":' + str.tostring(rrRatioT1Short, "#.#") + ','
+    json := json + '"rr_ratio_t1":' + str.tostring(rrRatioT1Short, "#.#") + ','
+    json := json + '"rr_ratio_t2":' + str.tostring(rrRatioT2Short, "#.#") + ','
+    json := json + '"amount":' + str.tostring(maxRiskDollars, "#.##") + ','
+    json := json + '"stop_distance_pct":' + str.tostring(stopDistancePctShort, "#.##") + ','
+    json := json + '"recommended_shares":' + str.tostring(recommendedSharesShort) + ','
+    json := json + '"recommended_contracts":' + str.tostring(recommendedContractsShort) + ','
+    json := json + '"risk_per_contract":' + str.tostring(riskAmountShort, "#.##") + ','
+    json := json + '"position_multiplier":' + str.tostring(positionSizeMultiplierShort, "#.#") + ','
+    json := json + '"account_risk_pct":' + str.tostring(riskPerTrade, "#.#") + ','
+    json := json + '"max_loss_dollars":' + str.tostring(maxLossDollarsShort, "#.##")
+    json := json + '},'
+    
+    // === MARKET CONTEXT ===
+    json := json + '"market_context":{'
+    json := json + '"vwap":' + str.tostring(safeVwap, "#.##") + ','
+    json := json + '"pmh":' + str.tostring(safePmh, "#.##") + ','
+    json := json + '"pml":' + str.tostring(safePml, "#.##") + ','
+    json := json + '"day_open":' + str.tostring(safeDayOpen, "#.##") + ','
+    json := json + '"day_change_pct":' + str.tostring(dayChangePct, "#.##") + ','
+    json := json + '"price_vs_vwap_pct":' + str.tostring(priceVsVwapPct, "#.##") + ','
+    json := json + '"distance_to_pmh_pct":' + str.tostring(distanceToPmhPct, "#.##") + ','
+    json := json + '"distance_to_pml_pct":' + str.tostring(distanceToPmlPct, "#.##") + ','
+    json := json + '"atr":' + str.tostring(safeAtr, "#.##") + ','
+    json := json + '"volume_vs_avg":' + str.tostring(safeVolumeRatio, "#.##") + ','
+    json := json + '"candle_direction":"' + candleDirection + '",'
+    json := json + '"candle_size_atr":' + str.tostring(safeCandleSizeATR, "#.#")
+    json := json + '},'
+    
+    // === TREND DATA ===
+    json := json + '"trend_data":{'
+    json := json + '"ema_8":' + str.tostring(safeEmaFast, "#.##") + ','
+    json := json + '"ema_21":' + str.tostring(safeEmaSlow, "#.##") + ','
+    json := json + '"ema_50":' + str.tostring(safeEma50, "#.##") + ','
+    json := json + '"alignment":"' + trendAlignment + '",'
+    json := json + '"strength":' + str.tostring(safeTrendStrength, "#") + ','
+    json := json + '"rsi":' + str.tostring(safeRsi, "#.#") + ','
+    json := json + '"macd_signal":"' + macdSignalStr + '"'
+    json := json + '},'
+    
+    // === MTF CONTEXT (ENHANCED) ===
+    json := json + '"mtf_context":{'
+    json := json + '"12h_bias":"' + (bias12HR ? "LONG" : "SHORT") + '",'
+    json := json + '"4h_bias":"' + bias4HRStr + '",'
+    json := json + '"4h_rsi":' + str.tostring(safeMomentum4HR, "#.#") + ','
+    json := json + '"1h_bias":"' + bias1HRStr + '",'
+    json := json + '"1h_rsi":' + str.tostring(momentum1HR, "#.#") + ','
+    json := json + '"local_trend":"' + trendAlignment + '",'
+    json := json + '"macro_bias":"' + (bias12HR ? "BULLISH" : "BEARISH") + '"'
+    json := json + '},'
+    
+    // === SCORE BREAKDOWN ===
+    json := json + '"score_breakdown":{'
+    json := json + '"total":' + str.tostring(scoreBear, "#.#") + ','
+    json := json + '"strat":' + str.tostring(stratScoreBear, "#.#") + ','
+    json := json + '"trend":' + str.tostring(trendScoreBear, "#.#") + ','
+    json := json + '"gamma":' + str.tostring(gammaScoreBear, "#.#") + ','
+    json := json + '"vwap":' + str.tostring(vwapScoreBear, "#.#") + ','
+    json := json + '"mtf":' + str.tostring(mtfScoreBear, "#.#") + ','
+    json := json + '"golf":' + str.tostring(golfScoreBear, "#.#")
+    json := json + '},'
+    
+    // === COMPONENTS ARRAY ===
+    json := json + '"components":[' + componentsShort + '],'
+    
+    // === TIME CONTEXT ===
+    json := json + '"time_context":{'
+    json := json + '"market_session":"' + marketSession + '",'
+    json := json + '"day_of_week":"' + dayOfWeekStr + '",'
+    json := json + '"bar_time":"' + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ss'Z'", "UTC") + '"'
+    json := json + '}}'
+    
+    json
+
+buildTestJson() =>
+    '{"test":true,"type":"PING","source":"SIGNALS","indicator":"Ultimate_Options_Strategy","ticker":"' + syminfo.ticker + '","direction":"NEUTRAL","price":' + str.tostring(close, "#.##") + ',"timestamp":' + str.tostring(math.round(time / 1000)) + ',"confidence":0,"score_bull":' + str.tostring(scoreBull, "#.#") + ',"score_bear":' + str.tostring(scoreBear, "#.#") + ',"market_session":"' + marketSession + '"}'
+
+// === SEND ALERTS ===
+if longSignal and enableSignalsWebhook and barstate.isconfirmed
+    alert(buildJsonLong(), alert.freq_once_per_bar)
+
+if shortSignal and enableSignalsWebhook and barstate.isconfirmed
+    alert(buildJsonShort(), alert.freq_once_per_bar)
+
+if enableTestMode and barstate.isconfirmed
+    alert(buildTestJson(), alert.freq_once_per_bar)
+
+// === DEBUG PANEL ===
+var table debugTable = table.new(position.bottom_left, 2, 12, bgcolor=color.new(color.black, 85), border_width=1)
+
+if showDebugPanel and barstate.islast
+    table.cell(debugTable, 0, 0, "🔍 SIGNAL DEBUG", text_color=color.white, text_size=size.small, bgcolor=color.new(color.purple, 60))
+    table.cell(debugTable, 1, 0, "Status", text_color=color.white, text_size=size.small, bgcolor=color.new(color.purple, 60))
+    
+    scoreOK = scoreBull >= minScoreForSignal or scoreBear >= minScoreForSignal
+    table.cell(debugTable, 0, 1, "Score >= " + str.tostring(minScoreForSignal), text_color=color.white, text_size=size.tiny)
+    table.cell(debugTable, 1, 1, scoreOK ? "✅ " + str.tostring(math.max(scoreBull, scoreBear), "#.#") : "❌ " + str.tostring(math.max(scoreBull, scoreBear), "#.#"), text_color=scoreOK ? color.green : color.red, text_size=size.tiny)
+    
+    table.cell(debugTable, 0, 2, "VWAP Check", text_color=color.white, text_size=size.tiny)
+    vwapStatus = not requireVWAPConfirmation ? "⏭ SKIP" : (close > vwap ? "✅ BULL" : close < vwap ? "✅ BEAR" : "❌")
+    table.cell(debugTable, 1, 2, vwapStatus, text_color=not requireVWAPConfirmation ? color.gray : color.green, text_size=size.tiny)
+    
+    table.cell(debugTable, 0, 3, "Golf Check", text_color=color.white, text_size=size.tiny)
+    golfStatus = not requireGolfConfirmation ? "⏭ SKIP" : ((golfC1 or golfC3) ? "✅ BULL" : golfC2 ? "✅ BEAR" : "❌")
+    table.cell(debugTable, 1, 3, golfStatus, text_color=not requireGolfConfirmation ? color.gray : ((golfC1 or golfC3 or golfC2) ? color.green : color.red), text_size=size.tiny)
+    
+    table.cell(debugTable, 0, 4, "Trend OK", text_color=color.white, text_size=size.tiny)
+    trendStatus = trendUp ? "✅ UP" : trendDown ? "✅ DOWN" : "✅ NEUTRAL"
+    table.cell(debugTable, 1, 4, trendStatus, text_color=color.green, text_size=size.tiny)
+    
+    table.cell(debugTable, 0, 5, "Trigger Cond", text_color=color.white, text_size=size.tiny)
+    triggerStatus = not requireTriggerCondition ? "⏭ SKIP" : (hasTriggerLong ? "✅ LONG" : hasTriggerShort ? "✅ SHORT" : "❌")
+    table.cell(debugTable, 1, 5, triggerStatus, text_color=not requireTriggerCondition ? color.gray : ((hasTriggerLong or hasTriggerShort) ? color.green : color.red), text_size=size.tiny)
+    
+    table.cell(debugTable, 0, 6, "LONG SIGNAL", text_color=color.white, text_size=size.tiny, bgcolor=color.new(color.green, 80))
+    table.cell(debugTable, 1, 6, longSignal ? "🟢 ACTIVE" : "⚫ NO", text_color=longSignal ? color.lime : color.gray, text_size=size.tiny, bgcolor=color.new(color.green, 80))
+    
+    table.cell(debugTable, 0, 7, "SHORT SIGNAL", text_color=color.white, text_size=size.tiny, bgcolor=color.new(color.red, 80))
+    table.cell(debugTable, 1, 7, shortSignal ? "🔴 ACTIVE" : "⚫ NO", text_color=shortSignal ? color.red : color.gray, text_size=size.tiny, bgcolor=color.new(color.red, 80))
+    
+    table.cell(debugTable, 0, 8, "Bull Score", text_color=color.white, text_size=size.tiny)
+    table.cell(debugTable, 1, 8, str.tostring(scoreBull, "#.#") + " (T:" + str.tostring(trendScore, "#.#") + " V:" + str.tostring(vwapScore, "#.#") + " M:" + str.tostring(mtfScore, "#.#") + ")", text_color=color.lime, text_size=size.tiny)
+    
+    table.cell(debugTable, 0, 9, "Bear Score", text_color=color.white, text_size=size.tiny)
+    table.cell(debugTable, 1, 9, str.tostring(scoreBear, "#.#") + " (T:" + str.tostring(trendScoreBear, "#.#") + " V:" + str.tostring(vwapScoreBear, "#.#") + " M:" + str.tostring(mtfScoreBear, "#.#") + ")", text_color=color.red, text_size=size.tiny)
+    
+    table.cell(debugTable, 0, 10, "TEST MODE", text_color=color.white, text_size=size.tiny)
+    table.cell(debugTable, 1, 10, enableTestMode ? "🧪 ON" : "OFF", text_color=enableTestMode ? color.yellow : color.gray, text_size=size.tiny)
+    
+    table.cell(debugTable, 0, 11, "Webhook", text_color=color.white, text_size=size.tiny)
+    table.cell(debugTable, 1, 11, enableSignalsWebhook ? "✅ ON" : "❌ OFF", text_color=enableSignalsWebhook ? color.green : color.red, text_size=size.tiny)
+
+// === INFO TABLE ===
+var table infoTable = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Signals v3 Enhanced", text_color=color.white, text_size=size.small, bgcolor=color.new(color.blue, 60))
+    table.cell(infoTable, 1, 0, enableSignalsWebhook ? "✅ ON" : "❌ OFF", text_color=enableSignalsWebhook ? color.green : color.red, text_size=size.small, bgcolor=color.new(color.blue, 60))
+    table.cell(infoTable, 0, 1, "Session:", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 1, marketSession, text_color=color.aqua, text_size=size.tiny)
+    table.cell(infoTable, 0, 2, "Timeframe:", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 2, validTimeframe, text_color=color.yellow, text_size=size.tiny)
+    table.cell(infoTable, 0, 3, "Min Score:", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 3, str.tostring(minScoreForSignal, "#.#"), text_color=color.orange, text_size=size.tiny)
+    table.cell(infoTable, 0, 4, "Test Mode:", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 4, enableTestMode ? "🧪 ACTIVE" : "Off", text_color=enableTestMode ? color.yellow : color.gray, text_size=size.tiny)
+    table.cell(infoTable, 0, 5, "Endpoint:", text_color=color.white, text_size=size.tiny)
+    table.cell(infoTable, 1, 5, "Phase 2.5", text_color=color.lime, text_size=size.tiny)
+
+// === ALERT CONDITIONS ===
+alertcondition(longSignal, title="🟢 LONG Signal", message="{{strategy.order.alert_message}}")
+alertcondition(shortSignal, title="🔴 SHORT Signal", message="{{strategy.order.alert_message}}")
+alertcondition(scoreBull >= extremeScoreThreshold or scoreBear >= extremeScoreThreshold, title="⚡ EXTREME Score", message="EXTREME Score")
+alertcondition(enableTestMode, title="🧪 TEST - Every Bar", message="{{strategy.order.alert_message}}")
+alertcondition(true, title="📡 ANY BAR (Test Webhook)", message="Webhook test ping")
