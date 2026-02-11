@@ -252,6 +252,56 @@ async function main() {
     });
   }
 
+  logSection('Step 5: Sample Raw Payload per Detected Source (All)');
+  if (hasWebhookRawPayload) {
+    results.push(
+      await runQuery(
+        'Sample raw payload per detected_source',
+        `SELECT DISTINCT ON (detected_source)
+           detected_source,
+           raw_payload,
+           status,
+           created_at
+         FROM (
+           SELECT
+             raw_payload,
+             status,
+             created_at,
+             CASE
+               WHEN raw_payload->>'meta' IS NOT NULL
+                 AND raw_payload->'meta'->>'engine' = 'SATY_PO'
+                 THEN 'SATY_PHASE'
+               WHEN raw_payload->>'journal' IS NOT NULL
+                 AND raw_payload->'journal'->>'engine' = 'STRAT_V6_FULL'
+                 THEN 'STRAT'
+               WHEN raw_payload->>'timeframes' IS NOT NULL
+                 AND raw_payload->>'bias' IS NOT NULL
+                 THEN 'TREND'
+               WHEN raw_payload->>'indicator' IS NOT NULL
+                 AND raw_payload->>'indicator' IN ('ORB', 'Stretch', 'BHCH', 'EMA')
+                 THEN 'ORB'
+               WHEN raw_payload->>'trend' IS NOT NULL
+                 AND raw_payload->>'score' IS NOT NULL
+                 AND raw_payload->>'signal' IS NOT NULL
+                 THEN 'SIGNALS'
+               ELSE 'UNKNOWN / GENERIC_TV'
+             END AS detected_source
+           FROM webhook_events
+           WHERE created_at >= CURRENT_DATE
+             AND COALESCE(is_test, false) = false
+             AND raw_payload IS NOT NULL
+         ) sub
+         ORDER BY detected_source, created_at DESC`
+      )
+    );
+  } else {
+    results.push({
+      name: 'Sample raw payload per detected_source',
+      rows: [],
+      error: 'webhook_events.raw_payload column missing',
+    });
+  }
+
   for (const result of results) {
     logResult(result);
   }

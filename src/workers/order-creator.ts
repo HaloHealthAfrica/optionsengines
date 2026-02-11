@@ -117,6 +117,14 @@ export class OrderCreatorWorker {
       );
       const riskLimit = riskLimitsResult.rows[0] || {};
       const maxPositionSize = riskLimit.max_position_size || config.maxPositionSize || 1;
+      const openPositionsResult = await db.query(
+        `SELECT COUNT(*)::int AS count FROM refactored_positions WHERE status IN ('open', 'closing')`
+      );
+      const openPositions = openPositionsResult.rows[0]?.count || 0;
+      const capacityRatio =
+        config.maxOpenPositions > 0
+          ? Math.max(0.25, (config.maxOpenPositions - openPositions) / config.maxOpenPositions)
+          : 1;
 
       for (const signal of signals.rows) {
         try {
@@ -126,7 +134,7 @@ export class OrderCreatorWorker {
           const optionType = signal.direction === 'long' ? 'call' : 'put';
           const optionSymbol = buildOptionSymbol(signal.symbol, expiration, optionType, strike);
 
-          const quantity = Math.max(1, Math.floor(maxPositionSize));
+          const quantity = Math.max(1, Math.floor(maxPositionSize * capacityRatio));
 
           await db.query(
             `INSERT INTO orders (

@@ -3,6 +3,7 @@
  */
 
 import { config } from '../config/index.js';
+import { evaluateMarketSession } from '../utils/market-session.js';
 import { TradeRecommendation, Signal, MarketContext } from './types.js';
 import { logger } from '../utils/logger.js';
 import { selectStrike } from '../services/strike-selection.service.js';
@@ -119,11 +120,26 @@ async function buildEngineBRecommendation(
         ttmSqueeze: { state: 'off', momentum: 0 },
       };
     }
+    const signalTimestamp =
+      signal.timestamp instanceof Date ? signal.timestamp : new Date(signal.timestamp);
+    const sessionEvaluation = evaluateMarketSession({
+      timestamp: signalTimestamp,
+      allowPremarket: config.allowPremarket,
+      allowAfterhours: config.allowAfterhours,
+      gracePeriodMinutes: config.marketCloseGraceMinutes,
+    });
     const marketHours = await marketData.getMarketHours();
-    const isMarketOpen = marketHours.isMarketOpen;
+    const isMarketOpen = sessionEvaluation.isOpen;
+    const sessionType = sessionEvaluation.sessionType === 'RTH' ? 'RTH' : 'ETH';
+    const minutesUntilClose =
+      sessionType === 'RTH' && marketHours.isMarketOpen ? marketHours.minutesUntilClose : undefined;
     const riskResult = enrichment.riskResult || {};
+    const effectiveOpenPositions = Number(
+      riskResult.effectiveOpenPositions ?? riskResult.openPositions ?? 0
+    );
     const positionLimitExceeded =
-      Number(riskResult.openPositions ?? 0) >= Number(riskResult.maxOpenPositions ?? Number.POSITIVE_INFINITY) ||
+      effectiveOpenPositions >=
+        Number(riskResult.maxOpenPositions ?? Number.POSITIVE_INFINITY) ||
       Number(riskResult.openSymbolPositions ?? 0) >= Number(riskResult.maxPositionsPerSymbol ?? Number.POSITIVE_INFINITY);
 
     const marketContextForAgents: MarketData = {
@@ -131,9 +147,9 @@ async function buildEngineBRecommendation(
       indicators,
       currentPrice,
       sessionContext: {
-        sessionType: isMarketOpen ? 'RTH' : 'ETH',
+        sessionType,
         isMarketOpen,
-        minutesUntilClose: marketHours.minutesUntilClose,
+        minutesUntilClose,
       },
       gex: enrichment.enrichedData.gex || null,
       optionsFlow: enrichment.enrichedData.optionsFlow || null,
@@ -150,7 +166,7 @@ async function buildEngineBRecommendation(
       direction: signal.direction,
       timeframe: signal.timeframe,
       timestamp: signal.timestamp,
-      sessionType: isMarketOpen ? 'RTH' : 'ETH',
+      sessionType,
     };
 
     const metaAgent = new MetaDecisionAgent();

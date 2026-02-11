@@ -47,13 +47,16 @@ export class SignalProcessor {
            FROM signals
            WHERE processed = FALSE AND processing_lock = FALSE
              AND (status IS NULL OR status = 'pending')
+             AND (queued_until IS NULL OR queued_until <= NOW())
+             AND (next_retry_at IS NULL OR next_retry_at <= NOW())
            ${signalFilter}
            ORDER BY timestamp ASC
            LIMIT $1
            FOR UPDATE SKIP LOCKED
          )
          RETURNING signal_id, symbol, direction, timeframe, timestamp,
-                   signal_hash, raw_payload, processed, experiment_id, status, created_at`,
+                   signal_hash, raw_payload, processed, experiment_id, status, created_at,
+                   queued_until, queue_reason, processing_attempts, next_retry_at`,
         params
       );
 
@@ -235,7 +238,11 @@ export class SignalProcessor {
     try {
       await client.query(
         `UPDATE signals
-         SET processed = TRUE, experiment_id = $1, processing_lock = FALSE
+         SET processed = TRUE,
+             experiment_id = $1,
+             processing_lock = FALSE,
+             next_retry_at = NULL,
+             processing_attempts = 0
          WHERE signal_id = $2`,
         [experiment_id, signal_id]
       );
@@ -274,9 +281,50 @@ export class SignalProcessor {
       await client.query(
         `UPDATE signals
          SET status = $1,
-             rejection_reason = $3
+             rejection_reason = $3,
+             processing_lock = FALSE,
+             next_retry_at = NULL
          WHERE signal_id = $2`,
         [status, signal_id, rejectionReason ?? null]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async queueSignal(signal_id: string, queuedUntil: Date, reason: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query(
+        `UPDATE signals
+         SET queued_until = $1,
+             queued_at = NOW(),
+             queue_reason = $2,
+             processing_lock = FALSE
+         WHERE signal_id = $3`,
+        [queuedUntil, reason, signal_id]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async scheduleRetry(
+    signal_id: string,
+    attempts: number,
+    nextRetryAt: Date,
+    reason: string
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query(
+        `UPDATE signals
+         SET processing_attempts = $1,
+             next_retry_at = $2,
+             rejection_reason = $3,
+             processing_lock = FALSE
+         WHERE signal_id = $4`,
+        [attempts, nextRetryAt, reason, signal_id]
       );
     } finally {
       client.release();

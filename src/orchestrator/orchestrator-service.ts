@@ -31,21 +31,145 @@ export class OrchestratorService {
     private shadowExecutor?: ShadowExecutor
   ) {}
 
-  async processSignals(limit: number = 10, signalIds?: string[]): Promise<ExperimentResult[]> {
+  async processSignals(
+    limit: number = 10,
+    signalIds?: string[],
+    options?: {
+      concurrency?: number;
+      timeoutMs?: number;
+      retryDelayMs?: number;
+    }
+  ): Promise<ExperimentResult[]> {
     const signals = await this.signalProcessor.getUnprocessedSignals(limit, signalIds);
     const results: ExperimentResult[] = [];
+    const queue = [...signals];
+    const concurrency = Math.max(1, options?.concurrency ?? 1);
+    const timeoutMs = Math.max(1000, options?.timeoutMs ?? 30000);
+    const retryDelayMs = Math.max(1000, options?.retryDelayMs ?? 60000);
 
-    for (const signal of signals) {
-      const result = await this.processSignal(signal);
-      results.push(result);
-    }
+    const workers = Array.from({ length: Math.min(concurrency, queue.length) }).map(async () => {
+      while (queue.length > 0) {
+        const signal = queue.shift();
+        if (!signal) {
+          break;
+        }
+        const result = await this.processSignalWithTimeout(signal, timeoutMs, retryDelayMs);
+        results.push(result);
+      }
+    });
+
+    await Promise.all(workers);
 
     return results;
   }
 
+  private async processSignalWithTimeout(
+    signal: Signal,
+    timeoutMs: number,
+    retryDelayMs: number
+  ): Promise<ExperimentResult> {
+    const startedAt = Date.now();
+    const timeoutPromise = new Promise<ExperimentResult>((resolve) => {
+      setTimeout(() => {
+        resolve({
+          experiment: {} as any,
+          policy: {} as any,
+          market_context: {} as any,
+          success: false,
+          error: 'processing_timeout',
+        });
+      }, timeoutMs);
+    });
+
+    try {
+      const result = await Promise.race([this.processSignal(signal), timeoutPromise]);
+      const durationMs = Date.now() - startedAt;
+
+      if (result.error === 'processing_timeout') {
+        return this.handleProcessingFailure(signal, 'processing_timeout', retryDelayMs, durationMs);
+      }
+
+      return { ...result, duration_ms: durationMs };
+    } catch (error) {
+      const durationMs = Date.now() - startedAt;
+      logger.error('Signal processing failed (caught)', error, { signal_id: signal.signal_id });
+      return this.handleProcessingFailure(signal, 'processing_failed', retryDelayMs, durationMs);
+    }
+  }
+
+  private async handleProcessingFailure(
+    signal: Signal,
+    reason: string,
+    retryDelayMs: number,
+    durationMs: number
+  ): Promise<ExperimentResult> {
+    const attempts = Number(signal.processing_attempts ?? 0);
+    if (attempts < 1) {
+      const nextRetryAt = new Date(Date.now() + retryDelayMs);
+      await this.signalProcessor.scheduleRetry(
+        signal.signal_id,
+        attempts + 1,
+        nextRetryAt,
+        reason
+      );
+      return {
+        experiment: {} as any,
+        policy: {} as any,
+        market_context: {} as any,
+        success: false,
+        error: `retry_scheduled:${reason}`,
+        duration_ms: durationMs,
+      };
+    }
+
+    await this.signalProcessor.updateStatus(signal.signal_id, 'rejected', reason);
+    await this.signalProcessor.markFailed(signal.signal_id);
+
+    return {
+      experiment: {} as any,
+      policy: {} as any,
+      market_context: {} as any,
+      success: false,
+      error: reason,
+      duration_ms: durationMs,
+    };
+  }
+
   async processSignal(signal: Signal): Promise<ExperimentResult> {
+    const startedAt = Date.now();
     try {
       const enrichment = await buildSignalEnrichment(signal);
+      if (enrichment.queueUntil) {
+        await this.signalProcessor.queueSignal(
+          signal.signal_id,
+          enrichment.queueUntil,
+          enrichment.queueReason || 'market_closed'
+        );
+        return {
+          experiment: {} as any,
+          policy: {} as any,
+          market_context: {} as any,
+          success: false,
+          error: 'queued_market_closed',
+          duration_ms: Date.now() - startedAt,
+        };
+      }
+      if (enrichment.rejectionReason) {
+        await this.signalProcessor.updateStatus(
+          signal.signal_id,
+          'rejected',
+          enrichment.rejectionReason
+        );
+        await this.signalProcessor.markFailed(signal.signal_id);
+        return {
+          experiment: {} as any,
+          policy: {} as any,
+          market_context: {} as any,
+          success: false,
+          error: enrichment.rejectionReason,
+          duration_ms: Date.now() - startedAt,
+        };
+      }
       const market_context = await this.createMarketContext(signal);
       const experiment = await this.createExperiment(signal);
       signal.experiment_id = experiment.experiment_id;
@@ -105,20 +229,13 @@ export class OrchestratorService {
         engine_a_recommendation: engine_a_recommendation ?? undefined,
         engine_b_recommendation: engine_b_recommendation ?? undefined,
         success: true,
+        duration_ms: Date.now() - startedAt,
       };
     } catch (error: any) {
       logger.error('Failed to process signal', error, {
         signal_id: signal.signal_id,
       });
-      await this.signalProcessor.updateStatus(signal.signal_id, 'rejected', 'processing_error');
-      await this.signalProcessor.markFailed(signal.signal_id);
-      return {
-        experiment: {} as any,
-        policy: {} as any,
-        market_context: {} as any,
-        success: false,
-        error: error?.message ?? 'Unknown error',
-      };
+      throw error;
     }
   }
 

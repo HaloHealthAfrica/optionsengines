@@ -13,6 +13,7 @@ jest.mock('../../services/database.service.js', () => ({
 jest.mock('../../services/market-data.js', () => ({
   marketData: {
     isMarketOpen: jest.fn(),
+    getMarketHours: jest.fn(),
     getCandles: jest.fn(),
     getIndicators: jest.fn(),
     getStockPrice: jest.fn(),
@@ -27,12 +28,19 @@ describe('Property 10: Risk check attribution', () => {
   const symbolArb = fc.constantFrom('SPY', 'QQQ', 'AAPL');
   const timeframeArb = fc.constantFrom('1m', '5m', '15m');
 
-  test('Property: Market closed causes rejection with reason', async () => {
+  test('Property: Market closed queues signal for later', async () => {
     await fc.assert(
       fc.asyncProperty(symbolArb, timeframeArb, async (symbol, timeframe) => {
-        const captured: { rejectionReason?: string; statusUpdate?: string } = {};
+        const captured: { rejectionReason?: string; statusUpdate?: string; queuedUntil?: Date } = {};
+
+        const fixedNow = new Date('2026-02-09T02:00:00.000Z');
+        const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(fixedNow.getTime());
 
         (marketData.isMarketOpen as jest.Mock).mockResolvedValue(false);
+        (marketData.getMarketHours as jest.Mock).mockResolvedValue({
+          isMarketOpen: false,
+          nextOpen: new Date('2026-02-09T14:30:00.000Z'),
+        });
         (marketData.getCandles as jest.Mock).mockResolvedValue([]);
         (marketData.getIndicators as jest.Mock).mockResolvedValue({
           ema8: [],
@@ -56,7 +64,7 @@ describe('Property 10: Risk check attribution', () => {
                   symbol,
                   direction: 'long',
                   timeframe,
-                  timestamp: new Date(),
+                  timestamp: new Date(fixedNow.getTime()),
                 },
               ],
             };
@@ -75,6 +83,11 @@ describe('Property 10: Risk check attribution', () => {
             return { rows: [] };
           }
 
+          if (text.includes('SET queued_until')) {
+            captured.queuedUntil = params?.[0];
+            return { rows: [] };
+          }
+
           if (text.includes('INSERT INTO refactored_signals')) {
             captured.rejectionReason = params?.[3];
             return { rows: [] };
@@ -86,14 +99,17 @@ describe('Property 10: Risk check attribution', () => {
         const worker = new SignalProcessorWorker();
         await worker.run();
 
-        expect(captured.statusUpdate).toBe('rejected');
-        expect(captured.rejectionReason).toBe('market_closed');
+        expect(captured.statusUpdate).toBeUndefined();
+        expect(captured.rejectionReason).toBeUndefined();
+        expect(captured.queuedUntil).toBeInstanceOf(Date);
 
         (db.query as jest.Mock).mockClear();
         (marketData.isMarketOpen as jest.Mock).mockClear();
+        (marketData.getMarketHours as jest.Mock).mockClear();
         (marketData.getCandles as jest.Mock).mockClear();
         (marketData.getIndicators as jest.Mock).mockClear();
         (marketData.getStockPrice as jest.Mock).mockClear();
+        nowSpy.mockRestore();
       }),
       { numRuns: 30 }
     );

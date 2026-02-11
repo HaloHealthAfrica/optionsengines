@@ -398,6 +398,8 @@ export class MarketDataService {
   async getMarketHours(): Promise<{
     isMarketOpen: boolean;
     minutesUntilClose?: number;
+    nextOpen?: Date;
+    nextClose?: Date;
   }> {
     try {
       const hours = await retry(() => this.alpaca.getMarketHours(), {
@@ -418,6 +420,8 @@ export class MarketDataService {
       return {
         isMarketOpen: hours.isOpen,
         minutesUntilClose,
+        nextOpen: hours.nextOpen,
+        nextClose: hours.nextClose,
       };
     } catch (error) {
       this.recordFailure('alpaca');

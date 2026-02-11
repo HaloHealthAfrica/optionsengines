@@ -17,6 +17,11 @@ export const SignalSchema = z.object({
   processed: z.boolean(),
   experiment_id: z.string().uuid().optional(),
   status: z.string().optional(),
+  queued_until: z.date().nullable().optional(),
+  queued_at: z.date().nullable().optional(),
+  queue_reason: z.string().nullable().optional(),
+  processing_attempts: z.number().int().nonnegative().optional(),
+  next_retry_at: z.date().nullable().optional(),
   created_at: z.date().optional(),
 });
 
@@ -131,6 +136,7 @@ export const ExperimentResultSchema = z.object({
   engine_b_recommendation: TradeRecommendationSchema.optional(),
   success: z.boolean(),
   error: z.string().optional(),
+  duration_ms: z.number().int().nonnegative().optional(),
 });
 
 /**

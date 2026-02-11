@@ -17,6 +17,11 @@ export interface Signal {
   processed: boolean; // Processing status
   experiment_id?: string; // Link to experiment (optional until created)
   status?: string; // Signal status (pending, approved, rejected)
+  queued_until?: Date | null;
+  queued_at?: Date | null;
+  queue_reason?: string | null;
+  processing_attempts?: number;
+  next_retry_at?: Date | null;
   created_at?: Date;
 }
 
@@ -120,6 +125,7 @@ export interface ExperimentResult {
   engine_b_recommendation?: TradeRecommendation;
   success: boolean;
   error?: string;
+  duration_ms?: number;
 }
 
 /**

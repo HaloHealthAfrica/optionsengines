@@ -50,15 +50,34 @@ interface Config {
   signalProcessorInterval: number;
   orderCreatorInterval: number;
   paperExecutorInterval: number;
+  paperExecutorBatchSize: number;
   positionRefresherInterval: number;
   exitMonitorInterval: number;
   orchestratorIntervalMs: number;
+  orchestratorBatchSize: number;
+  orchestratorConcurrency: number;
+  orchestratorSignalTimeoutMs: number;
+  orchestratorRetryDelayMs: number;
+  processingQueueDepthAlert: number;
+  processingQueueDepthDurationSec: number;
 
   // Risk Management
   maxPositionSize: number;
   maxDailyLoss: number;
   maxOpenPositions: number;
   maxExposurePercent: number;
+  allowPremarket: boolean;
+  allowAfterhours: boolean;
+  marketCloseGraceMinutes: number;
+  signalMaxAgeMinutes: number;
+  maxDailyTrades: number;
+  positionReplacementEnabled: boolean;
+  minConfidenceForReplacement: number;
+  autoCloseNearTarget: boolean;
+  autoCloseNearTargetThresholdPct: number;
+  closeAgedPositions: boolean;
+  closeAgedAfterHours: number;
+  closeAgedBelowPnlPercent: number;
 
   // Exit Rules
   profitTargetPct: number;
@@ -107,10 +126,12 @@ function getEnvVarBoolean(key: string, defaultValue: boolean): boolean {
   return value.toLowerCase() === 'true';
 }
 
+const nodeEnv = getEnvVar('NODE_ENV', 'development');
+
 export const config: Config = {
   // Server
   port: getEnvVarNumber('PORT', 8080),
-  nodeEnv: getEnvVar('NODE_ENV', 'development'),
+  nodeEnv,
   appMode: (getEnvVar('APP_MODE', 'PAPER') as 'PAPER' | 'LIVE'),
 
   // Database
@@ -161,15 +182,40 @@ export const config: Config = {
   signalProcessorInterval: getEnvVarNumber('SIGNAL_PROCESSOR_INTERVAL', 30000),
   orderCreatorInterval: getEnvVarNumber('ORDER_CREATOR_INTERVAL', 30000),
   paperExecutorInterval: getEnvVarNumber('PAPER_EXECUTOR_INTERVAL', 10000),
+  paperExecutorBatchSize: getEnvVarNumber('PAPER_EXECUTOR_BATCH_SIZE', 10),
   positionRefresherInterval: getEnvVarNumber('POSITION_REFRESHER_INTERVAL', 60000),
   exitMonitorInterval: getEnvVarNumber('EXIT_MONITOR_INTERVAL', 60000),
   orchestratorIntervalMs: getEnvVarNumber('ORCHESTRATOR_INTERVAL_MS', 30000),
+  orchestratorBatchSize: getEnvVarNumber('ORCHESTRATOR_BATCH_SIZE', 20),
+  orchestratorConcurrency: getEnvVarNumber('ORCHESTRATOR_CONCURRENCY', 5),
+  orchestratorSignalTimeoutMs: getEnvVarNumber('ORCHESTRATOR_SIGNAL_TIMEOUT_MS', 30000),
+  orchestratorRetryDelayMs: getEnvVarNumber('ORCHESTRATOR_RETRY_DELAY_MS', 60000),
+  processingQueueDepthAlert: getEnvVarNumber('PROCESSING_QUEUE_DEPTH_ALERT', 20),
+  processingQueueDepthDurationSec: getEnvVarNumber('PROCESSING_QUEUE_DEPTH_DURATION_SEC', 300),
 
   // Risk Management
   maxPositionSize: getEnvVarNumber('MAX_POSITION_SIZE', 10),
   maxDailyLoss: getEnvVarNumber('MAX_DAILY_LOSS', 1000),
   maxOpenPositions: getEnvVarNumber('MAX_OPEN_POSITIONS', 5),
   maxExposurePercent: getEnvVarNumber('MAX_EXPOSURE_PERCENT', 20),
+  allowPremarket: getEnvVarBoolean('ALLOW_PREMARKET', nodeEnv === 'test'),
+  allowAfterhours: getEnvVarBoolean('ALLOW_AFTERHOURS', nodeEnv === 'test'),
+  marketCloseGraceMinutes: getEnvVarNumber('MARKET_CLOSE_GRACE_MINUTES', 10),
+  signalMaxAgeMinutes: getEnvVarNumber('SIGNAL_MAX_AGE_MINUTES', 30),
+  maxDailyTrades: getEnvVarNumber('MAX_DAILY_TRADES', nodeEnv === 'test' ? 500 : 0),
+  positionReplacementEnabled: getEnvVarBoolean(
+    'POSITION_REPLACEMENT_ENABLED',
+    nodeEnv === 'test'
+  ),
+  minConfidenceForReplacement: getEnvVarNumber('MIN_CONFIDENCE_FOR_REPLACEMENT', 70),
+  autoCloseNearTarget: getEnvVarBoolean('AUTO_CLOSE_NEAR_TARGET', nodeEnv === 'test'),
+  autoCloseNearTargetThresholdPct: getEnvVarNumber(
+    'AUTO_CLOSE_NEAR_TARGET_THRESHOLD_PCT',
+    80
+  ),
+  closeAgedPositions: getEnvVarBoolean('CLOSE_AGED_POSITIONS', nodeEnv === 'test'),
+  closeAgedAfterHours: getEnvVarNumber('CLOSE_AGED_AFTER_HOURS', 2),
+  closeAgedBelowPnlPercent: getEnvVarNumber('CLOSE_AGED_BELOW_PNL_PERCENT', 10),
 
   // Exit Rules
   profitTargetPct: getEnvVarNumber('PROFIT_TARGET_PCT', 50),

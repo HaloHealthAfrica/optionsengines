@@ -2,6 +2,7 @@
 import { db } from '../services/database.service.js';
 import { marketData } from '../services/market-data.js';
 import { logger } from '../utils/logger.js';
+import { config } from '../config/index.js';
 import { sleep } from '../utils/sleep.js';
 import { errorTracker } from '../services/error-tracker.service.js';
 import { publishPositionUpdate, publishRiskUpdate } from '../services/realtime-updates.service.js';
@@ -102,8 +103,37 @@ export class PaperExecutorWorker {
 
       let filled = 0;
       let failed = 0;
+      let remainingTrades = Number.POSITIVE_INFINITY;
 
-      for (const order of orders.rows) {
+      if (config.maxDailyTrades > 0) {
+        const tradeCountResult = await db.query(
+          `SELECT COUNT(*)::int AS count
+           FROM trades t
+           JOIN orders o ON o.order_id = t.order_id
+           WHERE o.order_type = $1
+             AND t.fill_timestamp >= CURRENT_DATE`,
+          ['paper']
+        );
+        const tradeCount = tradeCountResult.rows[0]?.count || 0;
+        remainingTrades = Math.max(0, config.maxDailyTrades - tradeCount);
+
+        if (remainingTrades <= 0) {
+          logger.warn('Daily trade cap reached, skipping executions', {
+            maxDailyTrades: config.maxDailyTrades,
+            tradeCount,
+          });
+          return;
+        }
+      }
+
+      const maxOrders =
+        remainingTrades === Number.POSITIVE_INFINITY
+          ? orders.rows.length
+          : Math.min(orders.rows.length, Math.max(0, remainingTrades));
+      const limitedOrders = orders.rows.slice(0, maxOrders);
+      const batchSize = Math.max(1, config.paperExecutorBatchSize);
+
+      const processOrder = async (order: PendingOrder): Promise<'filled' | 'failed'> => {
         try {
           const price = await fetchOptionPriceWithRetry(
             order.symbol,
@@ -117,8 +147,7 @@ export class PaperExecutorWorker {
               `UPDATE orders SET status = $1 WHERE order_id = $2`,
               ['failed', order.order_id]
             );
-            failed += 1;
-            continue;
+            return 'failed';
           }
 
           const fillTimestamp = new Date();
@@ -203,7 +232,7 @@ export class PaperExecutorWorker {
             }
           }
 
-          filled += 1;
+          return 'filled';
         } catch (error) {
           logger.error('Paper execution failed', error, { orderId: order.order_id });
           errorTracker.recordError('paper_executor');
@@ -211,7 +240,21 @@ export class PaperExecutorWorker {
             'failed',
             order.order_id,
           ]);
-          failed += 1;
+          return 'failed';
+        }
+      };
+
+      for (let i = 0; i < limitedOrders.length; i += batchSize) {
+        const batch = limitedOrders.slice(i, i + batchSize);
+        const results = await Promise.all(batch.map((order) => processOrder(order)));
+        filled += results.filter((status) => status === 'filled').length;
+        failed += results.filter((status) => status === 'failed').length;
+        if (filled >= remainingTrades) {
+          logger.warn('Daily trade cap reached mid-run, stopping executions', {
+            maxDailyTrades: config.maxDailyTrades,
+            filled,
+          });
+          break;
         }
       }
 

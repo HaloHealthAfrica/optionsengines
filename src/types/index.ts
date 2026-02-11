@@ -8,6 +8,11 @@ export interface Signal {
   timestamp: Date;
   status: 'pending' | 'approved' | 'rejected';
   raw_payload?: Record<string, any>;
+  queued_until?: Date | null;
+  queued_at?: Date | null;
+  queue_reason?: string | null;
+  processing_attempts?: number;
+  next_retry_at?: Date | null;
   created_at: Date;
 }
 

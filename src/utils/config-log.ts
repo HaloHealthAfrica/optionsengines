@@ -19,12 +19,21 @@ type ConfigSummary = {
   signalProcessorInterval: number;
   orderCreatorInterval: number;
   paperExecutorInterval: number;
+  paperExecutorBatchSize: number;
   positionRefresherInterval: number;
   exitMonitorInterval: number;
   maxPositionSize: number;
   maxDailyLoss: number;
   maxOpenPositions: number;
   maxExposurePercent: number;
+  maxDailyTrades: number;
+  positionReplacementEnabled: boolean;
+  minConfidenceForReplacement: number;
+  autoCloseNearTarget: boolean;
+  autoCloseNearTargetThresholdPct: number;
+  closeAgedPositions: boolean;
+  closeAgedAfterHours: number;
+  closeAgedBelowPnlPercent: number;
   profitTargetPct: number;
   stopLossPct: number;
   timeStopDte: number;
@@ -34,6 +43,12 @@ type ConfigSummary = {
   enableOrchestrator: boolean;
   enableDualPaperTrading: boolean;
   enableMarketWebhookPipeline: boolean;
+  orchestratorBatchSize: number;
+  orchestratorConcurrency: number;
+  orchestratorSignalTimeoutMs: number;
+  orchestratorRetryDelayMs: number;
+  processingQueueDepthAlert: number;
+  processingQueueDepthDurationSec: number;
 };
 
 function maskDatabaseUrl(url: string): string {
@@ -68,6 +83,7 @@ export function logConfigSummary(summary: ConfigSummary = config): void {
       signalProcessorInterval: summary.signalProcessorInterval,
       orderCreatorInterval: summary.orderCreatorInterval,
       paperExecutorInterval: summary.paperExecutorInterval,
+      paperExecutorBatchSize: summary.paperExecutorBatchSize,
       positionRefresherInterval: summary.positionRefresherInterval,
       exitMonitorInterval: summary.exitMonitorInterval,
     },
@@ -76,6 +92,14 @@ export function logConfigSummary(summary: ConfigSummary = config): void {
       maxDailyLoss: summary.maxDailyLoss,
       maxOpenPositions: summary.maxOpenPositions,
       maxExposurePercent: summary.maxExposurePercent,
+      maxDailyTrades: summary.maxDailyTrades,
+      positionReplacementEnabled: summary.positionReplacementEnabled,
+      minConfidenceForReplacement: summary.minConfidenceForReplacement,
+      autoCloseNearTarget: summary.autoCloseNearTarget,
+      autoCloseNearTargetThresholdPct: summary.autoCloseNearTargetThresholdPct,
+      closeAgedPositions: summary.closeAgedPositions,
+      closeAgedAfterHours: summary.closeAgedAfterHours,
+      closeAgedBelowPnlPercent: summary.closeAgedBelowPnlPercent,
     },
     exitRules: {
       profitTargetPct: summary.profitTargetPct,
@@ -90,6 +114,12 @@ export function logConfigSummary(summary: ConfigSummary = config): void {
     orchestrator: {
       enableOrchestrator: summary.enableOrchestrator,
       enableDualPaperTrading: summary.enableDualPaperTrading,
+      orchestratorBatchSize: summary.orchestratorBatchSize,
+      orchestratorConcurrency: summary.orchestratorConcurrency,
+      orchestratorSignalTimeoutMs: summary.orchestratorSignalTimeoutMs,
+      orchestratorRetryDelayMs: summary.orchestratorRetryDelayMs,
+      processingQueueDepthAlert: summary.processingQueueDepthAlert,
+      processingQueueDepthDurationSec: summary.processingQueueDepthDurationSec,
     },
     marketWebhooks: {
       enableMarketWebhookPipeline: summary.enableMarketWebhookPipeline,

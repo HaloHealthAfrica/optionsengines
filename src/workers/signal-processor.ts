@@ -59,7 +59,12 @@ export class SignalProcessorWorker {
 
     try {
       const pendingSignals = await db.query<Signal>(
-        `SELECT * FROM signals WHERE status = $1 ORDER BY created_at ASC LIMIT 100`,
+        `SELECT * FROM signals 
+         WHERE status = $1
+           AND (queued_until IS NULL OR queued_until <= NOW())
+           AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+         ORDER BY created_at ASC 
+         LIMIT 100`,
         ['pending']
       );
 
@@ -78,6 +83,18 @@ export class SignalProcessorWorker {
           enrichedData = enrichment.enrichedData;
           riskResult = enrichment.riskResult;
           const rejectionReason = enrichment.rejectionReason;
+          const queueUntil = enrichment.queueUntil;
+          const queueReason = enrichment.queueReason;
+
+          if (queueUntil) {
+            await db.query(
+              `UPDATE signals 
+               SET queued_until = $1, queued_at = NOW(), queue_reason = $2
+               WHERE signal_id = $3`,
+              [queueUntil, queueReason || 'market_closed', signal.signal_id]
+            );
+            continue;
+          }
 
           if (rejectionReason) {
             await db.query(
