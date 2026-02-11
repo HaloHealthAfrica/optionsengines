@@ -1,0 +1,124 @@
+{
+  "engine-a": {
+    "version": "1.0.0",
+    "description": "Engine A baseline for regression testing",
+    "capturedAt": "2024-01-01T00:00:00Z",
+    "scenarios": [
+      {
+        "id": "spy-orb-breakout",
+        "description": "SPY ORB breakout at RTH open",
+        "input": {
+          "symbol": "SPY",
+          "timeframe": "5m",
+          "pattern": "ORB_BREAKOUT",
+          "session": "RTH_OPEN"
+        },
+        "expectedDecision": {
+          "action": "BUY",
+          "confidence": 0.85,
+          "reasoning": "ORB breakout with strong volume"
+        },
+        "expectedLatency": 45
+      },
+      {
+        "id": "qqq-trend-continuation",
+        "description": "QQQ trend continuation mid-day",
+        "input": {
+          "symbol": "QQQ",
+          "timeframe": "15m",
+          "pattern": "TREND_CONTINUATION",
+          "session": "MID_DAY"
+        },
+        "expectedDecision": {
+          "action": "BUY",
+          "confidence": 0.75,
+          "reasoning": "Trend continuation with momentum"
+        },
+        "expectedLatency": 50
+      },
+      {
+        "id": "spx-chop",
+        "description": "SPX choppy market conditions",
+        "input": {
+          "symbol": "SPX",
+          "timeframe": "5m",
+          "pattern": "CHOP",
+          "session": "MID_DAY"
+        },
+        "expectedDecision": {
+          "action": "HOLD",
+          "confidence": 0.3,
+          "reasoning": "Choppy conditions, low confidence"
+        },
+        "expectedLatency": 40
+      }
+    ],
+    "performanceMetrics": {
+      "averageLatency": 45,
+      "maxLatency": 60,
+      "minLatency": 35,
+      "p95Latency": 55,
+      "p99Latency": 58
+    },
+    "tolerances": {
+      "maxLatencyIncrease": 10,
+      "confidenceTolerance": 0.05,
+      "floatingPointTolerance": 0.0001
+    }
+  },
+  "engine-b": {
+    "version": "1.0.0",
+    "description": "Engine B baseline for multi-agent testing",
+    "capturedAt": "2024-01-01T00:00:00Z",
+    "scenarios": [
+      {
+        "id": "spy-multi-agent-alignment",
+        "description": "SPY with ORB and TTM alignment",
+        "input": {
+          "symbol": "SPY",
+          "timeframe": "5m",
+          "pattern": "ORB_BREAKOUT",
+          "session": "RTH_OPEN",
+          "gexRegime": "NEGATIVE"
+        },
+        "expectedAgentActivations": ["ORB", "TTM", "RISK", "META_DECISION"],
+        "expectedDecision": {
+          "action": "BUY",
+          "confidence": 0.9,
+          "reasoning": "ORB and TTM alignment in negative GEX regime"
+        },
+        "expectedLatency": 250
+      },
+      {
+        "id": "qqq-agent-disagreement",
+        "description": "QQQ with agent disagreement",
+        "input": {
+          "symbol": "QQQ",
+          "timeframe": "15m",
+          "pattern": "TREND_CONTINUATION",
+          "session": "MID_DAY",
+          "gexRegime": "POSITIVE"
+        },
+        "expectedAgentActivations": ["STRAT", "SATYLAND", "RISK", "META_DECISION"],
+        "expectedDecision": {
+          "action": "HOLD",
+          "confidence": 0.5,
+          "reasoning": "Agent disagreement resolved by Meta-Decision"
+        },
+        "expectedLatency": 300
+      }
+    ],
+    "performanceMetrics": {
+      "averageLatency": 275,
+      "maxLatency": 400,
+      "minLatency": 200,
+      "p95Latency": 350,
+      "p99Latency": 380
+    },
+    "tolerances": {
+      "maxLatencyIncrease": 50,
+      "confidenceTolerance": 0.05,
+      "floatingPointTolerance": 0.0001
+    }
+  }
+}
