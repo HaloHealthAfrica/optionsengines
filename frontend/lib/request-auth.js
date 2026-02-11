@@ -1,10 +1,31 @@
 import { verifyToken } from './auth';
 
+const BACKEND_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+
+async function verifyBackendToken(token) {
+  if (!token) return null;
+  try {
+    const response = await fetch(`${BACKEND_URL}/auth/verify-token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload?.payload || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getUserFromRequest(request) {
   const token = request.cookies.get('auth_token')?.value;
   if (!token) return null;
   const user = await verifyToken(token);
-  return user ? { ...user, token } : null;
+  if (user) return { ...user, token };
+  const backendUser = await verifyBackendToken(token);
+  return backendUser ? { ...backendUser, token } : null;
 }
 
 export async function requireAuth(request) {
@@ -27,7 +48,10 @@ export async function requireAuth(request) {
     };
   }
   
-  const user = await verifyToken(token);
+  let user = await verifyToken(token);
+  if (!user) {
+    user = await verifyBackendToken(token);
+  }
   if (!user) {
     return {
       ok: false,
