@@ -531,6 +531,7 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
   let experimentId: string | null = null;
   let orderId: string | null = null;
   let agentDecisionRows: any[] = [];
+  let webhookRowResolved: { raw_payload?: unknown; processing_time_ms?: number } | null = null;
 
   if (type === 'webhook' && webhookRow.rows.length > 0) {
     const row = webhookRow.rows[0];
@@ -540,6 +541,8 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
     detail.processing_time_ms = row.processing_time_ms;
     signalId = row.signal_id;
     experimentId = row.experiment_id;
+    webhookRowResolved = row;
+    detail.raw_webhook_payload = row.raw_payload ?? null;
     if (row.status === 'duplicate') {
       detail.warnings.push('Duplicate webhook');
     }
@@ -596,6 +599,31 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
     }
   }
 
+  if (type === 'decision' && experimentId != null && signalId == null) {
+    const expRow = await db.query(
+      `SELECT signal_id FROM experiments WHERE experiment_id = $1 LIMIT 1`,
+      [experimentId]
+    );
+    if (expRow.rows[0]?.signal_id) {
+      signalId = expRow.rows[0].signal_id;
+    }
+  }
+
+  if (signalId != null && webhookRowResolved == null) {
+    const weRow = await db.query(
+      `SELECT raw_payload, processing_time_ms FROM webhook_events WHERE signal_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [signalId]
+    );
+    const we = weRow.rows[0];
+    if (we) {
+      webhookRowResolved = we;
+      detail.raw_webhook_payload = we.raw_payload ?? null;
+      if (detail.processing_time_ms == null) {
+        detail.processing_time_ms = we.processing_time_ms ?? null;
+      }
+    }
+  }
+
   if (signalId) {
     const signalResult = await db.query(
       `SELECT * FROM signals WHERE signal_id = $1 LIMIT 1`,
@@ -609,13 +637,13 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
         timeframe: signal.timeframe,
         variant: null,
         signal_type: signal.direction === 'long' ? 'buy' : 'sell',
+        signal_direction: signal.direction === 'long' ? 'buy' : 'sell',
         price: null,
         indicator_values: {},
         is_test: signal.is_test || false,
         test_session_id: signal.test_session_id || null,
         rejection_reason: signal.rejection_reason || null,
       };
-      detail.raw_webhook_payload = signal.raw_payload || null;
       detail.timestamp = detail.timestamp || signal.created_at;
       detail.status = detail.status || signal.status;
     }
@@ -631,18 +659,30 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
     }
   }
 
+  let shadowTradeRow: { shadow_trade_id?: string } | null = null;
+
   if (experimentId) {
-    const experimentResult = await db.query(
-      `SELECT * FROM experiments WHERE experiment_id = $1 LIMIT 1`,
-      [experimentId]
-    );
+    const [experimentResult, recommendationResult, agentResult, shadowResult] = await Promise.all([
+      db.query(`SELECT * FROM experiments WHERE experiment_id = $1 LIMIT 1`, [experimentId]),
+      db.query(
+        `SELECT engine, strike, expiration, quantity, entry_price, is_shadow, rationale
+         FROM decision_recommendations WHERE experiment_id = $1`,
+        [experimentId]
+      ),
+      db.query(
+        `SELECT agent_name, agent_type, bias, confidence, reasons, block, metadata, created_at
+         FROM agent_decisions WHERE experiment_id = $1 ORDER BY created_at ASC`,
+        [experimentId]
+      ),
+      db.query(
+        `SELECT shadow_trade_id FROM shadow_trades WHERE experiment_id = $1 LIMIT 1`,
+        [experimentId]
+      ),
+    ]);
     const experiment = experimentResult.rows[0];
-    const recommendationResult = await db.query(
-      `SELECT engine, strike, expiration, quantity, entry_price, is_shadow, rationale
-       FROM decision_recommendations
-       WHERE experiment_id = $1`,
-      [experimentId]
-    );
+    agentDecisionRows = agentResult.rows;
+    shadowTradeRow = shadowResult.rows[0] ?? null;
+
     if (experiment) {
       detail.experiment = {
         experiment_id: experiment.experiment_id,
@@ -656,23 +696,27 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
       detail.signal_data = detail.signal_data || {
         signal_id: experiment.signal_id,
       };
-      agentDecisionRows = (
-        await db.query(
-          `SELECT agent_name, agent_type, bias, confidence, reasons, block, metadata, created_at
-           FROM agent_decisions
-           WHERE experiment_id = $1
-           ORDER BY created_at ASC`,
-          [experimentId]
-        )
-      ).rows;
+
+      const metaRow = agentDecisionRows.find((r: any) => r.agent_name === 'meta_decision');
+      const engine_outcome = metaRow != null ? (metaRow.block === true ? 'reject' : 'approve') : null;
+      const signal_type = detail.signal_data?.signal_type ?? null;
+      const decision_factors = agentDecisionRows.flatMap((r: any) => {
+        const reasons = Array.isArray(r.reasons) ? r.reasons : [];
+        return reasons.map((reason: string) => ({
+          agent: r.agent_name,
+          reason: String(reason ?? ''),
+        }));
+      });
+
       detail.decision_engine = {
         engine: experiment.variant === 'A' ? 'Engine A' : 'Engine B',
-        decision: detail.signal_data?.signal_type || 'hold',
-        confidence_score: null,
+        engine_outcome,
+        decision: engine_outcome ?? signal_type ?? null,
+        confidence_score: metaRow != null && typeof metaRow.confidence === 'number' ? metaRow.confidence : null,
         strategy_used: null,
-        decision_time_ms: detail.processing_time_ms,
-        decision_timestamp: experiment.created_at,
-        decision_factors: [],
+        decision_time_ms: webhookRowResolved?.processing_time_ms ?? detail.processing_time_ms ?? null,
+        decision_timestamp: metaRow?.created_at ?? experiment.created_at ?? null,
+        decision_factors,
         thresholds_met: null,
         risk_checks_passed: null,
         recommendations: recommendationResult.rows.map((row) => ({
@@ -701,10 +745,11 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
   if (!detail.decision_engine && detail.order_data) {
     detail.decision_engine = {
       engine: detail.order_data.engine === 'B' ? 'Engine B' : 'Engine A',
-      decision: detail.signal_data?.signal_type || 'hold',
+      engine_outcome: null,
+      decision: detail.signal_data?.signal_type ?? null,
       confidence_score: null,
       strategy_used: null,
-      decision_time_ms: detail.processing_time_ms,
+      decision_time_ms: webhookRowResolved?.processing_time_ms ?? detail.processing_time_ms ?? null,
       decision_timestamp: detail.order_data.placed_at,
       decision_factors: [],
       thresholds_met: null,
@@ -778,14 +823,16 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
     detail.can_retry = false;
   }
 
-  const auditTrail: Array<{ timestamp: string; event: string; system: string }> = [];
-  if (detail.timestamp) {
+  const metaDecisionExists = agentDecisionRows.some((r: any) => r.agent_name === 'meta_decision');
+  const shadowTradeExists = shadowTradeRow != null;
+  const auditTrail: Array<{ timestamp: string | null; event: string; system: string }> = [];
+  if (webhookRowResolved != null && detail.timestamp) {
     auditTrail.push({ timestamp: detail.timestamp, event: 'Webhook received', system: 'API Gateway' });
   }
-  if (signalId) {
+  if (detail.signal_data?.symbol) {
     auditTrail.push({ timestamp: detail.timestamp, event: 'Signal validated', system: 'Signal Processor' });
   }
-  if (experimentId) {
+  if (metaDecisionExists || shadowTradeExists) {
     auditTrail.push({ timestamp: detail.timestamp, event: 'Decision made', system: detail.decision_engine?.engine || 'Engine' });
   }
   if (detail.order_data?.placed_at) {
@@ -795,6 +842,10 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
     auditTrail.push({ timestamp: detail.order_data.filled_at, event: 'Order filled', system: 'Broker API' });
   }
   detail.audit_trail = auditTrail;
+
+  if (experimentId != null && !detail.signal_data?.symbol && signalId != null) {
+    detail.system_state = 'incomplete_resolution';
+  }
 
   return res.json(detail);
 });
