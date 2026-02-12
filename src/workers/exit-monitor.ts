@@ -4,6 +4,9 @@ import { marketData } from '../services/market-data.js';
 import { logger } from '../utils/logger.js';
 import { sleep } from '../utils/sleep.js';
 import { publishPositionUpdate, publishRiskUpdate } from '../services/realtime-updates.service.js';
+import * as Sentry from '@sentry/node';
+import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
+import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
 
 interface OpenPosition {
   position_id: string;
@@ -32,6 +35,7 @@ export class ExitMonitorWorker {
   private isRunning = false;
 
   start(intervalMs: number): void {
+    registerWorkerErrorHandlers('ExitMonitorWorker');
     if (this.timer) {
       return;
     }
@@ -44,9 +48,15 @@ export class ExitMonitorWorker {
 
     this.run().catch((error) => {
       logger.error('Exit monitor worker failed on startup', error);
+      Sentry.captureException(error, { tags: { worker: 'ExitMonitorWorker' } });
     });
 
     logger.info('Exit monitor worker started', { intervalMs });
+    updateWorkerStatus('ExitMonitorWorker', { running: true });
+    Sentry.captureMessage('WORKER_START', {
+      level: 'info',
+      tags: { worker: 'ExitMonitorWorker' },
+    });
   }
 
   stop(): void {
@@ -54,6 +64,11 @@ export class ExitMonitorWorker {
       clearInterval(this.timer);
       this.timer = null;
       logger.info('Exit monitor worker stopped');
+      updateWorkerStatus('ExitMonitorWorker', { running: false });
+      Sentry.captureMessage('WORKER_STOP', {
+        level: 'info',
+        tags: { worker: 'ExitMonitorWorker' },
+      });
     }
   }
 
@@ -76,6 +91,7 @@ export class ExitMonitorWorker {
 
     this.isRunning = true;
     const startTime = Date.now();
+    updateWorkerStatus('ExitMonitorWorker', { lastRunAt: new Date() });
 
     try {
       const ruleResult = await db.query<ExitRule>(
@@ -192,6 +208,9 @@ export class ExitMonitorWorker {
             positionId: position.position_id,
             symbol: position.symbol
           });
+          Sentry.captureException(error, {
+            tags: { worker: 'ExitMonitorWorker', positionId: position.position_id },
+          });
           // Don't track as error if it's just missing API keys
         }
       }
@@ -201,6 +220,9 @@ export class ExitMonitorWorker {
         durationMs: Date.now() - startTime,
       });
     } finally {
+      updateWorkerStatus('ExitMonitorWorker', {
+        lastDurationMs: Date.now() - startTime,
+      });
       this.isRunning = false;
     }
   }

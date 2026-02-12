@@ -1,5 +1,6 @@
 // Express app setup for the dual-engine options trading platform
 import express, { Express, Request, Response, NextFunction } from 'express';
+import * as Sentry from '@sentry/node';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -66,6 +67,9 @@ app.use('/', engine2Routes);
 app.use('/api/v1/testing', testingRoutes);
 app.use('/api/v1/webhooks', webhookSchemaRoutes);
 app.use('/api/webhooks', marketWebhookRoutes);
+
+// Sentry error handler (must be before other error middleware)
+Sentry.setupExpressErrorHandler(app);
 
 // Root endpoint
 app.get('/', (_req: Request, res: Response) => {

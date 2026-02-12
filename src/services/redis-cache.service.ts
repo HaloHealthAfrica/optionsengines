@@ -1,6 +1,7 @@
 // Redis Cache Manager - Handles caching with TTL-based expiration
 import Redis from 'ioredis';
 import { logger } from '../utils/logger.js';
+import * as Sentry from '@sentry/node';
 
 interface CacheConfig {
   ttl: {
@@ -64,16 +65,25 @@ export class RedisCacheService {
       this.client.on('connect', () => {
         this.isConnected = true;
         logger.info('Redis cache connected');
+        Sentry.captureMessage('REDIS_CONNECTED', {
+          level: 'info',
+          tags: { stage: 'redis' },
+        });
       });
 
       this.client.on('error', (error: Error) => {
         logger.error('Redis error', error);
         this.isConnected = false;
+        Sentry.captureException(error, { tags: { stage: 'redis' } });
       });
 
       this.client.on('close', () => {
         this.isConnected = false;
         logger.warn('Redis connection closed');
+        Sentry.captureMessage('REDIS_DISCONNECTED', {
+          level: 'warning',
+          tags: { stage: 'redis' },
+        });
       });
 
       // Test connection with a timeout to avoid hanging
@@ -92,6 +102,7 @@ export class RedisCacheService {
       logger.info('Redis cache initialized');
     } catch (error) {
       logger.error('Failed to connect to Redis', error);
+      Sentry.captureException(error, { tags: { stage: 'redis', step: 'connect' } });
       if (this.client) {
         this.client.disconnect();
       }
@@ -106,6 +117,10 @@ export class RedisCacheService {
       this.client = null;
       this.isConnected = false;
       logger.info('Redis cache disconnected');
+      Sentry.captureMessage('REDIS_DISCONNECTED', {
+        level: 'info',
+        tags: { stage: 'redis' },
+      });
     }
   }
 
@@ -122,6 +137,7 @@ export class RedisCacheService {
       return JSON.parse(value) as T;
     } catch (error) {
       logger.error('Redis get failed', { key, error });
+      Sentry.captureException(error, { tags: { stage: 'redis', op: 'get' } });
       return null;
     }
   }
@@ -136,6 +152,7 @@ export class RedisCacheService {
       await this.client.setex(key, ttl, serialized);
     } catch (error) {
       logger.error('Redis set failed', { key, ttl, error });
+      Sentry.captureException(error, { tags: { stage: 'redis', op: 'set' } });
     }
   }
 
@@ -154,6 +171,7 @@ export class RedisCacheService {
       return deleted;
     } catch (error) {
       logger.error('Redis invalidate failed', { pattern, error });
+      Sentry.captureException(error, { tags: { stage: 'redis', op: 'invalidate' } });
       return 0;
     }
   }
@@ -168,6 +186,7 @@ export class RedisCacheService {
       return result === 1;
     } catch (error) {
       logger.error('Redis exists failed', { key, error });
+      Sentry.captureException(error, { tags: { stage: 'redis', op: 'exists' } });
       return false;
     }
   }
@@ -181,6 +200,7 @@ export class RedisCacheService {
       return await this.client.ttl(key);
     } catch (error) {
       logger.error('Redis getTTL failed', { key, error });
+      Sentry.captureException(error, { tags: { stage: 'redis', op: 'ttl' } });
       return -1;
     }
   }

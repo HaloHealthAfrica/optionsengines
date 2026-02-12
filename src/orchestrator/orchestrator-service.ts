@@ -20,6 +20,7 @@ import { EnrichedSignal, MetaDecision } from '../types/index.js';
 import { db } from '../services/database.service.js';
 import { config } from '../config/index.js';
 import { buildSignalEnrichment } from '../services/signal-enrichment.service.js';
+import * as Sentry from '@sentry/node';
 
 export class OrchestratorService {
   constructor(
@@ -137,9 +138,34 @@ export class OrchestratorService {
 
   async processSignal(signal: Signal): Promise<ExperimentResult> {
     const startedAt = Date.now();
-    try {
-      const enrichment = await buildSignalEnrichment(signal);
+    return await Sentry.withScope(async (scope) => {
+      scope.setTag('signalId', signal.signal_id);
+      scope.setTag('symbol', signal.symbol);
+      const transaction = Sentry.startTransaction({
+        name: 'orchestrator.processSignal',
+        op: 'orchestrator',
+      });
+      scope.setSpan(transaction);
+      try {
+        Sentry.addBreadcrumb({
+          category: 'signal',
+          message: 'Signal received',
+          level: 'info',
+          data: { signal_id: signal.signal_id, symbol: signal.symbol },
+        });
+        const enrichment = await buildSignalEnrichment(signal);
+        Sentry.addBreadcrumb({
+          category: 'enrichment',
+          message: 'Enrichment complete',
+          level: 'info',
+        });
       if (enrichment.queueUntil) {
+        Sentry.addBreadcrumb({
+          category: 'enrichment',
+          message: 'Signal queued',
+          level: 'info',
+          data: { queueUntil: enrichment.queueUntil, reason: enrichment.queueReason },
+        });
         await this.signalProcessor.queueSignal(
           signal.signal_id,
           enrichment.queueUntil,
@@ -155,6 +181,12 @@ export class OrchestratorService {
         };
       }
       if (enrichment.rejectionReason) {
+        Sentry.addBreadcrumb({
+          category: 'risk',
+          message: 'Signal rejected by enrichment',
+          level: 'warning',
+          data: { reason: enrichment.rejectionReason },
+        });
         await this.signalProcessor.updateStatus(
           signal.signal_id,
           'rejected',
@@ -170,11 +202,29 @@ export class OrchestratorService {
           duration_ms: Date.now() - startedAt,
         };
       }
+      Sentry.addBreadcrumb({
+        category: 'risk',
+        message: 'Risk evaluation complete',
+        level: 'info',
+      });
       const market_context = await this.createMarketContext(signal);
       const experiment = await this.createExperiment(signal);
       signal.experiment_id = experiment.experiment_id;
+      scope.setTag('engine', experiment.variant);
       const policy = await this.getExecutionPolicy(experiment.experiment_id, experiment.variant);
+      Sentry.addBreadcrumb({
+        category: 'policy',
+        message: 'Policy resolved',
+        level: 'info',
+        data: { execution_mode: policy.execution_mode, variant: experiment.variant },
+      });
       const { engineA, engineB } = await this.distributeSignal(signal, market_context, experiment);
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: 'Engine invoked',
+        level: 'info',
+        data: { variant: experiment.variant },
+      });
 
       const engine_a_recommendation = this.applyPolicyToRecommendation(
         experiment.experiment_id,
@@ -231,12 +281,18 @@ export class OrchestratorService {
         success: true,
         duration_ms: Date.now() - startedAt,
       };
-    } catch (error: any) {
-      logger.error('Failed to process signal', error, {
-        signal_id: signal.signal_id,
-      });
-      throw error;
-    }
+      } catch (error: any) {
+        logger.error('Failed to process signal', error, {
+          signal_id: signal.signal_id,
+        });
+        Sentry.captureException(error, {
+          tags: { stage: 'orchestrator', signalId: signal.signal_id },
+        });
+        throw error;
+      } finally {
+        transaction.finish();
+      }
+    });
   }
 
   async createMarketContext(signal: Signal): Promise<MarketContext> {
@@ -306,6 +362,12 @@ export class OrchestratorService {
     if (!this.shadowExecutor || !recommendation?.is_shadow || !config.enableShadowExecution) {
       return;
     }
+    Sentry.addBreadcrumb({
+      category: 'shadow',
+      message: 'Shadow execution triggered',
+      level: 'info',
+      data: { experimentId },
+    });
 
     const enrichedSignal: EnrichedSignal = {
       signalId: signal.signal_id,
@@ -338,6 +400,12 @@ export class OrchestratorService {
     if (config.appMode !== 'PAPER') {
       return;
     }
+    Sentry.addBreadcrumb({
+      category: 'orders',
+      message: 'Order creation triggered',
+      level: 'info',
+      data: { experimentId },
+    });
 
     const signalStatus = await db.query(
       `SELECT status, rejection_reason FROM signals WHERE signal_id = $1 LIMIT 1`,

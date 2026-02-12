@@ -1,3 +1,5 @@
+import * as Sentry from '@sentry/node';
+
 type ErrorStats = {
   total: number;
   bySource: Record<string, number>;
@@ -10,6 +12,11 @@ export class ErrorTracker {
   recordError(source: string): void {
     this.total += 1;
     this.bySource[source] = (this.bySource[source] ?? 0) + 1;
+    Sentry.captureMessage('WORKER_ERROR', {
+      level: 'error',
+      tags: { source },
+      extra: { count: this.bySource[source], total: this.total },
+    });
   }
 
   getStats(): ErrorStats {

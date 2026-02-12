@@ -6,6 +6,9 @@ import { config } from '../config/index.js';
 import { sleep } from '../utils/sleep.js';
 import { errorTracker } from '../services/error-tracker.service.js';
 import { publishPositionUpdate, publishRiskUpdate } from '../services/realtime-updates.service.js';
+import * as Sentry from '@sentry/node';
+import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
+import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
 
 interface PendingOrder {
   order_id: string;
@@ -46,6 +49,7 @@ export class PaperExecutorWorker {
   private isRunning = false;
 
   start(intervalMs: number): void {
+    registerWorkerErrorHandlers('PaperExecutorWorker');
     if (this.timer) {
       return;
     }
@@ -58,9 +62,15 @@ export class PaperExecutorWorker {
 
     this.run().catch((error) => {
       logger.error('Paper executor worker failed on startup', error);
+      Sentry.captureException(error, { tags: { worker: 'PaperExecutorWorker' } });
     });
 
     logger.info('Paper executor worker started', { intervalMs });
+    updateWorkerStatus('PaperExecutorWorker', { running: true });
+    Sentry.captureMessage('WORKER_START', {
+      level: 'info',
+      tags: { worker: 'PaperExecutorWorker' },
+    });
   }
 
   stop(): void {
@@ -68,6 +78,11 @@ export class PaperExecutorWorker {
       clearInterval(this.timer);
       this.timer = null;
       logger.info('Paper executor worker stopped');
+      updateWorkerStatus('PaperExecutorWorker', { running: false });
+      Sentry.captureMessage('WORKER_STOP', {
+        level: 'info',
+        tags: { worker: 'PaperExecutorWorker' },
+      });
     }
   }
 
@@ -90,6 +105,7 @@ export class PaperExecutorWorker {
 
     this.isRunning = true;
     const startTime = Date.now();
+    updateWorkerStatus('PaperExecutorWorker', { lastRunAt: new Date() });
 
     try {
       const orders = await db.query<PendingOrder>(
@@ -236,6 +252,9 @@ export class PaperExecutorWorker {
         } catch (error) {
           logger.error('Paper execution failed', error, { orderId: order.order_id });
           errorTracker.recordError('paper_executor');
+          Sentry.captureException(error, {
+            tags: { worker: 'PaperExecutorWorker', orderId: order.order_id },
+          });
           await db.query(`UPDATE orders SET status = $1 WHERE order_id = $2`, [
             'failed',
             order.order_id,
@@ -264,6 +283,9 @@ export class PaperExecutorWorker {
         durationMs: Date.now() - startTime,
       });
     } finally {
+      updateWorkerStatus('PaperExecutorWorker', {
+        lastDurationMs: Date.now() - startTime,
+      });
       this.isRunning = false;
     }
   }

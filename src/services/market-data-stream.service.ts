@@ -1,6 +1,7 @@
 // Market Data Stream Service - Real-time quote cache via Polygon WebSocket
 import { polygonWebSocket } from './providers/polygon-websocket-client.js';
 import { logger } from '../utils/logger.js';
+import * as Sentry from '@sentry/node';
 
 type QuoteSnapshot = {
   bid: number;
@@ -32,10 +33,16 @@ export class MarketDataStreamService {
 
     polygonWebSocket.on('error', (error: any) => {
       logger.warn('Market data WebSocket error', { error });
+      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'polygon' } });
     });
 
     polygonWebSocket.on('close', ({ code, reason }: any) => {
       logger.warn('Market data WebSocket closed', { code, reason: String(reason || '') });
+      Sentry.captureMessage('MARKET_DATA_WS_CLOSED', {
+        level: 'warning',
+        tags: { stage: 'market-data', provider: 'polygon' },
+        extra: { code, reason: String(reason || '') },
+      });
     });
   }
 
@@ -45,6 +52,7 @@ export class MarketDataStreamService {
 
     polygonWebSocket.connect().catch((error) => {
       logger.warn('Failed to connect market data WebSocket', { error });
+      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'polygon' } });
     });
   }
 

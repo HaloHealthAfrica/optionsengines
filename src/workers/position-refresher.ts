@@ -5,6 +5,9 @@ import { logger } from '../utils/logger.js';
 import { sleep } from '../utils/sleep.js';
 import { errorTracker } from '../services/error-tracker.service.js';
 import { publishPositionUpdate, publishRiskUpdate } from '../services/realtime-updates.service.js';
+import * as Sentry from '@sentry/node';
+import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
+import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
 
 interface OpenPosition {
   position_id: string;
@@ -22,6 +25,7 @@ export class PositionRefresherWorker {
   private isRunning = false;
 
   start(intervalMs: number): void {
+    registerWorkerErrorHandlers('PositionRefresherWorker');
     if (this.timer) {
       return;
     }
@@ -34,9 +38,15 @@ export class PositionRefresherWorker {
 
     this.run().catch((error) => {
       logger.error('Position refresher worker failed on startup', error);
+      Sentry.captureException(error, { tags: { worker: 'PositionRefresherWorker' } });
     });
 
     logger.info('Position refresher worker started', { intervalMs });
+    updateWorkerStatus('PositionRefresherWorker', { running: true });
+    Sentry.captureMessage('WORKER_START', {
+      level: 'info',
+      tags: { worker: 'PositionRefresherWorker' },
+    });
   }
 
   stop(): void {
@@ -44,6 +54,11 @@ export class PositionRefresherWorker {
       clearInterval(this.timer);
       this.timer = null;
       logger.info('Position refresher worker stopped');
+      updateWorkerStatus('PositionRefresherWorker', { running: false });
+      Sentry.captureMessage('WORKER_STOP', {
+        level: 'info',
+        tags: { worker: 'PositionRefresherWorker' },
+      });
     }
   }
 
@@ -66,6 +81,7 @@ export class PositionRefresherWorker {
 
     this.isRunning = true;
     const startTime = Date.now();
+    updateWorkerStatus('PositionRefresherWorker', { lastRunAt: new Date() });
 
     try {
       const positions = await db.query<OpenPosition>(
@@ -118,6 +134,9 @@ export class PositionRefresherWorker {
         } catch (error) {
           logger.warn('Position refresh failed', { positionId: position.position_id });
           errorTracker.recordError('position_refresher');
+          Sentry.captureException(error, {
+            tags: { worker: 'PositionRefresherWorker', positionId: position.position_id },
+          });
         }
       }
 
@@ -126,6 +145,9 @@ export class PositionRefresherWorker {
         durationMs: Date.now() - startTime,
       });
     } finally {
+      updateWorkerStatus('PositionRefresherWorker', {
+        lastDurationMs: Date.now() - startTime,
+      });
       this.isRunning = false;
     }
   }

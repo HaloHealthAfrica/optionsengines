@@ -5,6 +5,9 @@ import { logger } from '../utils/logger.js';
 import { config } from '../config/index.js';
 import { sleep } from '../utils/sleep.js';
 import { errorTracker } from '../services/error-tracker.service.js';
+import * as Sentry from '@sentry/node';
+import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
+import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
 
 interface ApprovedSignal {
   signal_id: string;
@@ -50,6 +53,7 @@ export class OrderCreatorWorker {
   private isRunning = false;
 
   start(intervalMs: number): void {
+    registerWorkerErrorHandlers('OrderCreatorWorker');
     if (this.timer) {
       return;
     }
@@ -62,9 +66,15 @@ export class OrderCreatorWorker {
 
     this.run().catch((error) => {
       logger.error('Order creator worker failed on startup', error);
+      Sentry.captureException(error, { tags: { worker: 'OrderCreatorWorker' } });
     });
 
     logger.info('Order creator worker started', { intervalMs });
+    updateWorkerStatus('OrderCreatorWorker', { running: true });
+    Sentry.captureMessage('WORKER_START', {
+      level: 'info',
+      tags: { worker: 'OrderCreatorWorker' },
+    });
   }
 
   stop(): void {
@@ -72,6 +82,11 @@ export class OrderCreatorWorker {
       clearInterval(this.timer);
       this.timer = null;
       logger.info('Order creator worker stopped');
+      updateWorkerStatus('OrderCreatorWorker', { running: false });
+      Sentry.captureMessage('WORKER_STOP', {
+        level: 'info',
+        tags: { worker: 'OrderCreatorWorker' },
+      });
     }
   }
 
@@ -94,6 +109,7 @@ export class OrderCreatorWorker {
 
     this.isRunning = true;
     const startTime = Date.now();
+    updateWorkerStatus('OrderCreatorWorker', { lastRunAt: new Date() });
 
     try {
       const signals = await db.query<ApprovedSignal>(
@@ -169,6 +185,9 @@ export class OrderCreatorWorker {
         } catch (error) {
           logger.error('Order creation failed', error, { signalId: signal.signal_id });
           errorTracker.recordError('order_creator');
+          Sentry.captureException(error, {
+            tags: { worker: 'OrderCreatorWorker', signalId: signal.signal_id },
+          });
         }
       }
 
@@ -177,6 +196,9 @@ export class OrderCreatorWorker {
         durationMs: Date.now() - startTime,
       });
     } finally {
+      updateWorkerStatus('OrderCreatorWorker', {
+        lastDurationMs: Date.now() - startTime,
+      });
       this.isRunning = false;
     }
   }

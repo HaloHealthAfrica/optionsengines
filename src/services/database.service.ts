@@ -2,6 +2,7 @@
 import pg from 'pg';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import * as Sentry from '@sentry/node';
 
 const { Pool } = pg;
 
@@ -33,6 +34,7 @@ export class DatabaseService {
     this.pool.on('error', (err) => {
       logger.error('Unexpected database pool error', err);
       this.isConnected = false;
+      Sentry.captureException(err, { tags: { stage: 'db', op: 'pool_error' } });
       this.handleDisconnection();
     });
 
@@ -72,6 +74,7 @@ export class DatabaseService {
     } catch (error) {
       this.isConnected = false;
       logger.error('Failed to connect to database', error);
+      Sentry.captureException(error, { tags: { stage: 'db', op: 'connect' } });
       throw error;
     }
   }
@@ -87,6 +90,11 @@ export class DatabaseService {
           duration,
           query: text.substring(0, 100),
         });
+        Sentry.captureMessage('DB_SLOW_QUERY', {
+          level: 'warning',
+          tags: { stage: 'db' },
+          extra: { durationMs: duration, query: text.substring(0, 200) },
+        });
       }
 
       return result;
@@ -94,6 +102,10 @@ export class DatabaseService {
       logger.error('Query execution failed', error, {
         query: text.substring(0, 100),
         params: params?.slice(0, 5),
+      });
+      Sentry.captureException(error, {
+        tags: { stage: 'db', op: 'query' },
+        extra: { query: text.substring(0, 200) },
       });
       throw error;
     }
@@ -109,6 +121,7 @@ export class DatabaseService {
     } catch (error) {
       await client.query('ROLLBACK');
       logger.error('Transaction failed, rolled back', error);
+      Sentry.captureException(error, { tags: { stage: 'db', op: 'transaction' } });
       throw error;
     } finally {
       client.release();

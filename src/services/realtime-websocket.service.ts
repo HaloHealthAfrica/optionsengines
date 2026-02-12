@@ -4,6 +4,7 @@ import { logger } from '../utils/logger.js';
 import { db } from './database.service.js';
 import { config } from '../config/index.js';
 import { marketIntelSnapshotService } from './market-intel/market-intel-snapshot.service.js';
+import * as Sentry from '@sentry/node';
 
 type ClientState = {
   symbol: string;
@@ -140,6 +141,10 @@ export function startRealtimeWebSocketServer(server: Server): WebSocketServer {
     const url = new URL(request.url || '/v1/realtime', 'http://localhost');
     const symbol = normalizeSymbol(url.searchParams.get('symbol'));
     clients.set(socket, { symbol });
+    Sentry.captureMessage('WS_CLIENT_CONNECTED', {
+      level: 'info',
+      tags: { stage: 'websocket', symbol },
+    });
     sendInitialSnapshots(socket, symbol).catch(() => undefined);
 
     socket.on('message', (data) => {
@@ -151,16 +156,28 @@ export function startRealtimeWebSocketServer(server: Server): WebSocketServer {
           sendInitialSnapshots(socket, nextSymbol).catch(() => undefined);
         }
       } catch {
+        Sentry.captureMessage('WS_MESSAGE_PARSE_FAILED', {
+          level: 'warning',
+          tags: { stage: 'websocket' },
+        });
         // Ignore malformed payloads
       }
     });
 
     socket.on('close', () => {
       clients.delete(socket);
+      Sentry.captureMessage('WS_CLIENT_DISCONNECTED', {
+        level: 'info',
+        tags: { stage: 'websocket', symbol },
+      });
     });
   });
 
   logger.info('Realtime WebSocket server started', { path: '/v1/realtime' });
+  Sentry.captureMessage('WS_SERVER_STARTED', {
+    level: 'info',
+    tags: { stage: 'websocket' },
+  });
   return wss;
 }
 
@@ -173,6 +190,10 @@ export function stopRealtimeWebSocketServer(): void {
   wss.close();
   wss = null;
   clients.clear();
+  Sentry.captureMessage('WS_SERVER_STOPPED', {
+    level: 'info',
+    tags: { stage: 'websocket' },
+  });
 }
 
 export function broadcastRealtime(type: BroadcastPayload['type'], data: any, symbol?: string): void {
@@ -180,7 +201,14 @@ export function broadcastRealtime(type: BroadcastPayload['type'], data: any, sym
     return;
   }
 
-  const payload = JSON.stringify({ type, data });
+  let payload: string;
+  try {
+    payload = JSON.stringify({ type, data });
+  } catch (error) {
+    logger.warn('Realtime broadcast serialization failed', { error });
+    Sentry.captureException(error, { tags: { stage: 'websocket', op: 'broadcast' } });
+    return;
+  }
   const normalizedSymbol = symbol ? normalizeSymbol(symbol) : null;
 
   wss.clients.forEach((client) => {
@@ -195,6 +223,11 @@ export function broadcastRealtime(type: BroadcastPayload['type'], data: any, sym
       }
     }
 
-    client.send(payload);
+    try {
+      client.send(payload);
+    } catch (error) {
+      logger.warn('Realtime broadcast failed', { error });
+      Sentry.captureException(error, { tags: { stage: 'websocket', op: 'broadcast' } });
+    }
   });
 }

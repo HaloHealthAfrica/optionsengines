@@ -6,6 +6,9 @@ import { OrchestratorService } from '../orchestrator/orchestrator-service.js';
 import { logger } from '../utils/logger.js';
 import { db } from '../services/database.service.js';
 import { config } from '../config/index.js';
+import * as Sentry from '@sentry/node';
+import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
+import { setLastSignalProcessed, updateWorkerStatus } from '../services/trade-engine-health.service.js';
 
 export class OrchestratorWorker {
   private timer: NodeJS.Timeout | null = null;
@@ -18,6 +21,7 @@ export class OrchestratorWorker {
   constructor(private orchestrator: OrchestratorService, private intervalMs: number) {}
 
   start(): void {
+    registerWorkerErrorHandlers('OrchestratorWorker');
     if (this.timer) {
       return;
     }
@@ -30,9 +34,15 @@ export class OrchestratorWorker {
 
     this.run().catch((error) => {
       logger.error('Orchestrator worker failed on startup', error);
+      Sentry.captureException(error, { tags: { worker: 'OrchestratorWorker' } });
     });
 
     logger.info('Orchestrator worker started', { intervalMs: this.intervalMs });
+    updateWorkerStatus('OrchestratorWorker', { running: true });
+    Sentry.captureMessage('WORKER_START', {
+      level: 'info',
+      tags: { worker: 'OrchestratorWorker' },
+    });
   }
 
   stop(): void {
@@ -41,6 +51,11 @@ export class OrchestratorWorker {
       clearInterval(this.timer);
       this.timer = null;
       logger.info('Orchestrator worker stopped');
+      updateWorkerStatus('OrchestratorWorker', { running: false });
+      Sentry.captureMessage('WORKER_STOP', {
+        level: 'info',
+        tags: { worker: 'OrchestratorWorker' },
+      });
     }
   }
 
@@ -66,6 +81,7 @@ export class OrchestratorWorker {
         await new Promise((resolve) => setTimeout(resolve, this.backoffMs));
       }
       const startedAt = Date.now();
+      updateWorkerStatus('OrchestratorWorker', { lastRunAt: new Date() });
       const results = await this.orchestrator.processSignals(
         config.orchestratorBatchSize,
         undefined,
@@ -75,6 +91,14 @@ export class OrchestratorWorker {
           retryDelayMs: config.orchestratorRetryDelayMs,
         }
       );
+      if (results.length > 0) {
+        setLastSignalProcessed(null, new Date());
+        Sentry.captureMessage('TRADE_ENGINE_PROCESSING', {
+          level: 'info',
+          tags: { worker: 'OrchestratorWorker' },
+          extra: { signals: results.length },
+        });
+      }
       const durations = results
         .map((result) => result.duration_ms)
         .filter((value): value is number => typeof value === 'number');
@@ -89,11 +113,23 @@ export class OrchestratorWorker {
         durationMs: Date.now() - startedAt,
         avgSignalMs: this.avgProcessingMs,
       });
+      updateWorkerStatus('OrchestratorWorker', {
+        lastDurationMs: Date.now() - startedAt,
+        backoffMs: this.backoffMs,
+      });
       await this.monitorQueueDepth();
       this.backoffMs = 0;
     } catch (error) {
       this.backoffMs = Math.min(this.backoffMs * 2 || 500, 10_000);
       logger.error('Orchestrator worker error', error, { backoffMs: this.backoffMs });
+      updateWorkerStatus('OrchestratorWorker', {
+        lastErrorAt: new Date(),
+        backoffMs: this.backoffMs,
+      });
+      Sentry.captureException(error, {
+        tags: { worker: 'OrchestratorWorker' },
+        extra: { backoffMs: this.backoffMs },
+      });
       throw error;
     } finally {
       this.isRunning = false;
@@ -123,12 +159,22 @@ export class OrchestratorWorker {
             durationSec: Math.round(elapsedSec),
             threshold: config.processingQueueDepthAlert,
           });
+          Sentry.captureMessage('PROCESSING_QUEUE_DEPTH_HIGH', {
+            level: 'warning',
+            tags: { worker: 'OrchestratorWorker' },
+            extra: {
+              depth,
+              durationSec: Math.round(elapsedSec),
+              threshold: config.processingQueueDepthAlert,
+            },
+          });
         }
       } else {
         this.queueDepthHighSince = null;
       }
     } catch (error) {
       logger.warn('Failed to monitor queue depth', { error });
+      Sentry.captureException(error, { tags: { worker: 'OrchestratorWorker' } });
     }
   }
 }

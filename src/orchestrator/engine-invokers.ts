@@ -21,6 +21,7 @@ import { TTMSpecialist } from '../agents/specialists/ttm-specialist.js';
 import { SatylandSubAgent } from '../agents/subagents/satyland-sub-agent.js';
 import { eventLogger } from '../services/event-logger.service.js';
 import { EnrichedSignal, MarketData, Indicators } from '../types/index.js';
+import * as Sentry from '@sentry/node';
 
 function applyGammaSizingMultiplier(
   baseSize: number,
@@ -42,7 +43,19 @@ async function buildRecommendation(
   context?: MarketContext
 ): Promise<TradeRecommendation | null> {
   try {
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: `Engine ${engine} strike selection`,
+      level: 'info',
+      data: { signal_id: signal.signal_id, symbol: signal.symbol },
+    });
     const { strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction);
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: `Engine ${engine} entry plan creation`,
+      level: 'info',
+      data: { strike, expiration, optionType },
+    });
     const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
 
     const baseSize = Math.max(1, Math.floor(config.maxPositionSize));
@@ -62,6 +75,9 @@ async function buildRecommendation(
     };
   } catch (error) {
     logger.error('Engine recommendation failed', error, { engine, signal_id: signal.signal_id });
+    Sentry.captureException(error, {
+      tags: { stage: 'engine', engine, signalId: signal.signal_id },
+    });
     return null;
   }
 }
@@ -71,6 +87,12 @@ async function buildEngineBRecommendation(
   context?: MarketContext
 ): Promise<TradeRecommendation | null> {
   try {
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: 'Engine B enrichment start',
+      level: 'info',
+      data: { signal_id: signal.signal_id, symbol: signal.symbol },
+    });
     const enrichment = await buildSignalEnrichment(signal);
     let candles: any[] = [];
     let indicators = enrichment.enrichedData.indicators as Indicators | undefined;
@@ -185,6 +207,12 @@ async function buildEngineBRecommendation(
     const activatedAgents = agents.filter((agent) =>
       agent.shouldActivate(enrichedSignal, marketContextForAgents)
     );
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: 'Engine B agents activated',
+      level: 'info',
+      data: { agents: activatedAgents.map((agent) => agent.type) },
+    });
 
     const outputs = await Promise.all(
       activatedAgents.map(async (agent) => {
@@ -197,6 +225,12 @@ async function buildEngineBRecommendation(
     );
 
     const metaDecision = metaAgent.aggregate(outputs);
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: 'Engine B meta decision',
+      level: 'info',
+      data: { decision: metaDecision.decision, confidence: metaDecision.finalConfidence },
+    });
 
     if (signal.experiment_id) {
       await eventLogger.logDecision({
@@ -211,6 +245,11 @@ async function buildEngineBRecommendation(
       logger.info('Engine B meta decision rejected', {
         signal_id: signal.signal_id,
         reasons: metaDecision.reasons,
+      });
+      Sentry.captureMessage('ENGINE_B_REJECTED', {
+        level: 'info',
+        tags: { stage: 'engine', engine: 'B', signalId: signal.signal_id },
+        extra: { reasons: metaDecision.reasons },
       });
       return null;
     }
@@ -234,6 +273,9 @@ async function buildEngineBRecommendation(
     };
   } catch (error) {
     logger.error('Engine B pipeline failed', error, { signal_id: signal.signal_id });
+    Sentry.captureException(error, {
+      tags: { stage: 'engine', engine: 'B', signalId: signal.signal_id },
+    });
     return null;
   }
 }

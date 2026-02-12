@@ -7,6 +7,9 @@ import { processWebhookPayload } from '../routes/webhook.js';
 import { createOrchestratorService } from '../orchestrator/container.js';
 import { createEngineAInvoker, createEngineBInvoker } from '../orchestrator/engine-invokers.js';
 import { publishIntelUpdate } from '../services/realtime-updates.service.js';
+import * as Sentry from '@sentry/node';
+import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
+import { setLastSignalProcessed, updateWorkerStatus } from '../services/trade-engine-health.service.js';
 
 type PipelineTriggerMessage = {
   reason?: string;
@@ -45,6 +48,7 @@ export class MarketWebhookPipelineWorker {
   });
 
   start(): void {
+    registerWorkerErrorHandlers('MarketWebhookPipelineWorker');
     if (this.isRunning || this.isShuttingDown) {
       return;
     }
@@ -63,11 +67,13 @@ export class MarketWebhookPipelineWorker {
 
     this.subscriber.on('error', (error: Error) => {
       logger.error('Market webhook pipeline Redis error', error);
+      Sentry.captureException(error, { tags: { worker: 'MarketWebhookPipelineWorker' } });
     });
 
     this.subscriber.subscribe('pipeline:trigger', (error) => {
       if (error) {
         logger.error('Market webhook pipeline subscribe failed', error);
+        Sentry.captureException(error, { tags: { worker: 'MarketWebhookPipelineWorker' } });
         return;
       }
       logger.info('Market webhook pipeline subscribed to triggers');
@@ -76,7 +82,13 @@ export class MarketWebhookPipelineWorker {
     this.subscriber.on('message', (_channel, message) => {
       this.handleTrigger(message).catch((error) => {
         logger.error('Market webhook trigger handling failed', error);
+        Sentry.captureException(error, { tags: { worker: 'MarketWebhookPipelineWorker' } });
       });
+    });
+    updateWorkerStatus('MarketWebhookPipelineWorker', { running: true });
+    Sentry.captureMessage('WORKER_START', {
+      level: 'info',
+      tags: { worker: 'MarketWebhookPipelineWorker' },
     });
   }
 
@@ -87,6 +99,11 @@ export class MarketWebhookPipelineWorker {
       this.subscriber = null;
     }
     this.isRunning = false;
+    updateWorkerStatus('MarketWebhookPipelineWorker', { running: false });
+    Sentry.captureMessage('WORKER_STOP', {
+      level: 'info',
+      tags: { worker: 'MarketWebhookPipelineWorker' },
+    });
   }
 
   async stopAndDrain(timeoutMs: number): Promise<void> {
@@ -99,6 +116,7 @@ export class MarketWebhookPipelineWorker {
 
   private async handleTrigger(message: string): Promise<void> {
     if (this.isShuttingDown) return;
+    updateWorkerStatus('MarketWebhookPipelineWorker', { lastRunAt: new Date() });
 
     let payload: PipelineTriggerMessage;
     try {
@@ -110,6 +128,10 @@ export class MarketWebhookPipelineWorker {
     const symbol = payload.symbol?.toUpperCase();
     if (!symbol) {
       logger.warn('Market webhook trigger missing symbol');
+      Sentry.captureMessage('MARKET_WEBHOOK_TRIGGER_MISSING_SYMBOL', {
+        level: 'warning',
+        tags: { worker: 'MarketWebhookPipelineWorker' },
+      });
       return;
     }
 
@@ -117,12 +139,20 @@ export class MarketWebhookPipelineWorker {
     const latestFlow = await webhookIngestionService.getLatestFlow(symbol);
     if (!latestFlow) {
       logger.warn('No flow data available for trigger', { symbol });
+      Sentry.captureMessage('MARKET_WEBHOOK_FLOW_MISSING', {
+        level: 'warning',
+        tags: { worker: 'MarketWebhookPipelineWorker', symbol },
+      });
       return;
     }
 
     const direction = this.resolveDirection(latestFlow);
     if (!direction) {
       logger.warn('Flow signal skipped (neutral/no direction)', { symbol });
+      Sentry.captureMessage('MARKET_WEBHOOK_FLOW_NEUTRAL', {
+        level: 'info',
+        tags: { worker: 'MarketWebhookPipelineWorker', symbol },
+      });
       return;
     }
 
@@ -136,6 +166,10 @@ export class MarketWebhookPipelineWorker {
 
     if (result.status !== 'ACCEPTED') {
       logger.info('Flow signal not accepted', { status: result.status, symbol });
+      Sentry.captureMessage('MARKET_WEBHOOK_SIGNAL_REJECTED', {
+        level: 'warning',
+        tags: { worker: 'MarketWebhookPipelineWorker', symbol, status: result.status },
+      });
       return;
     }
 
@@ -144,6 +178,7 @@ export class MarketWebhookPipelineWorker {
       await this.orchestrator.processSignals(1, [signalId]);
       await publishIntelUpdate(symbol);
       logger.info('Flow signal processed through orchestrator', { signalId, symbol });
+      setLastSignalProcessed(signalId, new Date());
     }
   }
 

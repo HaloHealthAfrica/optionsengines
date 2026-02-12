@@ -12,6 +12,7 @@ import { retry } from '../utils/retry.js';
 import { CircuitBreaker } from './circuit-breaker.service.js';
 import { Candle, GexData, GexStrikeLevel, Indicators, OptionsFlowEntry, OptionsFlowSummary } from '../types/index.js';
 import { marketDataStream } from './market-data-stream.service.js';
+import * as Sentry from '@sentry/node';
 
 type Provider = 'alpaca' | 'polygon' | 'marketdata' | 'twelvedata';
 
@@ -73,6 +74,10 @@ export class MarketDataService {
     const canRequest = breaker.canRequest();
     if (!canRequest) {
       logger.debug(`Skipping ${provider} (circuit breaker open)`);
+      Sentry.captureMessage('MARKET_DATA_CIRCUIT_OPEN', {
+        level: 'warning',
+        tags: { provider },
+      });
     }
     return canRequest;
   }
@@ -96,6 +101,11 @@ export class MarketDataService {
     const status = breaker.getStatus();
     if (status.state === 'open') {
       logger.error(`Circuit breaker opened for ${provider} after ${status.failures} failures`);
+      Sentry.captureMessage('MARKET_DATA_CIRCUIT_OPENED', {
+        level: 'error',
+        tags: { provider },
+        extra: { failures: status.failures },
+      });
     }
   }
 
@@ -153,9 +163,18 @@ export class MarketDataService {
         this.recordSuccess(providerName);
         cache.set(cacheKey, candles, 60);
         logger.info(`Candles fetched from ${providerName}`, { symbol, timeframe, count: candles.length });
+        Sentry.addBreadcrumb({
+          category: 'market-data',
+          message: 'Candles fetched',
+          level: 'info',
+          data: { provider: providerName, symbol, timeframe },
+        });
         return candles;
       } catch (error) {
         logger.warn(`${providerName} failed, trying next provider`, { error });
+        Sentry.captureException(error, {
+          tags: { stage: 'market-data', provider: providerName, symbol },
+        });
         this.recordFailure(providerName);
       }
     }
@@ -233,9 +252,18 @@ export class MarketDataService {
         this.recordSuccess(providerName);
         cache.set(cacheKey, price, 30);
         logger.info(`Price fetched from ${providerName}`, { symbol, price });
+        Sentry.addBreadcrumb({
+          category: 'market-data',
+          message: 'Price fetched',
+          level: 'info',
+          data: { provider: providerName, symbol },
+        });
         return price;
       } catch (error) {
         logger.warn(`${providerName} price fetch failed, trying next provider`, { error });
+        Sentry.captureException(error, {
+          tags: { stage: 'market-data', provider: providerName, symbol },
+        });
         this.recordFailure(providerName);
       }
     }
@@ -334,9 +362,18 @@ export class MarketDataService {
         this.recordSuccess(providerName);
         cache.set(cacheKey, price, 30);
         logger.info(`Option price fetched from ${providerName}`, { symbol, strike, optionType, price });
+        Sentry.addBreadcrumb({
+          category: 'market-data',
+          message: 'Option price fetched',
+          level: 'info',
+          data: { provider: providerName, symbol, strike, optionType },
+        });
         return price;
       } catch (error) {
         logger.warn(`${providerName} option price fetch failed`, { error });
+        Sentry.captureException(error, {
+          tags: { stage: 'market-data', provider: providerName, symbol },
+        });
         this.recordFailure(providerName);
       }
     }
@@ -371,6 +408,7 @@ export class MarketDataService {
       } catch (error) {
         this.recordFailure('alpaca');
         logger.warn('Alpaca market hours check failed, falling back', { error });
+      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'alpaca' } });
       }
     }
 
@@ -388,6 +426,7 @@ export class MarketDataService {
     } catch (error) {
       this.recordFailure('twelvedata');
       logger.error('Failed to check market hours', error);
+      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'twelvedata' } });
       return false; // Default to closed on error
     }
   }
@@ -426,6 +465,7 @@ export class MarketDataService {
     } catch (error) {
       this.recordFailure('alpaca');
       logger.error('Failed to get market hours', error);
+      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'alpaca' } });
       return { isMarketOpen: false };
     }
   }
@@ -505,6 +545,7 @@ export class MarketDataService {
     } catch (error) {
       this.recordFailure('marketdata');
       logger.error('Failed to fetch options chain', error, { symbol });
+      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'marketdata', symbol } });
       throw error;
     }
   }
@@ -619,6 +660,7 @@ export class MarketDataService {
     } catch (error) {
       this.recordFailure('marketdata');
       logger.error('Failed to calculate GEX', error, { symbol });
+      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'marketdata', symbol } });
       throw error;
     }
   }
@@ -680,6 +722,7 @@ export class MarketDataService {
     } catch (error) {
       this.recordFailure('marketdata');
       logger.warn('Failed to fetch options flow, returning empty summary', { error, symbol });
+      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'marketdata', symbol } });
       const emptySummary: OptionsFlowSummary = {
         symbol,
         entries: [],

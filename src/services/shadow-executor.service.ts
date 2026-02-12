@@ -4,6 +4,7 @@ import { marketData } from './market-data.js';
 import { logger } from '../utils/logger.js';
 import { MetaDecision, EnrichedSignal } from '../types/index.js';
 import { config } from '../config/index.js';
+import * as Sentry from '@sentry/node';
 
 function calculateExpiration(dteDays: number): Date {
   const base = new Date();
@@ -42,9 +43,20 @@ export class ShadowExecutor {
         experimentId,
         signalId: signal.signalId,
       });
+      Sentry.captureMessage('SHADOW_EXECUTION_SKIPPED', {
+        level: 'info',
+        tags: { stage: 'shadow', experimentId },
+        extra: { signalId: signal.signalId },
+      });
       return;
     }
 
+    Sentry.addBreadcrumb({
+      category: 'shadow',
+      message: 'Shadow trade start',
+      level: 'info',
+      data: { experimentId, signalId: signal.signalId },
+    });
     const price = await marketData.getStockPrice(signal.symbol);
     const strike = calculateStrike(price, signal.direction);
     const expiration = calculateExpiration(config.maxHoldDays);
@@ -127,6 +139,11 @@ export class ShadowExecutor {
       experimentId,
       signalId: signal.signalId,
       shadowTradeId,
+    });
+    Sentry.captureMessage('SHADOW_TRADE_SIMULATED', {
+      level: 'info',
+      tags: { stage: 'shadow', experimentId },
+      extra: { signalId: signal.signalId, shadowTradeId },
     });
   }
 
