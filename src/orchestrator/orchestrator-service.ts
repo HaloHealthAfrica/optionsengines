@@ -138,161 +138,162 @@ export class OrchestratorService {
 
   async processSignal(signal: Signal): Promise<ExperimentResult> {
     const startedAt = Date.now();
-    return await Sentry.withScope(async (scope) => {
-      scope.setTag('signalId', signal.signal_id);
-      scope.setTag('symbol', signal.symbol);
-      const transaction = Sentry.startTransaction({
+    return await Sentry.startSpan(
+      {
         name: 'orchestrator.processSignal',
         op: 'orchestrator',
-      });
-      scope.setSpan(transaction);
-      try {
-        Sentry.addBreadcrumb({
-          category: 'signal',
-          message: 'Signal received',
-          level: 'info',
-          data: { signal_id: signal.signal_id, symbol: signal.symbol },
-        });
-        const enrichment = await buildSignalEnrichment(signal);
-        Sentry.addBreadcrumb({
-          category: 'enrichment',
-          message: 'Enrichment complete',
-          level: 'info',
-        });
-      if (enrichment.queueUntil) {
-        Sentry.addBreadcrumb({
-          category: 'enrichment',
-          message: 'Signal queued',
-          level: 'info',
-          data: { queueUntil: enrichment.queueUntil, reason: enrichment.queueReason },
-        });
-        await this.signalProcessor.queueSignal(
-          signal.signal_id,
-          enrichment.queueUntil,
-          enrichment.queueReason || 'market_closed'
-        );
-        return {
-          experiment: {} as any,
-          policy: {} as any,
-          market_context: {} as any,
-          success: false,
-          error: 'queued_market_closed',
-          duration_ms: Date.now() - startedAt,
-        };
-      }
-      if (enrichment.rejectionReason) {
+        attributes: {
+          signalId: signal.signal_id,
+          symbol: signal.symbol,
+        },
+      },
+      async () => {
+        try {
+          Sentry.addBreadcrumb({
+            category: 'signal',
+            message: 'Signal received',
+            level: 'info',
+            data: { signal_id: signal.signal_id, symbol: signal.symbol },
+          });
+          const enrichment = await buildSignalEnrichment(signal);
+          Sentry.addBreadcrumb({
+            category: 'enrichment',
+            message: 'Enrichment complete',
+            level: 'info',
+          });
+        if (enrichment.queueUntil) {
+          Sentry.addBreadcrumb({
+            category: 'enrichment',
+            message: 'Signal queued',
+            level: 'info',
+            data: { queueUntil: enrichment.queueUntil, reason: enrichment.queueReason },
+          });
+          await this.signalProcessor.queueSignal(
+            signal.signal_id,
+            enrichment.queueUntil,
+            enrichment.queueReason || 'market_closed'
+          );
+          return {
+            experiment: {} as any,
+            policy: {} as any,
+            market_context: {} as any,
+            success: false,
+            error: 'queued_market_closed',
+            duration_ms: Date.now() - startedAt,
+          };
+        }
+        if (enrichment.rejectionReason) {
+          Sentry.addBreadcrumb({
+            category: 'risk',
+            message: 'Signal rejected by enrichment',
+            level: 'warning',
+            data: { reason: enrichment.rejectionReason },
+          });
+          await this.signalProcessor.updateStatus(
+            signal.signal_id,
+            'rejected',
+            enrichment.rejectionReason
+          );
+          await this.signalProcessor.markFailed(signal.signal_id);
+          return {
+            experiment: {} as any,
+            policy: {} as any,
+            market_context: {} as any,
+            success: false,
+            error: enrichment.rejectionReason,
+            duration_ms: Date.now() - startedAt,
+          };
+        }
         Sentry.addBreadcrumb({
           category: 'risk',
-          message: 'Signal rejected by enrichment',
-          level: 'warning',
-          data: { reason: enrichment.rejectionReason },
+          message: 'Risk evaluation complete',
+          level: 'info',
         });
-        await this.signalProcessor.updateStatus(
-          signal.signal_id,
-          'rejected',
-          enrichment.rejectionReason
+        const market_context = await this.createMarketContext(signal);
+        const experiment = await this.createExperiment(signal);
+        signal.experiment_id = experiment.experiment_id;
+        Sentry.setTag('engine', experiment.variant);
+        const policy = await this.getExecutionPolicy(experiment.experiment_id, experiment.variant);
+        Sentry.addBreadcrumb({
+          category: 'policy',
+          message: 'Policy resolved',
+          level: 'info',
+          data: { execution_mode: policy.execution_mode, variant: experiment.variant },
+        });
+        const { engineA, engineB } = await this.distributeSignal(signal, market_context, experiment);
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'Engine invoked',
+          level: 'info',
+          data: { variant: experiment.variant },
+        });
+
+        const engine_a_recommendation = this.applyPolicyToRecommendation(
+          experiment.experiment_id,
+          policy.execution_mode,
+          'A',
+          engineA
         );
-        await this.signalProcessor.markFailed(signal.signal_id);
+        const engine_b_recommendation = this.applyPolicyToRecommendation(
+          experiment.experiment_id,
+          policy.execution_mode,
+          'B',
+          engineB
+        );
+
+        await this.persistRecommendation(
+          signal,
+          experiment.experiment_id,
+          'A',
+          engine_a_recommendation,
+          enrichment
+        );
+        await this.persistRecommendation(
+          signal,
+          experiment.experiment_id,
+          'B',
+          engine_b_recommendation,
+          enrichment
+        );
+
+        await this.updateSignalStatus(
+          signal,
+          policy,
+          engine_a_recommendation,
+          engine_b_recommendation,
+          enrichment
+        );
+        await this.createPaperOrders(
+          signal,
+          experiment.experiment_id,
+          engine_a_recommendation,
+          engine_b_recommendation,
+          enrichment
+        );
+        await this.handleShadowExecution(signal, engine_b_recommendation, experiment.experiment_id);
+
+        await this.signalProcessor.markProcessed(signal.signal_id, experiment.experiment_id);
+
         return {
-          experiment: {} as any,
-          policy: {} as any,
-          market_context: {} as any,
-          success: false,
-          error: enrichment.rejectionReason,
+          experiment,
+          policy,
+          market_context,
+          engine_a_recommendation: engine_a_recommendation ?? undefined,
+          engine_b_recommendation: engine_b_recommendation ?? undefined,
+          success: true,
           duration_ms: Date.now() - startedAt,
         };
+        } catch (error: any) {
+          logger.error('Failed to process signal', error, {
+            signal_id: signal.signal_id,
+          });
+          Sentry.captureException(error, {
+            tags: { stage: 'orchestrator', signalId: signal.signal_id },
+          });
+          throw error;
+        }
       }
-      Sentry.addBreadcrumb({
-        category: 'risk',
-        message: 'Risk evaluation complete',
-        level: 'info',
-      });
-      const market_context = await this.createMarketContext(signal);
-      const experiment = await this.createExperiment(signal);
-      signal.experiment_id = experiment.experiment_id;
-      scope.setTag('engine', experiment.variant);
-      const policy = await this.getExecutionPolicy(experiment.experiment_id, experiment.variant);
-      Sentry.addBreadcrumb({
-        category: 'policy',
-        message: 'Policy resolved',
-        level: 'info',
-        data: { execution_mode: policy.execution_mode, variant: experiment.variant },
-      });
-      const { engineA, engineB } = await this.distributeSignal(signal, market_context, experiment);
-      Sentry.addBreadcrumb({
-        category: 'engine',
-        message: 'Engine invoked',
-        level: 'info',
-        data: { variant: experiment.variant },
-      });
-
-      const engine_a_recommendation = this.applyPolicyToRecommendation(
-        experiment.experiment_id,
-        policy.execution_mode,
-        'A',
-        engineA
-      );
-      const engine_b_recommendation = this.applyPolicyToRecommendation(
-        experiment.experiment_id,
-        policy.execution_mode,
-        'B',
-        engineB
-      );
-
-      await this.persistRecommendation(
-        signal,
-        experiment.experiment_id,
-        'A',
-        engine_a_recommendation,
-        enrichment
-      );
-      await this.persistRecommendation(
-        signal,
-        experiment.experiment_id,
-        'B',
-        engine_b_recommendation,
-        enrichment
-      );
-
-      await this.updateSignalStatus(
-        signal,
-        policy,
-        engine_a_recommendation,
-        engine_b_recommendation,
-        enrichment
-      );
-      await this.createPaperOrders(
-        signal,
-        experiment.experiment_id,
-        engine_a_recommendation,
-        engine_b_recommendation,
-        enrichment
-      );
-      await this.handleShadowExecution(signal, engine_b_recommendation, experiment.experiment_id);
-
-      await this.signalProcessor.markProcessed(signal.signal_id, experiment.experiment_id);
-
-      return {
-        experiment,
-        policy,
-        market_context,
-        engine_a_recommendation: engine_a_recommendation ?? undefined,
-        engine_b_recommendation: engine_b_recommendation ?? undefined,
-        success: true,
-        duration_ms: Date.now() - startedAt,
-      };
-      } catch (error: any) {
-        logger.error('Failed to process signal', error, {
-          signal_id: signal.signal_id,
-        });
-        Sentry.captureException(error, {
-          tags: { stage: 'orchestrator', signalId: signal.signal_id },
-        });
-        throw error;
-      } finally {
-        transaction.finish();
-      }
-    });
+    );
   }
 
   async createMarketContext(signal: Signal): Promise<MarketContext> {
