@@ -484,6 +484,8 @@ export default function TestingConsole() {
               Clear Test Data
             </button>
           </div>
+        </>
+      )}
         </div>
       </div>
     </div>
