@@ -139,7 +139,7 @@ function extractDirectionCandidate(payload: WebhookPayload): DirectionCandidate 
   if (patternStr.includes('bear') || patternStr.includes('short')) return 'short';
   if (patternStr.includes('bull') || patternStr.includes('long')) return 'long';
 
-  return (
+  const raw =
     payload.direction ??
     payload.side ??
     payload.trend ??
@@ -152,12 +152,12 @@ function extractDirectionCandidate(payload: WebhookPayload): DirectionCandidate 
     anyPayload.order_action ??
     (anyPayload.strategy as Record<string, unknown> | undefined)?.order_action ??
     anyPayload.action ??
-    anyPayload.event?.phase_name ??
+    (anyPayload.event as Record<string, unknown> | undefined)?.phase_name ??
     (anyPayload.market as Record<string, unknown> | undefined)?.market_bias ??
     (anyPayload.market as Record<string, unknown> | undefined)?.spy_trend ??
     (anyPayload.market as Record<string, unknown> | undefined)?.qqq_trend ??
-    (anyPayload.candle as Record<string, unknown> | undefined)?.pattern_bias
-  );
+    (anyPayload.candle as Record<string, unknown> | undefined)?.pattern_bias;
+  return raw as DirectionCandidate;
 }
 
 export function normalizeDirection(payload: WebhookPayload): 'long' | 'short' | null {
