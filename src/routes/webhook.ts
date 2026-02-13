@@ -65,7 +65,10 @@ export const webhookSchema = z
     secret: z.string().min(1).max(128).optional(),
   })
   .passthrough()
-  .refine((data) => Boolean(data.symbol || data.ticker), {
+  .refine((data) => {
+    const d = data as Record<string, unknown>;
+    return Boolean(d.symbol || d.ticker || (d.meta as Record<string, unknown> | undefined)?.ticker);
+  }, {
     message: 'symbol is required',
     path: ['symbol'],
   });
@@ -129,7 +132,12 @@ function detectIndicatorSource(payload: WebhookPayload): string {
 }
 
 function extractDirectionCandidate(payload: WebhookPayload): DirectionCandidate {
-  const anyPayload = payload as any;
+  const anyPayload = payload as Record<string, unknown>;
+  const signal = anyPayload.signal as Record<string, unknown> | undefined;
+  const pattern = signal?.pattern ?? anyPayload.pattern;
+  const patternStr = typeof pattern === 'string' ? pattern.toLowerCase() : '';
+  if (patternStr.includes('bear') || patternStr.includes('short')) return 'short';
+  if (patternStr.includes('bull') || patternStr.includes('long')) return 'long';
 
   return (
     payload.direction ??
@@ -138,17 +146,17 @@ function extractDirectionCandidate(payload: WebhookPayload): DirectionCandidate 
     payload.bias ??
     payload.signal?.type ??
     payload.signal?.direction ??
-    anyPayload.signal?.side ??
-    anyPayload.regime_context?.local_bias ??
-    anyPayload.execution_guidance?.bias ??
+    (anyPayload.signal as Record<string, unknown> | undefined)?.side ??
+    (anyPayload.regime_context as Record<string, unknown> | undefined)?.local_bias ??
+    (anyPayload.execution_guidance as Record<string, unknown> | undefined)?.bias ??
     anyPayload.order_action ??
-    anyPayload.strategy?.order_action ??
+    (anyPayload.strategy as Record<string, unknown> | undefined)?.order_action ??
     anyPayload.action ??
     anyPayload.event?.phase_name ??
-    anyPayload.market?.market_bias ??
-    anyPayload.market?.spy_trend ??
-    anyPayload.market?.qqq_trend ??
-    anyPayload.candle?.pattern_bias
+    (anyPayload.market as Record<string, unknown> | undefined)?.market_bias ??
+    (anyPayload.market as Record<string, unknown> | undefined)?.spy_trend ??
+    (anyPayload.market as Record<string, unknown> | undefined)?.qqq_trend ??
+    (anyPayload.candle as Record<string, unknown> | undefined)?.pattern_bias
   );
 }
 
@@ -173,14 +181,21 @@ export function normalizeDirection(payload: WebhookPayload): 'long' | 'short' | 
 }
 
 function normalizeTimeframe(payload: WebhookPayload): string | null {
+  const anyPayload = payload as Record<string, unknown>;
   const raw =
     payload.timeframe ??
     payload.tf ??
     payload.interval ??
     payload.trigger_timeframe ??
-    payload.triggerTimeframe;
+    payload.triggerTimeframe ??
+    (anyPayload.meta as Record<string, unknown> | undefined)?.timeframe;
 
   if (raw === undefined || raw === null) {
+    // Fallback: session "OPEN" = daily, "PRE"/"POST" = daily
+    const session = String(anyPayload.session ?? '').toUpperCase();
+    if (['OPEN', 'PRE', 'POST', 'REGULAR'].includes(session)) return '1d';
+    // Fallback: Adaptive Strat / strat_details style payloads → daily
+    if (anyPayload.strat_details && typeof anyPayload.strat_details === 'object') return '1d';
     return null;
   }
 
@@ -429,7 +444,7 @@ export async function processWebhookPayload(input: {
     const payload = parseResult.data;
     const { secret: _secret, ...payloadForStorage } = payload;
     testMetaForLog = extractTestMetadata(payload);
-    const symbol = payload.symbol ?? payload.ticker;
+    const symbol = payload.symbol ?? payload.ticker ?? (payload as { meta?: { ticker?: string } }).meta?.ticker;
     symbolForLog = symbol;
     const normalizedTimeframe = normalizeTimeframe(payload);
     timeframeForLog = normalizedTimeframe ?? undefined;
