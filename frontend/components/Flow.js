@@ -1,13 +1,17 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Search, Bell, CheckCircle, XCircle } from 'lucide-react';
+import { Bell, CheckCircle, XCircle } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import DataSourceBanner from './DataSourceBanner';
 import DataFreshnessIndicator from './DataFreshnessIndicator';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
-const defaultSymbols = ['SPY', 'QQQ', 'AAPL', 'TSLA', 'MSFT', 'NVDA', 'AMD', 'META', 'NFLX', 'IWM'];
-const tabs = ['Overview', 'Details', 'Signals', 'Alerts'];
+const MarketTideChart = dynamic(() => import('./MarketTideChart'), { ssr: false });
+
+/** Flow page supports only these tickers */
+const FLOW_ALLOWED_SYMBOLS = ['SPY', 'IWM', 'QQQ', 'SMI', 'SPX'];
+const tabs = ['Overview', 'Details', 'Market Tide', 'Signals', 'Alerts'];
 
 function RecentSignalsCard({ symbol }) {
   const [signals, setSignals] = useState([]);
@@ -285,21 +289,11 @@ function gammaBadgeClass(regime) {
 
 export default function Flow() {
   const [symbol, setSymbol] = useState('SPY');
-  const [query, setQuery] = useState('');
   const [activeTab, setActiveTab] = useState('Overview');
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('idle');
   const [dataSource, setDataSource] = useState('unknown');
   const [lastUpdated, setLastUpdated] = useState(null);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (query) {
-        setSymbol(query.toUpperCase());
-      }
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [query]);
 
   const fetchData = useMemo(
     () => async () => {
@@ -325,11 +319,6 @@ export default function Flow() {
 
   useAutoRefresh(fetchData, 30000, true);
 
-  const suggestions = useMemo(() => {
-    if (!query) return defaultSymbols;
-    return defaultSymbols.filter((item) => item.startsWith(query.toUpperCase()));
-  }, [query]);
-
   const isNetflowBullish =
     (data?.netflow?.direction ?? data?.optionsFlow?.netflow ?? '') !== 'bearish' &&
     !String(data?.optionsFlow?.netflow ?? '').startsWith('-');
@@ -350,6 +339,13 @@ export default function Flow() {
                 )}
               </span>
             )}
+            {data?.flowSource === 'marketdata' && data?.flowDebug && (
+              <span className="ml-2" title={data.flowDebug}>
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700 dark:bg-amber-500/20 dark:text-amber-200">
+                  Why marketdata? {data.flowDebug}
+                </span>
+              </span>
+            )}
             {data?.circuitBreakers?.unusualwhales?.state === 'open' && (
               <span className="ml-2 rounded bg-rose-100 px-1.5 py-0.5 text-xs text-rose-700 dark:bg-rose-500/20 dark:text-rose-200" title="Unusual Whales circuit breaker open - flow falling back to MarketData.app">
                 UW circuit open
@@ -357,37 +353,22 @@ export default function Flow() {
             )}
           </p>
         </div>
-        <div className="relative w-full max-w-xs">
-          <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search symbol"
-            className="w-full rounded-2xl border border-slate-200 bg-white/80 py-2 pl-9 pr-3 text-sm shadow-sm outline-none transition focus:border-brand-500 dark:border-slate-700 dark:bg-slate-900/80"
-            aria-label="Search symbol"
-          />
-          {query && (
-            <div className="absolute left-0 right-0 top-12 z-10 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-              {suggestions.length === 0 && (
-                <p className="muted px-3 py-2 text-xs">No matching symbols</p>
-              )}
-              {suggestions.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => {
-                    setSymbol(item);
-                    setQuery('');
-                  }}
-                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800"
-                >
-                  {item}
-                  <span className="muted text-xs">View</span>
-                </button>
-              ))}
-            </div>
-          )}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="muted text-xs font-medium">Ticker:</span>
+          {FLOW_ALLOWED_SYMBOLS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSymbol(s)}
+              className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                symbol === s
+                  ? 'bg-brand-500 text-white shadow-md'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+            >
+              {s}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -608,6 +589,10 @@ export default function Flow() {
                 </div>
               </div>
             </div>
+          )}
+
+          {activeTab === 'Market Tide' && (
+            <MarketTideChart symbol={symbol} />
           )}
 
           {activeTab === 'Signals' && (

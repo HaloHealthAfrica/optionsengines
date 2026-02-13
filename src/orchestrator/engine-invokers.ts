@@ -27,15 +27,14 @@ import * as Sentry from '@sentry/node';
 
 function applyGammaSizingMultiplier(
   baseSize: number,
-  regime?: MarketContext['marketIntel'] extends infer T
-    ? T extends { gamma?: { regime?: infer R } }
-      ? R
-      : undefined
-    : undefined
+  gammaContext?: { regime?: string; position_size_multiplier?: number }
 ): number {
-  const normalized = String(regime || '').toUpperCase();
-  if (normalized === 'LONG_GAMMA') return baseSize * 1.25;
-  if (normalized === 'SHORT_GAMMA') return baseSize * 0.6;
+  if (gammaContext?.position_size_multiplier != null && Number.isFinite(gammaContext.position_size_multiplier)) {
+    return Math.max(1, Math.floor(baseSize * gammaContext.position_size_multiplier));
+  }
+  const regime = String(gammaContext?.regime || '').toUpperCase();
+  if (regime === 'LONG_GAMMA') return baseSize * 1.25;
+  if (regime === 'SHORT_GAMMA') return baseSize * 0.6;
   return baseSize;
 }
 
@@ -94,7 +93,13 @@ async function buildRecommendation(
     const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
 
     const baseSize = Math.max(1, Math.floor(config.maxPositionSize));
-    const adjustedSize = applyGammaSizingMultiplier(baseSize, context?.marketIntel?.gamma?.regime);
+    const gammaCtx = context?.enrichment?.gammaDecision
+      ? {
+          regime: context.enrichment.gammaDecision.regime,
+          position_size_multiplier: context.enrichment.gammaDecision.position_size_multiplier,
+        }
+      : context?.marketIntel?.gamma;
+    const adjustedSize = applyGammaSizingMultiplier(baseSize, gammaCtx);
     const quantity = Math.max(1, Math.floor(adjustedSize));
 
     return {
@@ -287,7 +292,13 @@ async function buildEngineBRecommendation(
     const { strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction);
     const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
     const baseSize = Math.max(1, Math.floor(config.maxPositionSize));
-    const adjustedSize = applyGammaSizingMultiplier(baseSize, context?.marketIntel?.gamma?.regime);
+    const gammaCtx = context?.enrichment?.gammaDecision
+      ? {
+          regime: context.enrichment.gammaDecision.regime,
+          position_size_multiplier: context.enrichment.gammaDecision.position_size_multiplier,
+        }
+      : context?.marketIntel?.gamma;
+    const adjustedSize = applyGammaSizingMultiplier(baseSize, gammaCtx);
     const quantity = Math.max(1, Math.floor(adjustedSize));
 
     return {

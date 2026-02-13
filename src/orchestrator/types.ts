@@ -34,6 +34,16 @@ export interface EngineEnrichment {
   riskResult: Record<string, unknown>;
   rejectionReason: string | null;
   decisionOnly?: boolean;
+  gammaContext?: Record<string, unknown>;
+  gammaDecision?: {
+    regime: string;
+    direction: string;
+    confidence_score: number;
+    position_size_multiplier: number;
+    strike_adjustment: { gammaInfluencedStrike: boolean; gammaTargetStrike: number | null };
+    exit_profile: string;
+    gamma_context: Record<string, unknown>;
+  };
 }
 
 export interface MarketContext {

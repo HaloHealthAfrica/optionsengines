@@ -3,7 +3,7 @@ import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 import { rateLimiter } from '../rate-limiter.service.js';
 
-const BASE_URL = 'https://api.unusualwhales.com';
+const BASE_URL = 'https://api.unusualwhales.com/api';
 
 export interface UnusualWhalesOptionContract {
   id: string;
@@ -292,8 +292,9 @@ export class UnusualWhalesOptionsClient {
   private normalizeNetPremTick(r: Record<string, unknown>): UnusualWhalesNetPremTick {
     const callVol = this.toNum(r.call_volume ?? r.callVolume ?? r.call_vol) ?? 0;
     const putVol = this.toNum(r.put_volume ?? r.putVolume ?? r.put_vol) ?? 0;
-    const callPrem = this.toNum(r.call_premium ?? r.callPremium ?? r.call_prem ?? r.callPrem) ?? 0;
-    const putPrem = this.toNum(r.put_premium ?? r.putPremium ?? r.put_prem ?? r.putPrem) ?? 0;
+    // API returns net_call_premium, net_put_premium (can be negative)
+    const callPrem = this.toNum(r.call_premium ?? r.callPremium ?? r.net_call_premium ?? r.netCallPremium) ?? 0;
+    const putPrem = this.toNum(r.put_premium ?? r.putPremium ?? r.net_put_premium ?? r.netPutPremium) ?? 0;
     const netPrem = this.toNum(r.net_premium ?? r.netPremium ?? r.net_prem ?? r.netPrem ?? r.net_premium_flow) ?? (callPrem - putPrem);
     return {
       timestamp: this.toNum(r.timestamp ?? r.time ?? r.t) ?? Date.now(),

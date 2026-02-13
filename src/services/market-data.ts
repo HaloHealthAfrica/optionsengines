@@ -718,20 +718,28 @@ export class MarketDataService {
       return cached;
     }
 
+    let flowDebug = '';
+
     // Primary: Unusual Whales
     if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey && this.checkCircuitBreaker('unusualwhales')) {
       try {
         const uwFlow = await unusualWhalesOptionsService.getOptionsFlow(symbol, limit);
         if (uwFlow && uwFlow.entries.length > 0) {
           this.recordSuccess('unusualwhales');
-          cache.set(cacheKey, uwFlow, 60);
+          cache.set(cacheKey, { ...uwFlow, flowDebug: 'unusualwhales' }, 60);
           logger.info('Options flow: Unusual Whales (primary)', { symbol, count: uwFlow.entries.length });
-          return uwFlow;
+          return { ...uwFlow, flowDebug: 'unusualwhales' };
         }
+        flowDebug = 'unusualwhales_returned_empty';
       } catch (uwError) {
         this.recordFailure('unusualwhales');
+        flowDebug = `unusualwhales_failed: ${(uwError as Error).message}`;
         logger.warn('Unusual Whales options flow failed, trying MarketData.app fallback', { symbol, error: uwError });
       }
+    } else if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey && !this.checkCircuitBreaker('unusualwhales')) {
+      flowDebug = 'unusualwhales_circuit_breaker_open';
+    } else if (!config.unusualWhalesOptionsEnabled || !config.unusualWhalesApiKey) {
+      flowDebug = 'unusualwhales_not_configured';
     }
 
     // Fallback: MarketData.app
@@ -767,6 +775,7 @@ export class MarketDataService {
           entries,
           updatedAt: new Date(),
           source: 'marketdata',
+          flowDebug: flowDebug || 'marketdata_fallback',
         };
 
         this.recordSuccess('marketdata');
@@ -784,6 +793,7 @@ export class MarketDataService {
       symbol,
       entries: [],
       updatedAt: new Date(),
+      flowDebug: flowDebug || 'all_sources_empty',
     };
     cache.set(cacheKey, emptySummary, 15);
     return emptySummary;

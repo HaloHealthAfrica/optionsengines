@@ -15,7 +15,7 @@ import 'dotenv/config';
  *   UNUSUAL_WHALES_API_KEY=xxx npx tsx scripts/diagnose-uw-flow.ts SPY
  */
 
-const BASE_URL = 'https://api.unusualwhales.com';
+const BASE_URL = 'https://api.unusualwhales.com/api';
 const TICKER = process.argv[2] || 'SPY';
 const API_KEY = process.env.UNUSUAL_WHALES_API_KEY;
 
@@ -57,31 +57,36 @@ async function main() {
     console.log('   Endpoint: GET /stock/:ticker/option-contracts');
     console.log('   Our getOptionsFlow derives flow from chain contracts with volume > 0.\n');
 
-    const contractsUrl = `${BASE_URL}/stock/${TICKER}/option-contracts`;
-    const contractsPayload = (await fetchJson(contractsUrl)) as Record<string, unknown>;
-    const contracts = extractContractsArray(contractsPayload);
+    try {
+      const contractsUrl = `${BASE_URL}/stock/${TICKER}/option-contracts`;
+      const contractsPayload = (await fetchJson(contractsUrl)) as Record<string, unknown>;
+      const contracts = extractContractsArray(contractsPayload);
 
-    console.log(`   Contracts returned: ${contracts.length}`);
+      console.log(`   Contracts returned: ${contracts.length}`);
 
-    if (contracts.length > 0) {
-      const withVolume = contracts.filter((c) => {
-        const v = c.volume ?? c.vol;
-        return v != null && Number(v) > 0;
-      });
-      console.log(`   Contracts with volume > 0: ${withVolume.length}`);
+      if (contracts.length > 0) {
+        const withVolume = contracts.filter((c) => {
+          const v = c.volume ?? c.vol;
+          return v != null && Number(v) > 0;
+        });
+        console.log(`   Contracts with volume > 0: ${withVolume.length}`);
 
-      const first = contracts[0] as Record<string, unknown>;
-      const volKeys = Object.keys(first).filter((k) => k.toLowerCase().includes('vol'));
-      console.log(`   Volume-related keys in first contract: ${volKeys.join(', ') || 'NONE'}`);
-      console.log(`   First contract volume: ${first.volume ?? first.vol ?? 'undefined'}`);
+        const first = contracts[0] as Record<string, unknown>;
+        const volKeys = Object.keys(first).filter((k) => k.toLowerCase().includes('vol'));
+        console.log(`   Volume-related keys in first contract: ${volKeys.join(', ') || 'NONE'}`);
+        console.log(`   First contract volume: ${first.volume ?? first.vol ?? 'undefined'}`);
 
-      if (withVolume.length === 0) {
-        console.log('\n   *** ROOT CAUSE: Option chain has NO contracts with volume > 0 ***');
-        console.log('   Option chain APIs typically return OI (open interest), not trade volume.');
-        console.log('   Our code filters .filter(c => c.volume != null && c.volume > 0) - all get filtered out.\n');
+        if (withVolume.length === 0) {
+          console.log('\n   *** ROOT CAUSE: Option chain has NO contracts with volume > 0 ***');
+          console.log('   Option chain APIs typically return OI (open interest), not trade volume.');
+          console.log('   Our code filters .filter(c => c.volume != null && c.volume > 0) - all get filtered out.\n');
+        }
+      } else {
+        console.log('   *** No contracts returned - check API response structure ***');
       }
-    } else {
-      console.log('   *** No contracts returned - check API response structure ***');
+    } catch (e) {
+      console.log('   Option-contracts request failed:', (e as Error).message);
+      console.log('   (404 may mean wrong path or plan does not include this endpoint)\n');
     }
 
     // 2. Net premium ticks (proper flow endpoint - NOT currently used)

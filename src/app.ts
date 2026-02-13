@@ -25,6 +25,7 @@ import webhookSchemaRoutes from './routes/webhooks.js';
 import marketIntelRoutes from './routes/market-intel.js';
 import marketWebhookRoutes from './routes/market-webhooks.js';
 import cronRoutes from './routes/cron.js';
+import gammaRoutes from './routes/gamma.js';
 
 const app: Express = express();
 
@@ -66,6 +67,7 @@ app.use('/monitoring', monitoringRoutes);
 app.use('/orders', ordersRoutes);
 app.use('/history', historyRoutes);
 app.use('/intel', marketIntelRoutes);
+app.use('/gamma', gammaRoutes);
 app.use('/admin/cache', cacheInvalidation.createAdminRoutes());
 app.use('/api', optionsEnginesRoutes);
 app.use('/api/options', optionsRoutes);

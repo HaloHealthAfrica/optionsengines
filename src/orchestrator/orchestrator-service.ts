@@ -20,6 +20,8 @@ import { EnrichedSignal, MetaDecision } from '../types/index.js';
 import { db } from '../services/database.service.js';
 import { config } from '../config/index.js';
 import { buildSignalEnrichment } from '../services/signal-enrichment.service.js';
+import { gammaDealerStrategy } from '../strategies/GammaDealerStrategy.js';
+import type { GammaStrategyDecision, MarketDataLike } from '../strategies/types.js';
 import { alertService } from '../services/alert.service.js';
 import * as Sentry from '@sentry/node';
 
@@ -211,14 +213,44 @@ export class OrchestratorService {
           level: 'info',
         });
         const market_context = await this.createMarketContext(signal);
-        const contextWithEnrichment = {
+        let gammaDecision: GammaStrategyDecision | null = null;
+        if (config.enableGammaStrategy) {
+          const gammaContext = await gammaDealerStrategy.getGammaContext(signal.symbol);
+          const enrichedData = (enrichment.enrichedData ?? {}) as Record<string, unknown>;
+          const marketDataLike: MarketDataLike = {
+            currentPrice: market_context.current_price,
+            gex: enrichedData.gex as MarketDataLike['gex'],
+            optionsFlow: enrichedData.optionsFlow as MarketDataLike['optionsFlow'],
+          };
+          gammaDecision = await gammaDealerStrategy.evaluate(signal, marketDataLike, gammaContext);
+          if (gammaDecision) {
+            Sentry.addBreadcrumb({
+              category: 'gamma',
+              message: 'GammaDealerStrategy evaluated',
+              level: 'info',
+              data: { regime: gammaDecision.regime, confidence: gammaDecision.confidence_score },
+            });
+          }
+        }
+        const contextWithEnrichment: MarketContext = {
           ...market_context,
           enrichment: {
             enrichedData: enrichment.enrichedData ?? {},
             riskResult: enrichment.riskResult ?? {},
             rejectionReason: enrichment.rejectionReason,
             decisionOnly: enrichment.decisionOnly,
+            gammaContext: gammaDecision?.gamma_context,
+            gammaDecision: gammaDecision ?? undefined,
           },
+          marketIntel: gammaDecision
+            ? {
+                ...market_context.marketIntel,
+                gamma: {
+                  regime: gammaDecision.regime,
+                  position_size_multiplier: gammaDecision.position_size_multiplier,
+                },
+              }
+            : market_context.marketIntel,
         };
         const experiment = await this.createExperiment(signal);
         signal.experiment_id = experiment.experiment_id;
@@ -230,7 +262,16 @@ export class OrchestratorService {
           level: 'info',
           data: { execution_mode: policy.execution_mode, variant: experiment.variant },
         });
-        const { engineA, engineB } = await this.distributeSignal(signal, contextWithEnrichment, experiment);
+        let { engineA, engineB } = await this.distributeSignal(signal, contextWithEnrichment, experiment);
+        const { engineA: adjustedA, engineB: adjustedB } = this.applyGammaOverride(
+          experiment.variant,
+          engineA,
+          engineB,
+          gammaDecision,
+          signal
+        );
+        engineA = adjustedA;
+        engineB = adjustedB;
         Sentry.addBreadcrumb({
           category: 'engine',
           message: 'Engine invoked',
@@ -256,15 +297,20 @@ export class OrchestratorService {
           experiment.experiment_id,
           'A',
           engine_a_recommendation,
-          enrichment
+          enrichment,
+          gammaDecision
         );
         await this.persistRecommendation(
           signal,
           experiment.experiment_id,
           'B',
           engine_b_recommendation,
-          enrichment
+          enrichment,
+          gammaDecision
         );
+        if (gammaDecision) {
+          await this.persistSignalMetaGamma(signal.signal_id, gammaDecision);
+        }
 
         await this.updateSignalStatus(
           signal,
@@ -289,7 +335,12 @@ export class OrchestratorService {
             data: { signal_id: signal.signal_id },
           });
         }
-        await this.handleShadowExecution(signal, engine_b_recommendation, experiment.experiment_id);
+        await this.handleShadowExecution(
+          signal,
+          engine_b_recommendation,
+          experiment.experiment_id,
+          gammaDecision
+        );
 
         await this.signalProcessor.markProcessed(signal.signal_id, experiment.experiment_id);
 
@@ -335,6 +386,73 @@ export class OrchestratorService {
 
     const engineB = await this.engineCoordinator.invokeEngineB(signal, context);
     return { engineA: null, engineB };
+  }
+
+  private applyGammaOverride(
+    variant: 'A' | 'B',
+    engineA: TradeRecommendation | null,
+    engineB: TradeRecommendation | null,
+    gammaDecision: GammaStrategyDecision | null,
+    signal: Signal
+  ): { engineA: TradeRecommendation | null; engineB: TradeRecommendation | null } {
+    if (!gammaDecision || gammaDecision.direction === 'HOLD') {
+      return { engineA, engineB };
+    }
+    const gammaWeight = config.gammaStrategyWeight;
+    if (gammaDecision.confidence_score < gammaWeight) {
+      return { engineA, engineB };
+    }
+    if (variant === 'A' && engineA) {
+      if (gammaDecision.confidence_score >= 0.7) {
+        const gammaDir = gammaDecision.direction === 'LONG' ? 'long' : 'short';
+        const baseQty = engineA.quantity;
+        const adjustedQty = Math.max(1, Math.floor(baseQty * gammaDecision.position_size_multiplier));
+        logger.info('GammaDealerStrategy override Engine A', {
+          signal_id: signal.signal_id,
+          regime: gammaDecision.regime,
+          originalDirection: engineA.direction,
+          gammaDirection: gammaDir,
+          confidence: gammaDecision.confidence_score,
+        });
+        return {
+          engineA: {
+            ...engineA,
+            direction: gammaDir,
+            quantity: adjustedQty,
+          },
+          engineB,
+        };
+      }
+    }
+    if (variant === 'B' && engineB) {
+      const gammaDir = gammaDecision.direction === 'LONG' ? 'long' : 'short';
+      if (engineB.direction !== gammaDir) {
+        logger.info('GammaDealerStrategy conflict with Engine B - requiring alignment', {
+          signal_id: signal.signal_id,
+          engineBDirection: engineB.direction,
+          gammaDirection: gammaDir,
+        });
+        return { engineA, engineB: null };
+      }
+      const baseQty = engineB.quantity;
+      const adjustedQty = Math.max(1, Math.floor(baseQty * gammaDecision.position_size_multiplier));
+      return {
+        engineA,
+        engineB: { ...engineB, quantity: adjustedQty },
+      };
+    }
+    return { engineA, engineB };
+  }
+
+  private async persistSignalMetaGamma(signalId: string, gammaDecision: GammaStrategyDecision): Promise<void> {
+    try {
+      await db.query(
+        `UPDATE signals SET meta_gamma = $1 WHERE signal_id = $2`,
+        [JSON.stringify(gammaDecision), signalId]
+      );
+    } catch (err) {
+      logger.warn('Failed to persist signal meta_gamma', { signalId, error: err });
+    }
   }
 
   async trackOutcome(outcome: TradeOutcome): Promise<void> {
@@ -419,7 +537,8 @@ export class OrchestratorService {
   private async handleShadowExecution(
     signal: Signal,
     recommendation: TradeRecommendation | undefined,
-    experimentId: string
+    experimentId: string,
+    gammaDecision?: GammaStrategyDecision | null
   ): Promise<void> {
     if (!this.shadowExecutor || !recommendation?.is_shadow || !config.enableShadowExecution) {
       return;
@@ -449,7 +568,12 @@ export class OrchestratorService {
       reasons: ['orchestrator shadow execution'],
     };
 
-    await this.shadowExecutor.simulateExecution(metaDecision, enrichedSignal, experimentId);
+    await this.shadowExecutor.simulateExecution(
+      metaDecision,
+      enrichedSignal,
+      experimentId,
+      gammaDecision ? JSON.stringify(gammaDecision) : undefined
+    );
   }
 
   private async createPaperOrders(
@@ -583,17 +707,21 @@ export class OrchestratorService {
     experimentId: string,
     engine: 'A' | 'B',
     recommendation: TradeRecommendation | undefined,
-    enrichment: { enrichedData: Record<string, any>; riskResult: Record<string, any>; rejectionReason: string | null }
+    enrichment: { enrichedData: Record<string, any>; riskResult: Record<string, any>; rejectionReason: string | null },
+    gammaDecision?: GammaStrategyDecision | null
   ): Promise<void> {
     if (!recommendation) {
       return;
     }
 
-    const rationale = {
+    const rationale: Record<string, unknown> = {
       enriched_data: enrichment.enrichedData,
       risk_check_result: enrichment.riskResult,
       rejection_reason: enrichment.rejectionReason,
     };
+    if (gammaDecision) {
+      rationale.meta_gamma = gammaDecision;
+    }
 
     await db.query(
       `INSERT INTO decision_recommendations (

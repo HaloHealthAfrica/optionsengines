@@ -269,6 +269,30 @@ export async function backendGetFlow(token, symbol = 'SPY') {
   return response.json();
 }
 
+export async function backendGetMarketTide(token, symbol = 'SPY') {
+  const response = await backendFetch(`/flow/${encodeURIComponent(symbol)}/market-tide`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to fetch market tide');
+  return response.json();
+}
+
+export async function backendGetTopNetImpact(token) {
+  const response = await backendFetch('/flow/top-net-impact', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to fetch top net impact');
+  return response.json();
+}
+
+export async function backendGetGamma(token, symbol = 'SPY') {
+  const response = await backendFetch(`/gamma/${encodeURIComponent(symbol)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to fetch gamma context');
+  return response.json();
+}
+
 export async function backendGetFlowSignals(token, symbol = 'SPY', limit = 20) {
   const response = await backendFetch(
     `/flow/${encodeURIComponent(symbol)}/signals?limit=${limit}`,

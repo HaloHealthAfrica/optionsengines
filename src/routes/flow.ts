@@ -13,6 +13,9 @@ import { marketData } from '../services/market-data.js';
 
 const router = Router();
 
+/** Flow page supports only these tickers for now */
+const FLOW_ALLOWED_SYMBOLS = ['SPY', 'IWM', 'QQQ', 'SMI', 'SPX'];
+
 type AuthPayload = {
   userId: string;
   email: string;
@@ -100,6 +103,29 @@ router.get('/alerts/history', requireAuth, async (req: Request, res: Response) =
   }
 });
 
+/** Top Net Impact - net premium per ticker for bar chart (Market Tide style) */
+router.get('/top-net-impact', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const { positioningService } = await import('../services/positioning.service.js');
+    const results: Array<{ symbol: string; netPremium: number; formatted: string }> = [];
+    for (const sym of FLOW_ALLOWED_SYMBOLS) {
+      const flow = await positioningService.getOptionsFlowSnapshot(sym, 100);
+      const callPremium = flow.entries
+        .filter((e: { side?: string }) => e.side === 'call')
+        .reduce((s: number, e: { premium?: number }) => s + Number(e.premium || 0), 0);
+      const putPremium = flow.entries
+        .filter((e: { side?: string }) => e.side === 'put')
+        .reduce((s: number, e: { premium?: number }) => s + Number(e.premium || 0), 0);
+      const netPremium = callPremium - putPremium;
+      results.push({ symbol: sym, netPremium, formatted: formatNotional(netPremium) });
+    }
+    results.sort((a, b) => b.netPremium - a.netPremium);
+    res.json({ tickers: results });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch top net impact' });
+  }
+});
+
 /** Send test alert to Discord/Slack (bypasses cooldown) */
 router.post('/alerts/test', requireAuth, async (_req: Request, res: Response) => {
   try {
@@ -123,6 +149,14 @@ router.post('/alerts/test', requireAuth, async (_req: Request, res: Response) =>
 
 router.get('/:symbol', requireAuth, async (req: Request, res: Response) => {
   const symbol = String(req.params.symbol || 'SPY').toUpperCase();
+
+  if (!FLOW_ALLOWED_SYMBOLS.includes(symbol)) {
+    return res.status(400).json({
+      error: 'Symbol not supported for Flow',
+      symbol,
+      allowedSymbols: FLOW_ALLOWED_SYMBOLS,
+    });
+  }
 
   try {
     const [gex, flow, zScoreResult, flowConfig] = await Promise.all([
@@ -167,7 +201,7 @@ router.get('/:symbol', requireAuth, async (req: Request, res: Response) => {
     const bullish = totalVolume > 0 ? Math.round((callVolume / totalVolume) * 100) : 0;
     const bearish = totalVolume > 0 ? 100 - bullish : 0;
 
-    res.json({
+    return res.json({
       symbol,
       netflow: {
         value: netflow,
@@ -214,12 +248,59 @@ router.get('/:symbol', requireAuth, async (req: Request, res: Response) => {
         sampleSize: zScoreResult.sampleSize,
       } : null,
       circuitBreakers: config.unusualWhalesOptionsEnabled ? marketData.getCircuitBreakerStatus() : undefined,
+      flowDebug: flow.flowDebug,
+      allowedSymbols: FLOW_ALLOWED_SYMBOLS,
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       error: 'Failed to fetch flow data',
       symbol,
     });
+  }
+});
+
+/** Market Tide - time series of net prem ticks for chart (price, NCP, NPP, volume) */
+router.get('/:symbol/market-tide', requireAuth, async (req: Request, res: Response) => {
+  const symbol = String(req.params.symbol || 'SPY').toUpperCase();
+  if (!FLOW_ALLOWED_SYMBOLS.includes(symbol)) {
+    return res.status(400).json({ error: 'Symbol not supported', symbol, allowedSymbols: FLOW_ALLOWED_SYMBOLS });
+  }
+  try {
+    const { unusualWhalesOptionsService } = await import('../services/unusual-whales-options.service.js');
+    const { marketData } = await import('../services/market-data.js');
+    const ticks = await unusualWhalesOptionsService.getNetPremTicks(symbol);
+    let currentPrice = 0;
+    try {
+      currentPrice = await marketData.getStockPrice(symbol);
+    } catch {
+      /* ignore */
+    }
+    const timeSeries = ticks.map((t) => ({
+      timestamp: t.timestamp,
+      time: typeof t.timestamp === 'number' ? new Date(t.timestamp).toISOString() : String(t.timestamp),
+      callPremium: t.callPremium ?? 0,
+      putPremium: t.putPremium ?? 0,
+      netPremium: t.netPremium ?? (t.callPremium ?? 0) - (t.putPremium ?? 0),
+      volume: -(t.callVolume ?? 0) - (t.putVolume ?? 0),
+    }));
+    const lastTick = ticks[ticks.length - 1];
+    const ncp = lastTick?.callPremium ?? 0;
+    const npp = lastTick?.putPremium ?? 0;
+    const totalVol = lastTick ? (lastTick.callVolume ?? 0) + (lastTick.putVolume ?? 0) : 0;
+    return res.json({
+      symbol,
+      currentPrice: Number.isFinite(currentPrice) ? currentPrice : null,
+      timeSeries,
+      summary: {
+        ncp,
+        npp,
+        netPremium: ncp - npp,
+        volume: totalVol,
+        formatted: { ncp: formatNotional(ncp), npp: formatNotional(npp), net: formatNotional(ncp - npp) },
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to fetch market tide', symbol });
   }
 });
 

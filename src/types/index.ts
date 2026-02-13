@@ -251,6 +251,8 @@ export interface MarketIntelGammaContext {
   regime: GammaRegime;
   zeroGammaLevel?: number;
   distanceATR?: number;
+  /** From GammaDealerStrategy when enabled */
+  position_size_multiplier?: number;
 }
 
 export interface MarketIntelContext {
@@ -275,6 +277,8 @@ export interface OptionsFlowSummary {
   updatedAt: Date;
   /** Source of flow data: marketdata or unusualwhales */
   source?: 'marketdata' | 'unusualwhales';
+  /** Debug: why this source was used (helps diagnose UW vs marketdata) */
+  flowDebug?: string;
 }
 
 export interface MarketData {

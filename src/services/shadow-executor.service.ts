@@ -36,7 +36,8 @@ export class ShadowExecutor {
   async simulateExecution(
     decision: MetaDecision,
     signal: EnrichedSignal,
-    experimentId: string
+    experimentId: string,
+    metaGamma?: string
   ): Promise<void> {
     if (decision.decision !== 'approve') {
       logger.info('Shadow execution skipped (decision reject)', {
@@ -90,8 +91,9 @@ export class ShadowExecutor {
         entry_price,
         entry_timestamp,
         contributing_agents,
-        meta_confidence
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        meta_confidence,
+        meta_gamma
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
       RETURNING shadow_trade_id`,
       [
         experimentId,
@@ -106,6 +108,7 @@ export class ShadowExecutor {
         entryTimestamp,
         JSON.stringify(decision.contributingAgents),
         decision.finalConfidence,
+        metaGamma ?? null,
       ]
     );
 

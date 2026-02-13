@@ -272,6 +272,14 @@ export class UnusualWhalesOptionsService {
   }
 
   /**
+   * Get net premium ticks for Market Tide chart (time series of call/put premium).
+   */
+  async getNetPremTicks(ticker: string, date?: string) {
+    if (!this.isConfigured) return [];
+    return this.client.getNetPremTicks(ticker, date);
+  }
+
+  /**
    * Get option chain as MarketDataOptionRow[] for GEX/max-pain fallback.
    * UW does not provide gamma; those rows will have gamma undefined (GEX will be 0).
    */

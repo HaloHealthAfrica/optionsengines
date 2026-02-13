@@ -9,6 +9,7 @@ import DataFreshnessIndicator from './DataFreshnessIndicator';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 const Chart = dynamic(() => import('./Chart'), { ssr: false });
+const GammaPanel = dynamic(() => import('./GammaPanel'), { ssr: false });
 
 const ranges = ['1D', '1W', '1M', '6M', '1Y'];
 
@@ -120,6 +121,8 @@ export default function Dashboard() {
           )
         )}
       </div>
+
+      <GammaPanel defaultSymbol="SPY" />
 
       <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
         <button

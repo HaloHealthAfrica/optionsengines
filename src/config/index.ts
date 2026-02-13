@@ -125,6 +125,11 @@ interface Config {
   enableUwFlowPoller: boolean;
   uwFlowPollerIntervalMs: number;
 
+  // Gamma Dealer Strategy
+  enableGammaStrategy: boolean;
+  gammaNeutralThreshold: number;
+  gammaStrategyWeight: number;
+
   // Logging
   logLevel: string;
 }
@@ -283,6 +288,11 @@ export const config: Config = {
 
   enableUwFlowPoller: getEnvVarBoolean('ENABLE_UW_FLOW_POLLER', false),
   uwFlowPollerIntervalMs: getEnvVarNumber('UW_FLOW_POLLER_INTERVAL_MS', 120000),
+
+  // Gamma Dealer Strategy
+  enableGammaStrategy: getEnvVarBoolean('ENABLE_GAMMA_STRATEGY', false),
+  gammaNeutralThreshold: getEnvVarNumber('GAMMA_NEUTRAL_THRESHOLD', 100_000_000),
+  gammaStrategyWeight: getEnvVarNumber('GAMMA_STRATEGY_WEIGHT', 0.25),
 
   // Logging
   logLevel: getEnvVar('LOG_LEVEL', 'info'),
