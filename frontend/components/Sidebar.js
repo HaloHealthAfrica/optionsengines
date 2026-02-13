@@ -14,7 +14,7 @@ import {
 
 const iconMap = {
   dashboard: LayoutDashboard,
-  positioning: BarChart3,
+  flow: BarChart3,
   orders: Activity,
   history: Activity,
   monitoring: RadioTower,

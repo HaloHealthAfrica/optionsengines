@@ -207,6 +207,29 @@ export default function Positioning() {
                     <p className="muted text-xs">Net Premium</p>
                     <p className="text-xl font-semibold">{data.optionsFlow.premium}</p>
                   </div>
+                  <div
+                    className={`rounded-2xl p-4 ${
+                      (data.optionsFlow.netflow ?? '').toString().startsWith('-')
+                        ? 'bg-rose-50 dark:bg-rose-500/10'
+                        : 'bg-emerald-50 dark:bg-emerald-500/10'
+                    }`}
+                  >
+                    <p className="text-xs text-slate-600 dark:text-slate-300">Netflow</p>
+                    <p
+                      className={`text-xl font-semibold ${
+                        (data.optionsFlow.netflow ?? '').toString().startsWith('-')
+                          ? 'text-rose-600 dark:text-rose-400'
+                          : 'text-emerald-600 dark:text-emerald-400'
+                      }`}
+                    >
+                      {data.optionsFlow.netflow ?? '--'}
+                    </p>
+                    <p className="muted mt-1 text-xs">
+                      {(data.optionsFlow.netflow ?? '').toString().startsWith('-')
+                        ? 'Put premium &gt; call premium'
+                        : 'Call premium &gt; put premium'}
+                    </p>
+                  </div>
                   <div className="flex items-center justify-between rounded-2xl bg-emerald-50 p-4 dark:bg-emerald-500/10">
                     <p className="text-xs text-emerald-600">Bullish Sentiment</p>
                     <p className="text-lg font-semibold text-emerald-600">{data.optionsFlow.bullish}%</p>

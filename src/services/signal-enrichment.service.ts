@@ -1,6 +1,7 @@
 import { db } from './database.service.js';
 import { marketData } from './market-data.js';
 import { positioningService } from './positioning.service.js';
+import { confluenceService } from './confluence.service.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { evaluateMarketSession, normalizeMarketSession } from '../utils/market-session.js';
@@ -16,6 +17,7 @@ export type SignalEnrichmentResult = {
 type SignalLike = {
   signal_id: string;
   symbol: string;
+  direction?: 'long' | 'short';
   timeframe: string;
   timestamp: Date | string;
   raw_payload?: Record<string, any> | null;
@@ -275,6 +277,35 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     logger.warn('Options flow data unavailable for signal', { error, symbol: signal.symbol });
   }
 
+  // Confluence: netflow + gamma + signal direction
+  let confluence = null;
+  if (!rejectionReason && gexData && optionsFlow) {
+    const callPremium = optionsFlow.entries
+      .filter((e) => e.side === 'call')
+      .reduce((s, e) => s + Number(e.premium || 0), 0);
+    const putPremium = optionsFlow.entries
+      .filter((e) => e.side === 'put')
+      .reduce((s, e) => s + Number(e.premium || 0), 0);
+    const netflow = callPremium - putPremium;
+    const gammaRegime = confluenceService.getGammaRegime(gexData.dealerPosition);
+    const signalDirection = signal.direction ?? null;
+    confluence = confluenceService.computeConfluence({
+      netflow,
+      gammaRegime,
+      signalDirection,
+      flowEntriesCount: optionsFlow.entries?.length ?? 0,
+    });
+
+    const flowConfig = (await import('./flow-config.service.js')).getFlowConfigSync();
+    if (flowConfig.enableConfluenceGate && !confluence.tradeGatePasses) {
+      rejectionReason = 'confluence_below_threshold';
+      riskResult.confluenceRejection = {
+        score: confluence.score,
+        threshold: flowConfig.confluenceMinThreshold,
+      };
+    }
+  }
+
   const enrichedData = {
     symbol: signal.symbol,
     timeframe: signal.timeframe,
@@ -283,6 +314,7 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     candlesCount: candles.length,
     gex: gexData,
     optionsFlow,
+    confluence,
   };
 
   return { enrichedData, riskResult, rejectionReason, queueUntil, queueReason };

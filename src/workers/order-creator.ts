@@ -106,11 +106,12 @@ export class OrderCreatorWorker {
     updateWorkerStatus('OrderCreatorWorker', { lastRunAt: new Date() });
 
     try {
-      const signals = await db.query<ApprovedSignal>(
+      const signals = await db.query<ApprovedSignal & { enriched_data?: string }>(
         `SELECT s.signal_id, s.symbol, s.direction, s.timeframe, s.timestamp,
-                s.experiment_id, e.variant AS engine
+                s.experiment_id, e.variant AS engine, rs.enriched_data
          FROM signals s
          LEFT JOIN experiments e ON e.signal_id = s.signal_id
+         LEFT JOIN refactored_signals rs ON rs.signal_id = s.signal_id
          LEFT JOIN orders o ON o.signal_id = s.signal_id
          WHERE s.status = $1 AND o.order_id IS NULL
          ORDER BY s.created_at ASC
@@ -140,13 +141,27 @@ export class OrderCreatorWorker {
 
       for (const signal of signals.rows) {
         try {
+          let confluenceMultiplier = 1;
+          if (config.enableConfluenceSizing && signal.enriched_data) {
+            try {
+              const enriched = JSON.parse(signal.enriched_data || '{}');
+              const conf = enriched?.confluence;
+              if (conf && typeof conf.positionSizeMultiplier === 'number') {
+                confluenceMultiplier = conf.positionSizeMultiplier;
+              }
+            } catch {
+              /* use default 1 */
+            }
+          }
+
           const price = await marketData.getStockPrice(signal.symbol);
           const strike = calculateStrike(price, signal.direction);
           const expiration = calculateExpiration(config.maxHoldDays);
           const optionType = signal.direction === 'long' ? 'call' : 'put';
           const optionSymbol = buildOptionSymbol(signal.symbol, expiration, optionType, strike);
 
-          const quantity = Math.max(1, Math.floor(maxPositionSize * capacityRatio));
+          const baseQty = Math.max(1, Math.floor(maxPositionSize * capacityRatio));
+          const quantity = Math.max(1, Math.floor(baseQty * confluenceMultiplier));
 
           const engine = signal.engine ?? 'A';
           const experimentId = signal.experiment_id ?? null;

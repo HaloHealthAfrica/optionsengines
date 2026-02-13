@@ -273,6 +273,8 @@ export interface OptionsFlowSummary {
   symbol: string;
   entries: OptionsFlowEntry[];
   updatedAt: Date;
+  /** Source of flow data: marketdata or unusualwhales */
+  source?: 'marketdata' | 'unusualwhales';
 }
 
 export interface MarketData {

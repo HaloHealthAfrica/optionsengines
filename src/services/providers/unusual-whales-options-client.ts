@@ -255,4 +255,64 @@ export class UnusualWhalesOptionsClient {
       return [];
     }
   }
+
+  /**
+   * Fetch flow alerts from UW. Used for Phase 10 flow-first signals.
+   * GET /option-trades/flow-alerts?newer_than=timestamp
+   */
+  async getFlowAlerts(newerThanMs?: number): Promise<UnusualWhalesFlowAlert[]> {
+    if (!this.apiKey) return [];
+
+    if (!(await this.rateLimit())) return [];
+
+    let url = `${BASE_URL}/option-trades/flow-alerts`;
+    if (newerThanMs != null && Number.isFinite(newerThanMs)) {
+      url += `?newer_than=${newerThanMs}`;
+    }
+
+    try {
+      const response = await fetch(url, { headers: this.headers });
+      if (!response.ok) {
+        logger.warn('UW flow-alerts request failed', { status: response.status });
+        return [];
+      }
+      const payload = (await response.json()) as Record<string, unknown>;
+      const data = payload?.data ?? payload?.result ?? payload;
+      const arr = Array.isArray(data) ? data : (data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).alerts))
+        ? ((data as Record<string, unknown>).alerts as unknown[])
+        : [];
+      return arr.map((r: unknown) => this.normalizeFlowAlert(r as Record<string, unknown>));
+    } catch (error) {
+      logger.error('UW flow-alerts fetch failed', { error });
+      return [];
+    }
+  }
+
+  private normalizeFlowAlert(r: Record<string, unknown>): UnusualWhalesFlowAlert {
+    const typeRaw = r.option_type ?? r.type ?? r.side ?? 'call';
+    const type: 'call' | 'put' = String(typeRaw).toLowerCase() === 'put' ? 'put' : 'call';
+    return {
+      ticker: String(r.ticker ?? r.symbol ?? r.underlying ?? ''),
+      type,
+      strike: this.toNum(r.strike ?? r.strike_price) ?? 0,
+      expiry: String(r.expiration ?? r.expiry ?? r.exp ?? ''),
+      premium: this.toNum(r.premium ?? r.notional) ?? 0,
+      size: this.toNum(r.size ?? r.volume ?? r.contracts) ?? 0,
+      sentiment: (r.sentiment === 'bearish' ? 'bearish' : r.sentiment === 'bullish' ? 'bullish' : 'neutral') as 'bullish' | 'bearish' | 'neutral',
+      unusual: Boolean(r.unusual ?? r.sweep),
+      timestamp: this.toNum(r.timestamp ?? r.time) ?? Date.now(),
+    };
+  }
+}
+
+export interface UnusualWhalesFlowAlert {
+  ticker: string;
+  type: 'call' | 'put';
+  strike: number;
+  expiry: string;
+  premium: number;
+  size: number;
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+  unusual: boolean;
+  timestamp: number;
 }

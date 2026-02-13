@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Sidebar from './Sidebar';
 import Dashboard from './Dashboard';
-import Positioning from './Positioning';
+import Flow from './Flow';
 import Orders from './Orders';
 import History from './History';
 import Settings from './Settings';
@@ -14,7 +14,7 @@ import IntelConsole from './IntelConsole';
 
 const tabs = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'positioning', label: 'Positioning' },
+  { id: 'flow', label: 'Flow' },
   { id: 'orders', label: 'Orders' },
   { id: 'history', label: 'History' },
   { id: 'monitoring', label: 'Monitoring' },
@@ -47,8 +47,8 @@ export default function ClientShell() {
 
   const ActiveView = useMemo(() => {
     switch (activeTab) {
-      case 'positioning':
-        return <Positioning />;
+      case 'flow':
+        return <Flow />;
       case 'orders':
         return <Orders />;
       case 'history':

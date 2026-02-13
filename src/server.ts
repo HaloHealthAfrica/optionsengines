@@ -108,6 +108,11 @@ async function bootstrap(): Promise<void> {
     });
   });
 
+  // Preload flow config for workers (confluence threshold, gate, sizing)
+  import('./services/flow-config.service.js').then(({ getFlowConfig }) =>
+    getFlowConfig().catch((err) => logger.warn('Flow config preload failed', err))
+  );
+
   logger.info('Bootstrap complete');
 }
 

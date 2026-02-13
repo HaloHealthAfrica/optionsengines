@@ -171,6 +171,13 @@ export async function backendGetPositioning(token, symbol = 'SPY') {
   const totalPremium = Array.isArray(flow.entries)
     ? flow.entries.reduce((sum, entry) => sum + Number(entry.premium || 0), 0)
     : 0;
+  const callPremium = Array.isArray(flow.entries)
+    ? flow.entries.filter((entry) => entry.side === 'call').reduce((sum, entry) => sum + Number(entry.premium || 0), 0)
+    : 0;
+  const putPremium = Array.isArray(flow.entries)
+    ? flow.entries.filter((entry) => entry.side === 'put').reduce((sum, entry) => sum + Number(entry.premium || 0), 0)
+    : 0;
+  const netflow = callPremium - putPremium;
 
   const dealerPosition = String(gex.dealerPosition || '').toLowerCase();
   const gammaRegime =
@@ -203,6 +210,7 @@ export async function backendGetPositioning(token, symbol = 'SPY') {
     },
     optionsFlow: {
       premium: formatNotional(totalPremium),
+      netflow: formatNotional(netflow),
       bullish,
       bearish,
     },
@@ -215,6 +223,80 @@ export async function backendGetPositioning(token, symbol = 'SPY') {
 
   console.log('[Backend API] Positioning data received');
   return response;
+}
+
+export async function backendGetFlowConfig(token) {
+  const response = await backendFetch('/flow/config', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch flow config');
+  }
+
+  return response.json();
+}
+
+export async function backendGetFlow(token, symbol = 'SPY') {
+  const response = await backendFetch(`/flow/${encodeURIComponent(symbol)}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch flow data');
+  }
+
+  return response.json();
+}
+
+export async function backendGetFlowSignals(token, symbol = 'SPY', limit = 20) {
+  const response = await backendFetch(
+    `/flow/${encodeURIComponent(symbol)}/signals?limit=${limit}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch flow signals');
+  }
+
+  return response.json();
+}
+
+export async function backendGetFlowAlertsStatus(token) {
+  const response = await backendFetch('/flow/alerts/status', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch alerts status');
+  }
+
+  return response.json();
+}
+
+export async function backendPostFlowAlertsTest(token) {
+  const response = await backendFetch('/flow/alerts/test', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to send test alert');
+  }
+
+  return response.json();
 }
 
 export async function backendGetMonitoringStatus(token, limit = 25, testFilter = 'all') {

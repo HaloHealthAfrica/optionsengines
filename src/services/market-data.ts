@@ -756,6 +756,7 @@ export class MarketDataService {
         symbol,
         entries,
         updatedAt: new Date(),
+        source: 'marketdata',
       };
 
       this.recordSuccess('marketdata');
@@ -763,16 +764,33 @@ export class MarketDataService {
       return summary;
     } catch (error) {
       this.recordFailure('marketdata');
-      logger.warn('Failed to fetch options flow, returning empty summary', { error, symbol });
+      logger.warn('MarketData options flow failed, trying Unusual Whales fallback', { error, symbol });
       Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'marketdata', symbol } });
-      const emptySummary: OptionsFlowSummary = {
-        symbol,
-        entries: [],
-        updatedAt: new Date(),
-      };
-      cache.set(cacheKey, emptySummary, 15);
-      return emptySummary;
     }
+
+    // Phase 5: UW flow fallback
+    if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey && this.checkCircuitBreaker('unusualwhales')) {
+      try {
+        const uwFlow = await unusualWhalesOptionsService.getOptionsFlow(symbol, limit);
+        if (uwFlow && uwFlow.entries.length > 0) {
+          this.recordSuccess('unusualwhales');
+          cache.set(cacheKey, uwFlow, 60);
+          logger.info('Options flow fallback: Unusual Whales', { symbol, count: uwFlow.entries.length });
+          return uwFlow;
+        }
+      } catch (uwError) {
+        this.recordFailure('unusualwhales');
+        logger.warn('Unusual Whales options flow fallback failed', { symbol, error: uwError });
+      }
+    }
+
+    const emptySummary: OptionsFlowSummary = {
+      symbol,
+      entries: [],
+      updatedAt: new Date(),
+    };
+    cache.set(cacheKey, emptySummary, 15);
+    return emptySummary;
   }
 
   /**

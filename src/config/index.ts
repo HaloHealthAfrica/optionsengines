@@ -104,6 +104,22 @@ interface Config {
   // Market webhook pipeline
   enableMarketWebhookPipeline: boolean;
 
+  // Confluence (Flow page, trade gate, position sizing)
+  confluenceMinThreshold: number;
+  enableConfluenceGate: boolean;
+  enableConfluenceSizing: boolean;
+  basePositionSize: number;
+
+  // Alerts
+  discordWebhookUrl: string;
+  slackWebhookUrl: string;
+  alertsEnabled: boolean;
+  alertCooldownMinutes: number;
+
+  // Flow-first signals (Phase 10: UW flow poller)
+  enableUwFlowPoller: boolean;
+  uwFlowPollerIntervalMs: number;
+
   // Logging
   logLevel: string;
 }
@@ -242,6 +258,21 @@ export const config: Config = {
 
   // Market webhook pipeline
   enableMarketWebhookPipeline: getEnvVarBoolean('ENABLE_MARKET_WEBHOOK_PIPELINE', true),
+
+  // Confluence
+  confluenceMinThreshold: getEnvVarNumber('CONFLUENCE_MIN_THRESHOLD', 75),
+  enableConfluenceGate: getEnvVarBoolean('ENABLE_CONFLUENCE_GATE', true),
+  enableConfluenceSizing: getEnvVarBoolean('ENABLE_CONFLUENCE_SIZING', true),
+  basePositionSize: getEnvVarNumber('BASE_POSITION_SIZE', 1),
+
+  // Alerts
+  discordWebhookUrl: getEnvVar('DISCORD_WEBHOOK_URL', ''),
+  slackWebhookUrl: getEnvVar('SLACK_WEBHOOK_URL', ''),
+  alertsEnabled: getEnvVarBoolean('ALERTS_ENABLED', false),
+  alertCooldownMinutes: getEnvVarNumber('ALERT_COOLDOWN_MINUTES', 30),
+
+  enableUwFlowPoller: getEnvVarBoolean('ENABLE_UW_FLOW_POLLER', false),
+  uwFlowPollerIntervalMs: getEnvVarNumber('UW_FLOW_POLLER_INTERVAL_MS', 120000),
 
   // Logging
   logLevel: getEnvVar('LOG_LEVEL', 'info'),

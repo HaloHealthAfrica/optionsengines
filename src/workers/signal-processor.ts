@@ -5,6 +5,8 @@ import { Signal } from '../types/index.js';
 import { sleep } from '../utils/sleep.js';
 import { errorTracker } from '../services/error-tracker.service.js';
 import { buildSignalEnrichment } from '../services/signal-enrichment.service.js';
+import { alertService } from '../services/alert.service.js';
+import { config } from '../config/index.js';
 import * as Sentry from '@sentry/node';
 import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
 import { setLastSignalProcessed, updateWorkerStatus } from '../services/trade-engine-health.service.js';
@@ -128,6 +130,33 @@ export class SignalProcessorWorker {
                VALUES ($1, $2, $3)`,
               [signal.signal_id, JSON.stringify(enrichedData), JSON.stringify(riskResult)]
             );
+
+            // Confluence alert when approved and score >= threshold
+            if (config.alertsEnabled && enrichedData?.confluence?.tradeGatePasses) {
+              const conf = enrichedData.confluence;
+              const entries = (enrichedData.optionsFlow?.entries ?? []) as Array<{ side?: string; premium?: number }>;
+              const callPremium = entries
+                .filter((e: { side?: string }) => e.side === 'call')
+                .reduce((s: number, e: { premium?: number }) => s + Number(e.premium || 0), 0);
+              const putPremium = entries
+                .filter((e: { side?: string }) => e.side === 'put')
+                .reduce((s: number, e: { premium?: number }) => s + Number(e.premium || 0), 0);
+              const netflow = callPremium - putPremium;
+              const fmt = (v: number) =>
+                Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : Math.abs(v) >= 1e3 ? `$${(v / 1e3).toFixed(1)}K` : `$${v}`;
+              const dealerPos = enrichedData.gex?.dealerPosition ?? 'neutral';
+              const gammaRegime =
+                dealerPos === 'long_gamma' ? 'LONG_GAMMA' : dealerPos === 'short_gamma' ? 'SHORT_GAMMA' : 'NEUTRAL';
+              alertService
+                .sendConfluenceAlert({
+                  symbol: signal.symbol,
+                  direction: signal.direction,
+                  confluenceScore: conf.score,
+                  netflowFormatted: fmt(netflow),
+                  gammaRegime,
+                })
+                .catch((err) => logger.warn('Confluence alert failed', { error: err, signalId: signal.signal_id }));
+            }
 
             approved += 1;
           }

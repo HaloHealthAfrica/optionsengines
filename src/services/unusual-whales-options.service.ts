@@ -1,4 +1,4 @@
-// Unusual Whales Options Service - Caching, option price, chain, OHLC
+// Unusual Whales Options Service - Caching, option price, chain, OHLC, flow
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { cache } from './cache.service.js';
@@ -8,6 +8,7 @@ import {
   UnusualWhalesIntradayTick,
 } from './providers/unusual-whales-options-client.js';
 import type { MarketDataOptionRow } from './providers/marketdata-client.js';
+import type { OptionsFlowSummary, OptionsFlowEntry } from '../types/index.js';
 
 const CHAIN_CACHE_TTL = 60;
 const PRICE_CACHE_TTL = 30;
@@ -107,6 +108,43 @@ export class UnusualWhalesOptionsService {
       strikes,
       contracts: contractList,
       updatedAt: new Date(),
+    };
+  }
+
+  /**
+   * Get options flow from UW option chain (volume * premium per contract).
+   * Used as fallback when MarketData.app flow is unavailable.
+   */
+  async getOptionsFlow(ticker: string, limit: number = 50): Promise<OptionsFlowSummary | null> {
+    if (!this.isConfigured) return null;
+
+    const contracts = await this.getCachedChain(ticker);
+    if (!contracts.length) return null;
+
+    const entries: OptionsFlowEntry[] = contracts
+      .filter((c) => c.volume != null && c.volume > 0)
+      .map((c) => {
+        const price = c.premium ?? c.mid ?? (c.bid != null && c.ask != null ? (c.bid + c.ask) / 2 : c.last) ?? 0;
+        const premium = Number.isFinite(price) ? (c.volume ?? 0) * price * 100 : 0;
+        return {
+          optionSymbol: `${c.ticker ?? ticker} ${c.expiration} ${c.strike} ${c.type}`,
+          side: c.type,
+          strike: c.strike,
+          expiration: new Date(c.expiration),
+          volume: c.volume ?? 0,
+          premium,
+          sentiment: (c.type === 'call' ? 'bullish' : 'bearish') as 'bullish' | 'bearish' | 'neutral',
+          timestamp: new Date(),
+        };
+      })
+      .sort((a, b) => (b.premium ?? 0) - (a.premium ?? 0))
+      .slice(0, limit);
+
+    return {
+      symbol: ticker,
+      entries,
+      updatedAt: new Date(),
+      source: 'unusualwhales',
     };
   }
 

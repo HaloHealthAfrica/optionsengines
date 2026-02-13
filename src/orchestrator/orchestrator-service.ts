@@ -20,6 +20,7 @@ import { EnrichedSignal, MetaDecision } from '../types/index.js';
 import { db } from '../services/database.service.js';
 import { config } from '../config/index.js';
 import { buildSignalEnrichment } from '../services/signal-enrichment.service.js';
+import { alertService } from '../services/alert.service.js';
 import * as Sentry from '@sentry/node';
 
 export class OrchestratorService {
@@ -353,6 +354,46 @@ export class OrchestratorService {
     const status = shouldTrade ? 'approved' : 'rejected';
     const rejectionReason = hasRejection ? enrichment?.rejectionReason || 'risk_rejected' : null;
     await this.signalProcessor.updateStatus(signal.signal_id, status, rejectionReason);
+
+    // Confluence alert when orchestrator approves and confluence passes
+    if (
+      shouldTrade &&
+      config.alertsEnabled &&
+      enrichment?.enrichedData?.confluence?.tradeGatePasses
+    ) {
+      const conf = enrichment.enrichedData.confluence;
+      const entries = (enrichment.enrichedData.optionsFlow?.entries ?? []) as Array<{
+        side?: string;
+        premium?: number;
+      }>;
+      const callPremium = entries
+        .filter((e) => e.side === 'call')
+        .reduce((s, e) => s + Number(e.premium || 0), 0);
+      const putPremium = entries
+        .filter((e) => e.side === 'put')
+        .reduce((s, e) => s + Number(e.premium || 0), 0);
+      const netflow = callPremium - putPremium;
+      const fmt = (v: number) =>
+        Math.abs(v) >= 1e6
+          ? `$${(v / 1e6).toFixed(1)}M`
+          : Math.abs(v) >= 1e3
+            ? `$${(v / 1e3).toFixed(1)}K`
+            : `$${v}`;
+      const dealerPos = enrichment.enrichedData.gex?.dealerPosition ?? 'neutral';
+      const gammaRegime =
+        dealerPos === 'long_gamma' ? 'LONG_GAMMA' : dealerPos === 'short_gamma' ? 'SHORT_GAMMA' : 'NEUTRAL';
+      alertService
+        .sendConfluenceAlert({
+          symbol: signal.symbol,
+          direction: signal.direction,
+          confluenceScore: conf.score,
+          netflowFormatted: fmt(netflow),
+          gammaRegime,
+        })
+        .catch((err) =>
+          logger.warn('Orchestrator confluence alert failed', { error: err, signalId: signal.signal_id })
+        );
+    }
   }
 
   private async handleShadowExecution(

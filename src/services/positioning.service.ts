@@ -136,22 +136,36 @@ export class PositioningService {
       const totalPutVolume = flow.entries
         .filter((entry) => entry.side === 'put')
         .reduce((sum, entry) => sum + entry.volume, 0);
+      const callPremium = flow.entries
+        .filter((entry) => entry.side === 'call')
+        .reduce((sum, entry) => sum + Number(entry.premium ?? 0), 0);
+      const putPremium = flow.entries
+        .filter((entry) => entry.side === 'put')
+        .reduce((sum, entry) => sum + Number(entry.premium ?? 0), 0);
+      const netflow = callPremium - putPremium;
+      const flowSource = flow.source ?? 'marketdata';
 
       await db.query(
         `INSERT INTO options_flow_snapshots (
           symbol,
           total_call_volume,
           total_put_volume,
+          call_premium,
+          put_premium,
+          netflow,
           entries,
           source
         )
-        VALUES ($1, $2, $3, $4, $5)`,
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           flow.symbol,
           totalCallVolume,
           totalPutVolume,
+          callPremium,
+          putPremium,
+          netflow,
           JSON.stringify(flow.entries || []),
-          'marketdata',
+          flowSource,
         ]
       );
     } catch (error) {
@@ -159,6 +173,49 @@ export class PositioningService {
     }
 
     return flow;
+  }
+
+  /**
+   * Compute netflow z-score from last N days of snapshots.
+   * Returns { zScore, mean, stdDev, sampleSize, isUnusual }.
+   */
+  async getNetflowZScore(symbol: string, lookbackDays: number = 20): Promise<{
+    zScore: number | null;
+    mean: number;
+    stdDev: number;
+    sampleSize: number;
+    isUnusual: boolean;
+  }> {
+    try {
+      const result = await db.query(
+        `SELECT netflow FROM options_flow_snapshots
+         WHERE symbol = $1 AND created_at >= NOW() - INTERVAL '1 day' * $2
+         ORDER BY created_at DESC
+         LIMIT 500`,
+        [symbol, lookbackDays]
+      );
+      const netflows = (result.rows as { netflow: string | number }[])
+        .map((r) => Number(r?.netflow ?? 0))
+        .filter(Number.isFinite);
+      if (netflows.length < 5) {
+        return { zScore: null, mean: 0, stdDev: 0, sampleSize: netflows.length, isUnusual: false };
+      }
+      const mean = netflows.reduce((a, b) => a + b, 0) / netflows.length;
+      const variance = netflows.reduce((s, v) => s + (v - mean) ** 2, 0) / netflows.length;
+      const stdDev = Math.sqrt(variance) || 1e-10;
+      const latest = netflows[0];
+      const zScore = (latest - mean) / stdDev;
+      return {
+        zScore,
+        mean,
+        stdDev,
+        sampleSize: netflows.length,
+        isUnusual: Math.abs(zScore) >= 2,
+      };
+    } catch (error) {
+      logger.warn('Failed to compute netflow z-score', { error, symbol });
+      return { zScore: null, mean: 0, stdDev: 0, sampleSize: 0, isUnusual: false };
+    }
   }
 
   async getMaxPain(symbol: string): Promise<MaxPainResult> {

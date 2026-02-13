@@ -76,6 +76,7 @@ export const positioningData = {
   },
   optionsFlow: {
     premium: '$420M',
+    netflow: '$120M',
     bullish: 72,
     bearish: 28,
   },
@@ -274,6 +275,55 @@ export function getPositioningForSymbol(symbol) {
   return {
     symbol,
     ...positioningData,
+  };
+}
+
+export function getFlowForSymbol(symbol) {
+  return {
+    symbol,
+    netflow: {
+      value: 120000000,
+      formatted: '$120M',
+      direction: 'bullish',
+    },
+    optionsFlow: {
+      premium: '$420M',
+      netflow: '$120M',
+      bullish: 72,
+      bearish: 28,
+    },
+    gamma: {
+      regime: 'SHORT_GAMMA',
+      zeroGammaLevel: 445.2,
+    },
+    confluence: {
+      score: 82,
+      aligned: true,
+      alignment: 'aligned',
+      factors: {
+        flowGammaAlignment: 90,
+        signalFlowAlignment: 50,
+        signalGammaAlignment: 50,
+        flowStrength: 65,
+      },
+      tradeGatePasses: true,
+      threshold: 75,
+    },
+    tradeGate: {
+      passes: true,
+      threshold: 75,
+      reason: 'Confluence above threshold',
+    },
+    positionSize: {
+      multiplier: 1,
+      tier: 'full',
+    },
+    gex: {
+      total: '$2.4B',
+      call: '$1.8B',
+      put: '$600M',
+    },
+    maxPain: null,
   };
 }
 
