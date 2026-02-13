@@ -112,12 +112,66 @@ export class UnusualWhalesOptionsService {
   }
 
   /**
-   * Get options flow from UW option chain (volume * premium per contract).
-   * Used as fallback when MarketData.app flow is unavailable.
+   * Get options flow from UW. Primary: net-prem-ticks (proper flow endpoint).
+   * Fallback: option chain (volume * premium) - chain often has no volume, so yields $0.
    */
   async getOptionsFlow(ticker: string, limit: number = 50): Promise<OptionsFlowSummary | null> {
     if (!this.isConfigured) return null;
 
+    // Primary: net-prem-ticks - returns call/put volume and premium per tick (proper flow data)
+    try {
+      const ticks = await this.client.getNetPremTicks(ticker);
+      if (ticks.length > 0) {
+        const totalCallPremium = ticks.reduce((s, t) => s + (t.callPremium ?? 0), 0);
+        const totalPutPremium = ticks.reduce((s, t) => s + (t.putPremium ?? 0), 0);
+        const totalCallVolume = ticks.reduce((s, t) => s + (t.callVolume ?? 0), 0);
+        const totalPutVolume = ticks.reduce((s, t) => s + (t.putVolume ?? 0), 0);
+
+        if (totalCallPremium > 0 || totalPutPremium > 0) {
+          const entries: OptionsFlowEntry[] = [];
+          if (totalCallPremium > 0) {
+            entries.push({
+              optionSymbol: `${ticker} net-prem calls`,
+              side: 'call',
+              strike: 0,
+              expiration: new Date(),
+              volume: totalCallVolume,
+              premium: totalCallPremium,
+              sentiment: 'bullish',
+              timestamp: new Date(),
+            });
+          }
+          if (totalPutPremium > 0) {
+            entries.push({
+              optionSymbol: `${ticker} net-prem puts`,
+              side: 'put',
+              strike: 0,
+              expiration: new Date(),
+              volume: totalPutVolume,
+              premium: totalPutPremium,
+              sentiment: 'bearish',
+              timestamp: new Date(),
+            });
+          }
+          logger.info('Options flow: Unusual Whales net-prem-ticks', {
+            ticker,
+            ticksCount: ticks.length,
+            callPremium: totalCallPremium,
+            putPremium: totalPutPremium,
+          });
+          return {
+            symbol: ticker,
+            entries,
+            updatedAt: new Date(),
+            source: 'unusualwhales',
+          };
+        }
+      }
+    } catch (err) {
+      logger.warn('UW net-prem-ticks failed, trying option chain', { ticker, error: err });
+    }
+
+    // Fallback: option chain (volume * premium) - chain often has volume=0 for all contracts
     const contracts = await this.getCachedChain(ticker);
     if (!contracts.length) return null;
 
@@ -139,6 +193,12 @@ export class UnusualWhalesOptionsService {
       })
       .sort((a, b) => (b.premium ?? 0) - (a.premium ?? 0))
       .slice(0, limit);
+
+    if (entries.length > 0) {
+      logger.info('Options flow: Unusual Whales option chain', { ticker, count: entries.length });
+    } else {
+      logger.debug('UW option chain has no contracts with volume>0', { ticker, contractsCount: contracts.length });
+    }
 
     return {
       symbol: ticker,

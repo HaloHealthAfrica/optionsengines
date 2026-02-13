@@ -9,6 +9,7 @@ import { confluenceService } from '../services/confluence.service.js';
 import { alertService } from '../services/alert.service.js';
 import { config } from '../config/index.js';
 import { getFlowConfig, updateFlowConfig } from '../services/flow-config.service.js';
+import { marketData } from '../services/market-data.js';
 
 const router = Router();
 
@@ -212,6 +213,7 @@ router.get('/:symbol', requireAuth, async (req: Request, res: Response) => {
         isUnusual: zScoreResult.isUnusual,
         sampleSize: zScoreResult.sampleSize,
       } : null,
+      circuitBreakers: config.unusualWhalesOptionsEnabled ? marketData.getCircuitBreakerStatus() : undefined,
     });
   } catch (error) {
     res.status(500).json({

@@ -31,7 +31,8 @@
     "test:production": "tsx scripts/e2e-production-test-with-sentry.ts",
     "analyze:sentry": "tsx scripts/analyze-sentry-traces.ts",
     "validate:e2e": "tsx scripts/run-full-e2e-sentry-validation.ts",
-    "verify:uw-schema": "tsx scripts/verify-unusual-whales-schema.ts"
+    "verify:uw-schema": "tsx scripts/verify-unusual-whales-schema.ts",
+    "diagnose:uw-flow": "tsx scripts/diagnose-uw-flow.ts"
   },
   "keywords": [
     "options",

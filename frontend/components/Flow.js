@@ -350,6 +350,11 @@ export default function Flow() {
                 )}
               </span>
             )}
+            {data?.circuitBreakers?.unusualwhales?.state === 'open' && (
+              <span className="ml-2 rounded bg-rose-100 px-1.5 py-0.5 text-xs text-rose-700 dark:bg-rose-500/20 dark:text-rose-200" title="Unusual Whales circuit breaker open - flow falling back to MarketData.app">
+                UW circuit open
+              </span>
+            )}
           </p>
         </div>
         <div className="relative w-full max-w-xs">

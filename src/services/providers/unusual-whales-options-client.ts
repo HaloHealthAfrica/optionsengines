@@ -257,6 +257,54 @@ export class UnusualWhalesOptionsClient {
   }
 
   /**
+   * Fetch net premium ticks for a ticker. Returns call/put volume and premium per tick.
+   * GET /stock/:ticker/net-prem-ticks?date=YYYY-MM-DD
+   * This is the proper flow endpoint - option-contracts (chain) typically has no volume.
+   */
+  async getNetPremTicks(ticker: string, date?: string): Promise<UnusualWhalesNetPremTick[]> {
+    if (!this.apiKey) return [];
+
+    if (!(await this.rateLimit())) return [];
+
+    const dateStr = date ?? new Date().toISOString().slice(0, 10);
+    const url = `${BASE_URL}/stock/${encodeURIComponent(ticker)}/net-prem-ticks?date=${dateStr}`;
+
+    try {
+      const response = await fetch(url, { headers: this.headers });
+      if (!response.ok) {
+        const text = await response.text();
+        logger.warn('UW net-prem-ticks request failed', { status: response.status, ticker, body: text.slice(0, 150) });
+        return [];
+      }
+      const payload = (await response.json()) as Record<string, unknown>;
+      const data = payload?.data ?? payload?.ticks ?? payload?.result ?? payload;
+      const arr = Array.isArray(data) ? data : [];
+      const ticks = arr.map((r: unknown) => this.normalizeNetPremTick(r as Record<string, unknown>));
+      logger.debug('UW net-prem-ticks fetched', { ticker, count: ticks.length });
+      return ticks;
+    } catch (error) {
+      logger.error('UW net-prem-ticks fetch failed', { error, ticker });
+      throw error;
+    }
+  }
+
+  private normalizeNetPremTick(r: Record<string, unknown>): UnusualWhalesNetPremTick {
+    const callVol = this.toNum(r.call_volume ?? r.callVolume) ?? 0;
+    const putVol = this.toNum(r.put_volume ?? r.putVolume) ?? 0;
+    const callPrem = this.toNum(r.call_premium ?? r.callPremium ?? r.call_prem) ?? 0;
+    const putPrem = this.toNum(r.put_premium ?? r.putPremium ?? r.put_prem) ?? 0;
+    const netPrem = this.toNum(r.net_premium ?? r.netPremium ?? r.net_prem) ?? (callPrem - putPrem);
+    return {
+      timestamp: this.toNum(r.timestamp ?? r.time ?? r.t) ?? Date.now(),
+      callVolume: callVol,
+      putVolume: putVol,
+      callPremium: callPrem,
+      putPremium: putPrem,
+      netPremium: netPrem,
+    };
+  }
+
+  /**
    * Fetch flow alerts from UW. Used for Phase 10 flow-first signals.
    * GET /option-trades/flow-alerts?newer_than=timestamp
    */
@@ -303,6 +351,15 @@ export class UnusualWhalesOptionsClient {
       timestamp: this.toNum(r.timestamp ?? r.time) ?? Date.now(),
     };
   }
+}
+
+export interface UnusualWhalesNetPremTick {
+  timestamp: number;
+  callVolume: number;
+  putVolume: number;
+  callPremium: number;
+  putPremium: number;
+  netPremium: number;
 }
 
 export interface UnusualWhalesFlowAlert {
