@@ -21,6 +21,10 @@ import { db } from '../services/database.service.js';
 import { config } from '../config/index.js';
 import { buildSignalEnrichment } from '../services/signal-enrichment.service.js';
 import { gammaDealerStrategy } from '../strategies/GammaDealerStrategy.js';
+import {
+  dealerPositioningStrategy,
+  type DealerPositioningDecision,
+} from '../strategies/DealerPositioningStrategy.js';
 import type { GammaStrategyDecision, MarketDataLike } from '../strategies/types.js';
 import { alertService } from '../services/alert.service.js';
 import * as Sentry from '@sentry/node';
@@ -213,8 +217,8 @@ export class OrchestratorService {
           level: 'info',
         });
         const market_context = await this.createMarketContext(signal);
-        let gammaDecision: GammaStrategyDecision | null = null;
-        if (config.enableGammaStrategy) {
+        let dealerDecision: GammaStrategyDecision | DealerPositioningDecision | null = null;
+        if (config.enableDealerUwGamma) {
           const gammaContext = await gammaDealerStrategy.getGammaContext(signal.symbol);
           const enrichedData = (enrichment.enrichedData ?? {}) as Record<string, unknown>;
           const marketDataLike: MarketDataLike = {
@@ -222,13 +226,28 @@ export class OrchestratorService {
             gex: enrichedData.gex as MarketDataLike['gex'],
             optionsFlow: enrichedData.optionsFlow as MarketDataLike['optionsFlow'],
           };
-          gammaDecision = await gammaDealerStrategy.evaluate(signal, marketDataLike, gammaContext);
-          if (gammaDecision) {
+          dealerDecision = await gammaDealerStrategy.evaluate(signal, marketDataLike, gammaContext);
+          if (dealerDecision) {
             Sentry.addBreadcrumb({
               category: 'gamma',
               message: 'GammaDealerStrategy evaluated',
               level: 'info',
-              data: { regime: gammaDecision.regime, confidence: gammaDecision.confidence_score },
+              data: { regime: dealerDecision.regime, confidence: dealerDecision.confidence_score },
+            });
+          }
+        }
+        if (!dealerDecision && config.enableDealerGex) {
+          const dpContext = dealerPositioningStrategy.buildContextFromEnrichment(
+            enrichment.enrichedData ?? null,
+            signal.symbol
+          );
+          dealerDecision = dealerPositioningStrategy.evaluate(signal, dpContext);
+          if (dealerDecision) {
+            Sentry.addBreadcrumb({
+              category: 'dealer',
+              message: 'DealerPositioningStrategy evaluated',
+              level: 'info',
+              data: { regime: dealerDecision.regime, confidence: dealerDecision.confidence_score },
             });
           }
         }
@@ -239,15 +258,23 @@ export class OrchestratorService {
             riskResult: enrichment.riskResult ?? {},
             rejectionReason: enrichment.rejectionReason,
             decisionOnly: enrichment.decisionOnly,
-            gammaContext: gammaDecision?.gamma_context,
-            gammaDecision: gammaDecision ?? undefined,
+            gammaContext: dealerDecision && 'gamma_context' in dealerDecision ? dealerDecision.gamma_context : undefined,
+            gammaDecision: dealerDecision ? {
+              regime: dealerDecision.regime,
+              direction: dealerDecision.direction,
+              confidence_score: dealerDecision.confidence_score,
+              position_size_multiplier: dealerDecision.position_size_multiplier,
+              strike_adjustment: 'strike_adjustment' in dealerDecision ? dealerDecision.strike_adjustment : { gammaInfluencedStrike: false, gammaTargetStrike: null },
+              exit_profile: dealerDecision.exit_profile,
+              gamma_context: 'gamma_context' in dealerDecision ? dealerDecision.gamma_context : dealerDecision.dealer_context,
+            } : undefined,
           },
-          marketIntel: gammaDecision
+          marketIntel: dealerDecision
             ? {
                 ...market_context.marketIntel,
                 gamma: {
-                  regime: gammaDecision.regime,
-                  position_size_multiplier: gammaDecision.position_size_multiplier,
+                  regime: dealerDecision.regime,
+                  position_size_multiplier: dealerDecision.position_size_multiplier,
                 },
               }
             : market_context.marketIntel,
@@ -263,11 +290,25 @@ export class OrchestratorService {
           data: { execution_mode: policy.execution_mode, variant: experiment.variant },
         });
         let { engineA, engineB } = await this.distributeSignal(signal, contextWithEnrichment, experiment);
+        if (experiment.variant === 'B' && engineB == null) {
+          logger.warn('Engine B returned no recommendation', {
+            signal_id: signal.signal_id,
+            symbol: signal.symbol,
+            direction: signal.direction,
+            experiment_id: experiment.experiment_id,
+          });
+          Sentry.addBreadcrumb({
+            category: 'engine',
+            message: 'Engine B returned null',
+            level: 'warning',
+            data: { signal_id: signal.signal_id },
+          });
+        }
         const { engineA: adjustedA, engineB: adjustedB } = this.applyGammaOverride(
           experiment.variant,
           engineA,
           engineB,
-          gammaDecision,
+          dealerDecision,
           signal
         );
         engineA = adjustedA;
@@ -298,7 +339,7 @@ export class OrchestratorService {
           'A',
           engine_a_recommendation,
           enrichment,
-          gammaDecision
+          dealerDecision
         );
         await this.persistRecommendation(
           signal,
@@ -306,10 +347,10 @@ export class OrchestratorService {
           'B',
           engine_b_recommendation,
           enrichment,
-          gammaDecision
+          dealerDecision
         );
-        if (gammaDecision) {
-          await this.persistSignalMetaGamma(signal.signal_id, gammaDecision);
+        if (dealerDecision) {
+          await this.persistSignalMetaGamma(signal.signal_id, dealerDecision);
         }
 
         await this.updateSignalStatus(
@@ -339,7 +380,7 @@ export class OrchestratorService {
           signal,
           engine_b_recommendation,
           experiment.experiment_id,
-          gammaDecision
+          dealerDecision
         );
 
         await this.signalProcessor.markProcessed(signal.signal_id, experiment.experiment_id);
@@ -371,7 +412,10 @@ export class OrchestratorService {
   }
 
   async createExperiment(signal: Signal) {
-    return this.experimentManager.createExperiment(signal, 0.5, 'v1.0');
+    // AB_SPLIT_PERCENTAGE = % to Engine B; convert to split for A (1 - B%)
+    const pctB = Math.min(1, Math.max(0, config.abSplitPercentage));
+    const splitToA = 1 - pctB;
+    return this.experimentManager.createExperiment(signal, splitToA, 'v1.0');
   }
 
   async getExecutionPolicy(experiment_id: string, variant?: 'A' | 'B') {
@@ -392,27 +436,27 @@ export class OrchestratorService {
     variant: 'A' | 'B',
     engineA: TradeRecommendation | null,
     engineB: TradeRecommendation | null,
-    gammaDecision: GammaStrategyDecision | null,
+    dealerDecision: (GammaStrategyDecision | DealerPositioningDecision) | null,
     signal: Signal
   ): { engineA: TradeRecommendation | null; engineB: TradeRecommendation | null } {
-    if (!gammaDecision || gammaDecision.direction === 'HOLD') {
+    if (!dealerDecision || dealerDecision.direction === 'HOLD') {
       return { engineA, engineB };
     }
-    const gammaWeight = config.gammaStrategyWeight;
-    if (gammaDecision.confidence_score < gammaWeight) {
+    const gammaWeight = config.dealerStrategyWeight;
+    if (dealerDecision.confidence_score < gammaWeight) {
       return { engineA, engineB };
     }
     if (variant === 'A' && engineA) {
-      if (gammaDecision.confidence_score >= 0.7) {
-        const gammaDir = gammaDecision.direction === 'LONG' ? 'long' : 'short';
+      if (dealerDecision.confidence_score >= 0.7) {
+        const gammaDir = dealerDecision.direction === 'LONG' ? 'long' : 'short';
         const baseQty = engineA.quantity;
-        const adjustedQty = Math.max(1, Math.floor(baseQty * gammaDecision.position_size_multiplier));
-        logger.info('GammaDealerStrategy override Engine A', {
+        const adjustedQty = Math.max(1, Math.floor(baseQty * dealerDecision.position_size_multiplier));
+        logger.info('Dealer strategy override Engine A', {
           signal_id: signal.signal_id,
-          regime: gammaDecision.regime,
+          regime: dealerDecision.regime,
           originalDirection: engineA.direction,
           gammaDirection: gammaDir,
-          confidence: gammaDecision.confidence_score,
+          confidence: dealerDecision.confidence_score,
         });
         return {
           engineA: {
@@ -425,9 +469,9 @@ export class OrchestratorService {
       }
     }
     if (variant === 'B' && engineB) {
-      const gammaDir = gammaDecision.direction === 'LONG' ? 'long' : 'short';
+      const gammaDir = dealerDecision.direction === 'LONG' ? 'long' : 'short';
       if (engineB.direction !== gammaDir) {
-        logger.info('GammaDealerStrategy conflict with Engine B - requiring alignment', {
+        logger.info('Dealer strategy conflict with Engine B - requiring alignment', {
           signal_id: signal.signal_id,
           engineBDirection: engineB.direction,
           gammaDirection: gammaDir,
@@ -435,7 +479,7 @@ export class OrchestratorService {
         return { engineA, engineB: null };
       }
       const baseQty = engineB.quantity;
-      const adjustedQty = Math.max(1, Math.floor(baseQty * gammaDecision.position_size_multiplier));
+      const adjustedQty = Math.max(1, Math.floor(baseQty * dealerDecision.position_size_multiplier));
       return {
         engineA,
         engineB: { ...engineB, quantity: adjustedQty },
@@ -444,11 +488,14 @@ export class OrchestratorService {
     return { engineA, engineB };
   }
 
-  private async persistSignalMetaGamma(signalId: string, gammaDecision: GammaStrategyDecision): Promise<void> {
+  private async persistSignalMetaGamma(
+    signalId: string,
+    decision: GammaStrategyDecision | DealerPositioningDecision
+  ): Promise<void> {
     try {
       await db.query(
         `UPDATE signals SET meta_gamma = $1 WHERE signal_id = $2`,
-        [JSON.stringify(gammaDecision), signalId]
+        [JSON.stringify(decision), signalId]
       );
     } catch (err) {
       logger.warn('Failed to persist signal meta_gamma', { signalId, error: err });
@@ -491,6 +538,28 @@ export class OrchestratorService {
     );
     const status = shouldTrade || decisionOnly ? 'approved' : 'rejected';
     const rejectionReason = hasRejection && !decisionOnly ? enrichment?.rejectionReason || 'risk_rejected' : null;
+
+    if (executed === 'B' && !shouldTrade && !decisionOnly) {
+      const reason =
+        !recommendation
+          ? 'no_recommendation'
+          : recommendation.is_shadow
+            ? 'shadow_only'
+            : hasRejection
+              ? rejectionReason || 'risk_rejected'
+              : 'unknown';
+      logger.warn('Engine B signal not trading', {
+        signal_id: signal.signal_id,
+        symbol: signal.symbol,
+        direction: signal.direction,
+        reason,
+        hasRecommendation: !!recommendation,
+        isShadow: recommendation?.is_shadow,
+        hasRejection,
+        rejectionReason,
+      });
+    }
+
     await this.signalProcessor.updateStatus(signal.signal_id, status, rejectionReason);
 
     // Confluence alert when orchestrator approves and confluence passes
@@ -538,7 +607,7 @@ export class OrchestratorService {
     signal: Signal,
     recommendation: TradeRecommendation | undefined,
     experimentId: string,
-    gammaDecision?: GammaStrategyDecision | null
+    dealerDecision?: GammaStrategyDecision | DealerPositioningDecision | null
   ): Promise<void> {
     if (!this.shadowExecutor || !recommendation?.is_shadow || !config.enableShadowExecution) {
       return;
@@ -572,7 +641,7 @@ export class OrchestratorService {
       metaDecision,
       enrichedSignal,
       experimentId,
-      gammaDecision ? JSON.stringify(gammaDecision) : undefined
+      dealerDecision ? JSON.stringify(dealerDecision) : undefined
     );
   }
 
@@ -708,7 +777,7 @@ export class OrchestratorService {
     engine: 'A' | 'B',
     recommendation: TradeRecommendation | undefined,
     enrichment: { enrichedData: Record<string, any>; riskResult: Record<string, any>; rejectionReason: string | null },
-    gammaDecision?: GammaStrategyDecision | null
+    dealerDecision?: GammaStrategyDecision | DealerPositioningDecision | null
   ): Promise<void> {
     if (!recommendation) {
       return;
@@ -719,8 +788,8 @@ export class OrchestratorService {
       risk_check_result: enrichment.riskResult,
       rejection_reason: enrichment.rejectionReason,
     };
-    if (gammaDecision) {
-      rationale.meta_gamma = gammaDecision;
+    if (dealerDecision) {
+      rationale.meta_gamma = dealerDecision;
     }
 
     await db.query(

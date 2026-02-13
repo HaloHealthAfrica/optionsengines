@@ -1,39 +1,59 @@
 // Backend API client for proxying requests to the Express backend
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || 'http://localhost:8080';
-
-console.log('[Backend API] Configured URL:', BACKEND_URL);
+const DEFAULT_TIMEOUT_MS = 15000;
+const RETRY_ATTEMPTS = 2;
+const RETRY_DELAY_MS = 1500;
 
 export async function backendFetch(endpoint, options = {}) {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const url = `${BACKEND_URL}${endpoint}`;
-  
-  console.log('[Backend API] Fetching:', url);
-  
-  try {
-    const controller = new AbortController();
-    const timeoutMs = 12000;
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+  const doFetch = async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch(url, {
       ...options,
+      timeoutMs: undefined,
       headers: {
         'Content-Type': 'application/json',
         ...options.headers,
       },
       signal: controller.signal,
     });
-    
     clearTimeout(timeoutId);
-    console.log('[Backend API] Response status:', response.status);
     return response;
-  } catch (error) {
-    const message =
-      error?.name === 'AbortError'
-        ? `Request timed out after 12s (${url})`
-        : error?.message || 'Unknown error';
-    console.error('[Backend API] Fetch error:', message);
-    throw new Error(`Backend fetch failed: ${message}`);
+  };
+
+  let lastError;
+  for (let attempt = 0; attempt <= RETRY_ATTEMPTS; attempt++) {
+    try {
+      const response = await doFetch();
+      if (!response.ok && attempt < RETRY_ATTEMPTS && response.status >= 500) {
+        const body = await response.text();
+        console.warn(`[Backend API] ${response.status} on ${endpoint}, retry ${attempt + 1}/${RETRY_ATTEMPTS}`, body?.slice(0, 200));
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+      return response;
+    } catch (error) {
+      lastError = error;
+      const isRetryable = error?.name === 'AbortError' || error?.code === 'ECONNRESET' || error?.code === 'ETIMEDOUT';
+      if (attempt < RETRY_ATTEMPTS && isRetryable) {
+        console.warn(`[Backend API] ${error?.message} on ${endpoint}, retry ${attempt + 1}/${RETRY_ATTEMPTS}`);
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+      const message =
+        error?.name === 'AbortError'
+          ? `Request timed out after ${timeoutMs / 1000}s (${url})`
+          : error?.message || 'Unknown error';
+      console.error('[Backend API] Fetch error:', message);
+      throw new Error(`Backend fetch failed: ${message}`);
+    }
   }
+  if (lastError) throw lastError;
+  throw new Error('Backend fetch failed: max retries exceeded');
 }
 
 async function safeJson(response) {
@@ -50,6 +70,7 @@ export async function backendLogin(email, password) {
   const response = await backendFetch('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
+    timeoutMs: 60000, // 60s for Fly.io cold start
   });
   
   if (!response.ok) {
@@ -70,6 +91,7 @@ export async function backendRegister(email, password) {
   const response = await backendFetch('/auth/register', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
+    timeoutMs: 60000, // 60s for Fly.io cold start
   });
 
   if (!response.ok) {
@@ -257,13 +279,14 @@ export async function backendPatchFlowConfig(token, updates) {
 
 export async function backendGetFlow(token, symbol = 'SPY') {
   const response = await backendFetch(`/flow/${encodeURIComponent(symbol)}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
+    timeoutMs: 20000,
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch flow data');
+    const body = await response.text();
+    console.error('[Backend API] Flow fetch failed:', response.status, body?.slice(0, 300));
+    throw new Error(`Failed to fetch flow data (${response.status})`);
   }
 
   return response.json();
@@ -493,6 +516,26 @@ export async function backendClearTestSession(token, testSessionId) {
 
   if (!response.ok) {
     throw new Error('Failed to clear test session');
+  }
+
+  return response.json();
+}
+
+export async function backendRunTradeAudit(token, options = {}) {
+  const { dateFilter = 'CURRENT_DATE' } = options;
+  const response = await backendFetch('/api/v1/testing/audit', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ dateFilter }),
+    timeoutMs: 30000,
+  });
+
+  if (!response.ok) {
+    const err = await safeJson(response);
+    throw new Error(err?.error || err?.message || 'Audit failed');
   }
 
   return response.json();

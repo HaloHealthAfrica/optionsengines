@@ -6,6 +6,9 @@
 app = 'optionsengines'
 primary_region = 'iad'
 
+[env]
+  APP_MODE = "PAPER"
+
 [build]
 
 [http_service]

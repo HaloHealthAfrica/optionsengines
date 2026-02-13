@@ -12,7 +12,7 @@ export async function GET(request) {
     console.error('Flow config fetch failed:', error);
     return Response.json(
       {
-        confluenceMinThreshold: 75,
+        confluenceMinThreshold: 50,
         enableConfluenceGate: true,
         enableConfluenceSizing: true,
         basePositionSize: 1,

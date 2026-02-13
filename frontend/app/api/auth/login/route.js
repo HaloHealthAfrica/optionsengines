@@ -3,6 +3,7 @@ import { signToken, validateCredentials } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60; // Allow Fly.io cold start (~30–60s)
 
 function validateCsrfToken(request) {
   const cookieHeader = request.headers.get('cookie');

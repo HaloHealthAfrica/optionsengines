@@ -293,6 +293,7 @@ export default function Flow() {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('idle');
   const [dataSource, setDataSource] = useState('unknown');
+  const [failReason, setFailReason] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
 
   const fetchData = useMemo(
@@ -302,6 +303,7 @@ export default function Flow() {
         const response = await fetch(`/api/flow/${symbol}`);
         if (!response.ok) throw new Error('Failed to load flow data');
         setDataSource(response.headers.get('x-data-source') || 'unknown');
+        setFailReason(response.headers.get('x-fail-reason') || null);
         const payload = await response.json();
         setData(payload);
         setStatus('success');
@@ -372,7 +374,7 @@ export default function Flow() {
         </div>
       </div>
 
-      <DataSourceBanner source={dataSource} />
+      <DataSourceBanner source={dataSource} failReason={failReason} />
       <DataFreshnessIndicator lastUpdated={lastUpdated} />
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Flow views">

@@ -1,11 +1,53 @@
 import { db } from './database.service.js';
 import { marketData } from './market-data.js';
+import { unusualWhalesGammaProvider } from './providers/unusualwhales-gamma.js';
+import type { GammaContext } from './providers/unusualwhales-gamma.js';
+import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
-import { GexData, OptionsFlowSummary } from '../types/index.js';
+import { GexData, GexStrikeLevel, OptionsFlowSummary } from '../types/index.js';
 import { redisCache } from './redis-cache.service.js';
 
 /** In-flight GEX fetches by symbol for promise coalescing */
 const gexInFlight = new Map<string, Promise<GexData>>();
+
+/**
+ * Convert Unusual Whales GammaContext to GexData format.
+ */
+function gammaContextToGexData(ctx: GammaContext): GexData {
+  const dealerPosition: GexData['dealerPosition'] =
+    ctx.dealer_bias === 'long' ? 'long_gamma' : ctx.dealer_bias === 'short' ? 'short_gamma' : 'neutral';
+  const volatilityExpectation: GexData['volatilityExpectation'] =
+    dealerPosition === 'long_gamma' ? 'compressed' : dealerPosition === 'short_gamma' ? 'expanding' : 'neutral';
+
+  const levels: GexStrikeLevel[] = (ctx.gamma_by_strike ?? []).map((s) => ({
+    strike: s.strike,
+    callGex: s.netGamma > 0 ? s.netGamma : 0,
+    putGex: s.netGamma < 0 ? -s.netGamma : 0,
+    netGex: s.netGamma,
+  }));
+
+  return {
+    symbol: ctx.symbol,
+    netGex: ctx.net_gamma,
+    totalCallGex: ctx.call_gamma ?? (ctx.net_gamma > 0 ? ctx.net_gamma : 0),
+    totalPutGex: ctx.put_gamma ?? (ctx.net_gamma < 0 ? -ctx.net_gamma : 0),
+    zeroGammaLevel: ctx.gamma_flip ?? undefined,
+    dealerPosition,
+    volatilityExpectation,
+    updatedAt: ctx.timestamp,
+    levels,
+  };
+}
+
+/** Returns true if GEX data is effectively empty (all zeros, no zero gamma level). */
+function isGexAllZeros(gex: GexData): boolean {
+  return (
+    gex.netGex === 0 &&
+    gex.totalCallGex === 0 &&
+    gex.totalPutGex === 0 &&
+    (gex.zeroGammaLevel == null || gex.zeroGammaLevel === 0)
+  );
+}
 
 type MaxPainResult = {
   symbol: string;
@@ -26,8 +68,13 @@ type SignalCorrelationResult = {
 
 export class PositioningService {
   async getGexSnapshot(symbol: string): Promise<GexData & { cached?: boolean; cache_age_seconds?: number; ttl_remaining?: number; stale?: boolean }> {
-    // Check cache first
-    const cacheKey = redisCache.buildKey('gex', { symbol, date: new Date().toISOString().split('T')[0] });
+    // Check cache first; include provider preference so switching config invalidates cache
+    const providerSuffix = config.enableDealerUwGamma ? 'uw' : 'md';
+    const cacheKey = redisCache.buildKey('gex', {
+      symbol,
+      date: new Date().toISOString().split('T')[0],
+      provider: providerSuffix,
+    });
     const cached = await redisCache.getCached<GexData>(cacheKey);
     
     if (cached.hit && cached.data) {
@@ -81,8 +128,54 @@ export class PositioningService {
   }
 
   private async fetchGexFromExternalAPI(symbol: string): Promise<GexData> {
-    const gex = await marketData.getGex(symbol);
+    let gex: GexData;
+    let source: 'marketdata' | 'unusualwhales' = 'marketdata';
 
+    // When ENABLE_DEALER_UW_GAMMA=true, prefer Unusual Whales gamma API
+    if (config.enableDealerUwGamma && config.unusualWhalesApiKey) {
+      const uwGex = await this.tryUnusualWhalesGex(symbol);
+      if (uwGex) {
+        gex = uwGex;
+        source = 'unusualwhales';
+        logger.debug('GEX from Unusual Whales (primary)', { symbol });
+      } else {
+        gex = await this.fetchMarketDataGex(symbol);
+      }
+    } else {
+      // Default: MarketData first, fallback to UW when MarketData returns all zeros
+      gex = await this.fetchMarketDataGex(symbol);
+      if (isGexAllZeros(gex) && config.unusualWhalesApiKey) {
+        const uwGex = await this.tryUnusualWhalesGex(symbol);
+        if (uwGex) {
+          gex = uwGex;
+          source = 'unusualwhales';
+          logger.info('GEX fallback to Unusual Whales (MarketData returned zeros)', { symbol });
+        }
+      }
+    }
+
+    await this.persistGexSnapshot(gex, source);
+    return gex;
+  }
+
+  private async tryUnusualWhalesGex(symbol: string): Promise<GexData | null> {
+    try {
+      const ctx = await unusualWhalesGammaProvider.getGammaContext(symbol);
+      if (!ctx || (ctx.net_gamma === 0 && !ctx.gamma_flip && ctx.gamma_by_strike?.length === 0)) {
+        return null;
+      }
+      return gammaContextToGexData(ctx);
+    } catch (error) {
+      logger.warn('Unusual Whales GEX fetch failed', { symbol, error });
+      return null;
+    }
+  }
+
+  private async fetchMarketDataGex(symbol: string): Promise<GexData> {
+    return marketData.getGex(symbol);
+  }
+
+  private async persistGexSnapshot(gex: GexData, source: 'marketdata' | 'unusualwhales'): Promise<void> {
     try {
       await db.query(
         `INSERT INTO gex_snapshots (
@@ -106,14 +199,12 @@ export class PositioningService {
           gex.dealerPosition,
           gex.volatilityExpectation,
           JSON.stringify(gex.levels || []),
-          'marketdata',
+          source,
         ]
       );
     } catch (error) {
-      logger.warn('Failed to persist GEX snapshot', { error, symbol });
+      logger.warn('Failed to persist GEX snapshot', { error, symbol: gex.symbol });
     }
-
-    return gex;
   }
 
   async getOptionsFlowSnapshot(symbol: string, limit: number = 50): Promise<OptionsFlowSummary> {
@@ -264,7 +355,7 @@ export class PositioningService {
   }
 
   async getSignalCorrelation(symbol: string): Promise<SignalCorrelationResult> {
-    const gex = await marketData.getGex(symbol);
+    const gex = await this.getGexSnapshot(symbol);
     const bias: SignalCorrelationResult['bias'] =
       gex.netGex > 0 ? 'bullish' : gex.netGex < 0 ? 'bearish' : 'neutral';
 

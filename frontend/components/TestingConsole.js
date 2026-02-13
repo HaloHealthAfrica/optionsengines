@@ -72,6 +72,12 @@ export default function TestingConsole() {
   const [status, setStatus] = useState('idle');
   const [customError, setCustomError] = useState(null);
   const [requestError, setRequestError] = useState(null);
+  const [auditDate, setAuditDate] = useState(() => {
+    const d = new Date();
+    return d.toISOString().slice(0, 10);
+  });
+  const [auditResult, setAuditResult] = useState(null);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const fetchSession = useCallback(async (id) => {
     if (!id) return;
@@ -187,6 +193,30 @@ export default function TestingConsole() {
     setSessionId(null);
   }, [sessionId]);
 
+  const runAudit = useCallback(async () => {
+    setAuditLoading(true);
+    setRequestError(null);
+    try {
+      const response = await fetch('/api/testing/audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dateFilter: auditDate === '' ? 'CURRENT_DATE' : auditDate }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setRequestError(result?.error || result?.message || 'Audit failed');
+        setAuditResult(null);
+        return;
+      }
+      setAuditResult(result);
+    } catch (err) {
+      setRequestError(err?.message || 'Audit failed');
+      setAuditResult(null);
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [auditDate]);
+
   const summaryLabel = useMemo(() => {
     if (!sessionId) return 'No active tests';
     return `Session ${sessionId}`;
@@ -202,14 +232,14 @@ export default function TestingConsole() {
       <div className="grid gap-6 lg:grid-cols-[1.2fr,1fr]">
         <div className="card p-6">
           <div className="flex items-center gap-2">
-            {['single', 'batch', 'custom'].map((item) => (
+            {['single', 'batch', 'custom', 'audit'].map((item) => (
               <button
                 key={item}
                 type="button"
                 onClick={() => setTab(item)}
                 className={`tab-button ${tab === item ? 'tab-button-active' : 'bg-white/60 dark:bg-slate-900/50'}`}
               >
-                {item === 'single' ? 'Single' : item === 'batch' ? 'Batch' : 'Custom'}
+                {item === 'single' ? 'Single' : item === 'batch' ? 'Batch' : item === 'custom' ? 'Custom' : 'Audit'}
               </button>
             ))}
           </div>
@@ -339,11 +369,75 @@ export default function TestingConsole() {
               </button>
             </div>
           )}
+
+          {tab === 'audit' && (
+            <div className="mt-6 grid gap-4 text-sm">
+              <label className="grid gap-1">
+                <span className="muted text-xs">Date (empty = today)</span>
+                <input
+                  type="date"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+                  value={auditDate}
+                  onChange={(e) => setAuditDate(e.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={runAudit}
+                disabled={auditLoading}
+                className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 dark:bg-white dark:text-slate-900"
+              >
+                {auditLoading ? 'Running audit...' : 'Run Trade Audit'}
+              </button>
+              {requestError && tab === 'audit' && <p className="text-xs text-rose-500">{requestError}</p>}
+            </div>
+          )}
         </div>
 
         <div className="card p-6">
-          <h2 className="text-lg font-semibold">Live Results</h2>
-          <p className="muted text-xs">{summaryLabel}</p>
+          {tab === 'audit' && auditResult ? (
+            <>
+              <h2 className="text-lg font-semibold">Audit Results</h2>
+              <p className="muted text-xs">Run at {auditResult.runAt}</p>
+              <div className="mt-4 grid gap-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span>Audit trail</span>
+                  <span className="font-semibold">{auditResult.auditTrail?.length ?? 0} trades</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Violations</span>
+                  <span className="font-semibold">{auditResult.violations?.length ?? 0}</span>
+                </div>
+              </div>
+              {auditResult.violationSummary && Object.keys(auditResult.violationSummary).length > 0 && (
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+                  <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">Violation summary</p>
+                  <ul className="mt-1 list-inside list-disc text-xs text-amber-700 dark:text-amber-300">
+                    {Object.entries(auditResult.violationSummary).map(([k, v]) => (
+                      <li key={k}>{k}: {v}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="mt-4">
+                <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">Recommendations</p>
+                <ul className="mt-2 space-y-1 text-xs text-slate-700 dark:text-slate-300">
+                  {(auditResult.recommendations || []).map((r, i) => (
+                    <li key={i} className="rounded bg-slate-100 px-2 py-1 dark:bg-slate-800/50">
+                      {r}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </>
+          ) : tab === 'audit' ? (
+            <div className="text-center text-sm text-slate-500 dark:text-slate-400">
+              <p>Run the audit to see results and recommendations.</p>
+            </div>
+          ) : (
+            <>
+              <h2 className="text-lg font-semibold">Live Results</h2>
+              <p className="muted text-xs">{summaryLabel}</p>
           <div className="mt-4 grid gap-3 text-sm">
             <div className="flex items-center justify-between">
               <span>Accepted</span>

@@ -16,7 +16,7 @@ export interface FlowConfigValues {
 }
 
 const DEFAULTS: FlowConfigValues = {
-  confluenceMinThreshold: 75,
+  confluenceMinThreshold: 50,
   enableConfluenceGate: true,
   enableConfluenceSizing: true,
   basePositionSize: 1,

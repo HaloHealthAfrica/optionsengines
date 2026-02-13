@@ -25,11 +25,11 @@ export interface ConfluenceResult {
   positionSizeTier: 'full' | 'half' | 'quarter' | 'none';
 }
 
-const CONFLUENCE_THRESHOLD = 75;
+const CONFLUENCE_THRESHOLD = 50;
 const SIZING_TIERS = {
-  full: 80,
-  half: 70,
-  quarter: 60,
+  full: 70,
+  half: 55,
+  quarter: 45,
 } as const;
 
 /**

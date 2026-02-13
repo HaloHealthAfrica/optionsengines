@@ -582,6 +582,7 @@ export default function Monitoring({ initialView = 'overview' }) {
   const workerErrors = pipeline.worker_errors || {};
   const recentSignals = pipeline.recent_signals || [];
   const recentRejections = pipeline.recent_rejections || [];
+  const rejectionByReason = pipeline.rejection_by_reason || [];
   const recent = data?.webhooks?.recent || [];
   const engineStats = data?.engines?.by_variant_24h || {};
   const recentFiltered = recent.filter((item) => {
@@ -1047,6 +1048,26 @@ export default function Monitoring({ initialView = 'overview' }) {
             </div>
           </div>
 
+          {rejectionByReason.length > 0 && (
+            <div className="card p-6">
+              <h2 className="text-lg font-semibold">Rejections by Reason</h2>
+              <p className="muted text-xs mt-1">Confluence and other gate rejections in the selected window</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {rejectionByReason.map(({ rejection_reason, count }) => (
+                  <span
+                    key={rejection_reason}
+                    className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                      rejection_reason === 'confluence_below_threshold'
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
+                        : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                    }`}
+                  >
+                    {rejection_reason}: {count}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="card p-6">
             <h2 className="text-lg font-semibold">Recent Rejections</h2>
             <div className="mt-3 grid gap-2 text-xs">

@@ -315,6 +315,13 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
         score: confluence.score,
         threshold: flowConfig.confluenceMinThreshold,
       };
+      logger.info('Confluence gate rejected signal', {
+        symbol: signal.symbol,
+        direction: signal.direction,
+        score: confluence.score,
+        threshold: flowConfig.confluenceMinThreshold,
+        gap: flowConfig.confluenceMinThreshold - confluence.score,
+      });
     }
   }
 

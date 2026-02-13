@@ -14,6 +14,7 @@ import {
 } from '../services/testing-webhook.service.js';
 import { ensureTestSession, getTestSessionSummary, markTestSessionCompleted, clearTestSession } from '../services/testing-session.service.js';
 import { authService } from '../services/auth.service.js';
+import { runTradeAudit } from '../services/trade-audit.service.js';
 
 const router = Router();
 const testRateLimit = new Map<string, { count: number; resetAt: number }>();
@@ -341,6 +342,19 @@ router.post('/webhooks/send-batch-custom', requireAuth, requireTestingAccess, re
     status: 'processing',
     webhook_ids: requestIds,
   });
+});
+
+router.post('/audit', requireAuth, requireTestingAccess, async (req: Request, res: Response) => {
+  const dateFilter = String(req.body?.dateFilter ?? req.query?.dateFilter ?? 'CURRENT_DATE');
+  try {
+    const result = await runTradeAudit(dateFilter);
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(500).json({
+      error: 'Audit failed',
+      message: error?.message ?? String(error),
+    });
+  }
 });
 
 router.get('/sessions/:id', requireAuth, requireTestingAccess, async (req: Request, res: Response) => {

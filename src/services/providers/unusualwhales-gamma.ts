@@ -139,7 +139,7 @@ export class UnusualWhalesGammaProvider {
       .slice(0, 5);
 
     const dealerBias: 'long' | 'short' | 'neutral' =
-      netGamma > config.gammaNeutralThreshold ? 'long' : netGamma < -config.gammaNeutralThreshold ? 'short' : 'neutral';
+      netGamma > config.dealerUwNeutralThreshold ? 'long' : netGamma < -config.dealerUwNeutralThreshold ? 'short' : 'neutral';
 
     const context: GammaContext = {
       symbol,

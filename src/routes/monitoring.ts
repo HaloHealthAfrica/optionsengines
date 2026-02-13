@@ -74,9 +74,10 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
   let decisionByEngine = { rows: [] as any[] };
   let decisionQueue = { rows: [] as any[] };
   let agentMetricsRows = { rows: [] as any[] };
+  let rejectionByReason = { rows: [] as { rejection_reason: string; count: string }[] };
 
   try {
-    [recentEvents, summaryRows, engineRows, signalSummaryRows, orderSummaryRows, recentSignals, recentRejections, activityRows,
+    [recentEvents, summaryRows, engineRows, signalSummaryRows, orderSummaryRows, recentSignals, recentRejections, rejectionByReason, activityRows,
       decisionLogRows, decisionBreakdownSymbol, decisionBreakdownOutcome, decisionBreakdownTimeframe, decisionBreakdownDecision,
       decisionOverview, decisionByEngine, decisionQueue, agentMetricsRows] =
       await Promise.all([
@@ -140,6 +141,16 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
          ${signalsFilter}
          ORDER BY s.created_at DESC
          LIMIT 10`
+      ),
+      db.query(
+        `SELECT COALESCE(s.rejection_reason, 'unknown') AS rejection_reason, COUNT(*)::int AS count
+         FROM signals s
+         WHERE s.status = 'rejected'
+           AND s.created_at > NOW() - ($1::int || ' hours')::interval
+         ${signalsFilter}
+         GROUP BY s.rejection_reason
+         ORDER BY count DESC`,
+        [windowHours]
       ),
       db.query(
         `SELECT 
@@ -280,6 +291,7 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
     orderSummaryRows = { rows: [] };
     recentSignals = { rows: [] };
     recentRejections = { rows: [] };
+    rejectionByReason = { rows: [] };
     activityRows = { rows: [] };
     decisionLogRows = { rows: [] };
     decisionBreakdownSymbol = { rows: [] };
@@ -479,6 +491,7 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
       },
       recent_signals: recentSignals.rows,
       recent_rejections: recentRejections.rows,
+      rejection_by_reason: rejectionByReason.rows,
       last_activity: {
         signal: activity.last_signal_at || null,
         order: activity.last_order_at || null,

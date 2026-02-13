@@ -19,11 +19,11 @@ import type {
 
 export class GammaDealerStrategy {
   private get enabled(): boolean {
-    return config.enableGammaStrategy;
+    return config.enableDealerUwGamma;
   }
 
   private get threshold(): number {
-    return config.gammaNeutralThreshold;
+    return config.dealerUwNeutralThreshold;
   }
 
   classifyRegime(netGamma: number): GammaRegime {

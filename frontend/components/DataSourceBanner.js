@@ -1,13 +1,22 @@
-export default function DataSourceBanner({ source }) {
+const FAIL_REASON_LABELS = {
+  timeout: 'Backend request timed out (try again)',
+  backend_unreachable: 'Backend unreachable — check NEXT_PUBLIC_API_URL',
+  backend_error: 'Backend returned an error (5xx)',
+  unauthorized: 'Authentication failed',
+  unknown: 'Backend unavailable',
+};
+
+export default function DataSourceBanner({ source, failReason }) {
   const normalized = String(source || '').toLowerCase();
 
   if (normalized === 'backend' || !normalized) {
     return null;
   }
 
+  const reasonLabel = failReason ? FAIL_REASON_LABELS[failReason] || FAIL_REASON_LABELS.unknown : null;
   const message =
     normalized === 'mock'
-      ? 'Showing mock data because the backend is unavailable.'
+      ? reasonLabel || 'Showing mock data because the backend is unavailable.'
       : 'Data source unavailable. Showing last known data.';
 
   return (

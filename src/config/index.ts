@@ -125,10 +125,12 @@ interface Config {
   enableUwFlowPoller: boolean;
   uwFlowPollerIntervalMs: number;
 
-  // Gamma Dealer Strategy
-  enableGammaStrategy: boolean;
-  gammaNeutralThreshold: number;
-  gammaStrategyWeight: number;
+  // Dealer strategy family (both use dealer gamma positioning)
+  // UW = Unusual Whales gamma API | GEX = GEX/flow from positioning service
+  enableDealerUwGamma: boolean;
+  enableDealerGex: boolean;
+  dealerStrategyWeight: number;
+  dealerUwNeutralThreshold: number;
 
   // Logging
   logLevel: string;
@@ -151,6 +153,25 @@ function getEnvVarBoolean(key: string, defaultValue: boolean): boolean {
   const value = process.env[key];
   if (!value) return defaultValue;
   return value.toLowerCase() === 'true';
+}
+
+function getEnvVarBooleanWithFallback(
+  primary: string,
+  fallback: string,
+  defaultValue: boolean
+): boolean {
+  const v = process.env[primary] ?? process.env[fallback];
+  if (!v) return defaultValue;
+  return v.toLowerCase() === 'true';
+}
+
+function getEnvVarNumberWithFallback(
+  primary: string,
+  fallback: string,
+  defaultValue: number
+): number {
+  const v = process.env[primary] ?? process.env[fallback];
+  return v ? parseFloat(v) : defaultValue;
 }
 
 const nodeEnv = getEnvVar('NODE_ENV', 'development');
@@ -275,7 +296,7 @@ export const config: Config = {
   enableMarketWebhookPipeline: getEnvVarBoolean('ENABLE_MARKET_WEBHOOK_PIPELINE', true),
 
   // Confluence
-  confluenceMinThreshold: getEnvVarNumber('CONFLUENCE_MIN_THRESHOLD', 75),
+  confluenceMinThreshold: getEnvVarNumber('CONFLUENCE_MIN_THRESHOLD', 50),
   enableConfluenceGate: getEnvVarBoolean('ENABLE_CONFLUENCE_GATE', true),
   enableConfluenceSizing: getEnvVarBoolean('ENABLE_CONFLUENCE_SIZING', true),
   basePositionSize: getEnvVarNumber('BASE_POSITION_SIZE', 1),
@@ -289,10 +310,27 @@ export const config: Config = {
   enableUwFlowPoller: getEnvVarBoolean('ENABLE_UW_FLOW_POLLER', false),
   uwFlowPollerIntervalMs: getEnvVarNumber('UW_FLOW_POLLER_INTERVAL_MS', 120000),
 
-  // Gamma Dealer Strategy
-  enableGammaStrategy: getEnvVarBoolean('ENABLE_GAMMA_STRATEGY', false),
-  gammaNeutralThreshold: getEnvVarNumber('GAMMA_NEUTRAL_THRESHOLD', 100_000_000),
-  gammaStrategyWeight: getEnvVarNumber('GAMMA_STRATEGY_WEIGHT', 0.25),
+  // Dealer strategy: UW gamma API (GammaDealerStrategy) | GEX/flow (DealerPositioningStrategy)
+  enableDealerUwGamma: getEnvVarBooleanWithFallback(
+    'ENABLE_DEALER_UW_GAMMA',
+    'ENABLE_GAMMA_STRATEGY',
+    false
+  ),
+  enableDealerGex: getEnvVarBooleanWithFallback(
+    'ENABLE_DEALER_GEX',
+    'ENABLE_DEALER_POSITIONING_STRATEGY',
+    true
+  ),
+  dealerStrategyWeight: getEnvVarNumberWithFallback(
+    'DEALER_STRATEGY_WEIGHT',
+    'GAMMA_STRATEGY_WEIGHT',
+    0.25
+  ),
+  dealerUwNeutralThreshold: getEnvVarNumberWithFallback(
+    'DEALER_UW_NEUTRAL_THRESHOLD',
+    'GAMMA_NEUTRAL_THRESHOLD',
+    100_000_000
+  ),
 
   // Logging
   logLevel: getEnvVar('LOG_LEVEL', 'info'),
