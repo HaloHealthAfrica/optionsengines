@@ -69,6 +69,7 @@ interface Config {
   maxExposurePercent: number;
   allowPremarket: boolean;
   allowAfterhours: boolean;
+  decisionOnlyWhenMarketClosed: boolean;
   marketCloseGraceMinutes: number;
   signalMaxAgeMinutes: number;
   maxDailyTrades: number;
@@ -222,6 +223,7 @@ export const config: Config = {
   maxExposurePercent: getEnvVarNumber('MAX_EXPOSURE_PERCENT', 20),
   allowPremarket: getEnvVarBoolean('ALLOW_PREMARKET', nodeEnv === 'test'),
   allowAfterhours: getEnvVarBoolean('ALLOW_AFTERHOURS', nodeEnv === 'test'),
+  decisionOnlyWhenMarketClosed: getEnvVarBoolean('DECISION_ONLY_WHEN_MARKET_CLOSED', true),
   marketCloseGraceMinutes: getEnvVarNumber('MARKET_CLOSE_GRACE_MINUTES', 10),
   signalMaxAgeMinutes: getEnvVarNumber('SIGNAL_MAX_AGE_MINUTES', 30),
   maxDailyTrades: getEnvVarNumber('MAX_DAILY_TRADES', nodeEnv === 'test' ? 500 : 0),

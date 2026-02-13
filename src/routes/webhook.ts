@@ -144,7 +144,11 @@ function extractDirectionCandidate(payload: WebhookPayload): DirectionCandidate 
     anyPayload.order_action ??
     anyPayload.strategy?.order_action ??
     anyPayload.action ??
-    anyPayload.event?.phase_name
+    anyPayload.event?.phase_name ??
+    anyPayload.market?.market_bias ??
+    anyPayload.market?.spy_trend ??
+    anyPayload.market?.qqq_trend ??
+    anyPayload.candle?.pattern_bias
   );
 }
 
@@ -158,10 +162,10 @@ export function normalizeDirection(payload: WebhookPayload): 'long' | 'short' | 
     return null;
   }
 
-  if (['long', 'bull', 'bullish', 'up', 'buy', 'call', 'markup'].includes(normalized)) {
+  if (['long', 'bull', 'bullish', 'up', 'buy', 'call', 'markup', 'breakout'].includes(normalized)) {
     return 'long';
   }
-  if (['short', 'bear', 'bearish', 'down', 'sell', 'put', 'markdown'].includes(normalized)) {
+  if (['short', 'bear', 'bearish', 'down', 'sell', 'put', 'markdown', 'breakdown'].includes(normalized)) {
     return 'short';
   }
 

@@ -12,6 +12,8 @@ export type SignalEnrichmentResult = {
   rejectionReason: string | null;
   queueUntil?: Date | null;
   queueReason?: string | null;
+  /** When true, orchestrator runs engines and persists decisions but skips order creation (e.g. market closed) */
+  decisionOnly?: boolean;
 };
 
 type SignalLike = {
@@ -28,6 +30,7 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
   let rejectionReason: string | null = null;
   let queueUntil: Date | null = null;
   let queueReason: string | null = null;
+  let decisionOnly = false;
   const signalTimestamp =
     signal.timestamp instanceof Date ? signal.timestamp : new Date(signal.timestamp);
   const payload = signal.raw_payload && typeof signal.raw_payload === 'object' ? signal.raw_payload : {};
@@ -94,6 +97,10 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     riskResult.signalAgeMinutes = Math.round(signalAgeMinutes * 10) / 10;
     if (signalAgeMinutes > config.signalMaxAgeMinutes) {
       rejectionReason = 'signal_stale';
+    } else if (config.decisionOnlyWhenMarketClosed) {
+      decisionOnly = true;
+      riskResult.decisionOnly = true;
+      riskResult.decisionOnlyReason = 'market_closed';
     } else {
       try {
         const marketHours = await marketData.getMarketHours();
@@ -322,5 +329,5 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     confluence,
   };
 
-  return { enrichedData, riskResult, rejectionReason, queueUntil, queueReason };
+  return { enrichedData, riskResult, rejectionReason, queueUntil, queueReason, decisionOnly };
 }

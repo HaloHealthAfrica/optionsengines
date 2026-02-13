@@ -264,13 +264,22 @@ export class OrchestratorService {
           engine_b_recommendation,
           enrichment
         );
-        await this.createPaperOrders(
-          signal,
-          experiment.experiment_id,
-          engine_a_recommendation,
-          engine_b_recommendation,
-          enrichment
-        );
+        if (!enrichment.decisionOnly) {
+          await this.createPaperOrders(
+            signal,
+            experiment.experiment_id,
+            engine_a_recommendation,
+            engine_b_recommendation,
+            enrichment
+          );
+        } else {
+          Sentry.addBreadcrumb({
+            category: 'orders',
+            message: 'Order creation skipped (decision-only mode, market closed)',
+            level: 'info',
+            data: { signal_id: signal.signal_id },
+          });
+        }
         await this.handleShadowExecution(signal, engine_b_recommendation, experiment.experiment_id);
 
         await this.signalProcessor.markProcessed(signal.signal_id, experiment.experiment_id);
@@ -331,15 +340,16 @@ export class OrchestratorService {
     policy: { executed_engine: 'A' | 'B' | null },
     engineA?: TradeRecommendation | null,
     engineB?: TradeRecommendation | null,
-    enrichment?: { enrichedData: Record<string, any>; riskResult: Record<string, any>; rejectionReason: string | null }
+    enrichment?: { enrichedData: Record<string, any>; riskResult: Record<string, any>; rejectionReason: string | null; decisionOnly?: boolean }
   ): Promise<void> {
     const risk = enrichment?.riskResult || {};
     const positionLimitExceeded =
       Number(risk.openPositions ?? 0) >= Number(risk.maxOpenPositions ?? Number.POSITIVE_INFINITY) ||
       Number(risk.openSymbolPositions ?? 0) >= Number(risk.maxPositionsPerSymbol ?? Number.POSITIVE_INFINITY);
+    const decisionOnly = Boolean(enrichment?.decisionOnly);
     const hasRejection = Boolean(
       enrichment?.rejectionReason ||
-        risk.marketOpen === false ||
+        (!decisionOnly && risk.marketOpen === false) ||
         positionLimitExceeded
     );
 
@@ -349,10 +359,11 @@ export class OrchestratorService {
       executed &&
         recommendation &&
         !recommendation.is_shadow &&
-        !hasRejection
+        !hasRejection &&
+        !decisionOnly
     );
-    const status = shouldTrade ? 'approved' : 'rejected';
-    const rejectionReason = hasRejection ? enrichment?.rejectionReason || 'risk_rejected' : null;
+    const status = shouldTrade || decisionOnly ? 'approved' : 'rejected';
+    const rejectionReason = hasRejection && !decisionOnly ? enrichment?.rejectionReason || 'risk_rejected' : null;
     await this.signalProcessor.updateStatus(signal.signal_id, status, rejectionReason);
 
     // Confluence alert when orchestrator approves and confluence passes
