@@ -708,7 +708,7 @@ export class MarketDataService {
   }
 
   /**
-   * Get options flow summary using MarketData.app
+   * Get options flow summary. Primary: Unusual Whales. Fallback: MarketData.app.
    */
   async getOptionsFlow(symbol: string, limit: number = 50): Promise<OptionsFlowSummary> {
     const cacheKey = `options-flow:${symbol}:${limit}`;
@@ -717,70 +717,65 @@ export class MarketDataService {
       return cached;
     }
 
-    if (!this.checkCircuitBreaker('marketdata')) {
-      logger.warn('MarketData.app options flow unavailable (circuit breaker open)', { symbol });
-      return {
-        symbol,
-        entries: [],
-        updatedAt: new Date(),
-      };
-    }
-
-    try {
-      const rows = await retry(
-        async () => {
-          await rateLimiter.waitForToken('twelvedata');
-          return this.marketData.getOptionsFlow(symbol, limit);
-        },
-        {
-          retries: this.maxRetries,
-          onRetry: (error, attempt, delayMs) => {
-            logger.warn(`Retry ${attempt} for marketdata options flow`, { error, delayMs });
-          },
-        }
-      );
-
-      const entries: OptionsFlowEntry[] = rows.map((row) => ({
-        optionSymbol: row.optionSymbol,
-        side: row.optionType,
-        strike: row.strike,
-        expiration: new Date(row.expiration),
-        volume: Number(row.volume ?? 0),
-        openInterest: row.openInterest ? Number(row.openInterest) : undefined,
-        premium: row.premium ? Number(row.premium) : undefined,
-        sentiment: row.optionType === 'call' ? 'bullish' : 'bearish',
-        timestamp: row.timestamp ? new Date(row.timestamp) : new Date(),
-      }));
-
-      const summary: OptionsFlowSummary = {
-        symbol,
-        entries,
-        updatedAt: new Date(),
-        source: 'marketdata',
-      };
-
-      this.recordSuccess('marketdata');
-      cache.set(cacheKey, summary, 60);
-      return summary;
-    } catch (error) {
-      this.recordFailure('marketdata');
-      logger.warn('MarketData options flow failed, trying Unusual Whales fallback', { error, symbol });
-      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'marketdata', symbol } });
-    }
-
-    // Phase 5: UW flow fallback
+    // Primary: Unusual Whales
     if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey && this.checkCircuitBreaker('unusualwhales')) {
       try {
         const uwFlow = await unusualWhalesOptionsService.getOptionsFlow(symbol, limit);
         if (uwFlow && uwFlow.entries.length > 0) {
           this.recordSuccess('unusualwhales');
           cache.set(cacheKey, uwFlow, 60);
-          logger.info('Options flow fallback: Unusual Whales', { symbol, count: uwFlow.entries.length });
+          logger.info('Options flow: Unusual Whales (primary)', { symbol, count: uwFlow.entries.length });
           return uwFlow;
         }
       } catch (uwError) {
         this.recordFailure('unusualwhales');
-        logger.warn('Unusual Whales options flow fallback failed', { symbol, error: uwError });
+        logger.warn('Unusual Whales options flow failed, trying MarketData.app fallback', { symbol, error: uwError });
+      }
+    }
+
+    // Fallback: MarketData.app
+    if (this.checkCircuitBreaker('marketdata')) {
+      try {
+        const rows = await retry(
+          async () => {
+            await rateLimiter.waitForToken('twelvedata');
+            return this.marketData.getOptionsFlow(symbol, limit);
+          },
+          {
+            retries: this.maxRetries,
+            onRetry: (error, attempt, delayMs) => {
+              logger.warn(`Retry ${attempt} for marketdata options flow`, { error, delayMs });
+            },
+          }
+        );
+
+        const entries: OptionsFlowEntry[] = rows.map((row) => ({
+          optionSymbol: row.optionSymbol,
+          side: row.optionType,
+          strike: row.strike,
+          expiration: new Date(row.expiration),
+          volume: Number(row.volume ?? 0),
+          openInterest: row.openInterest ? Number(row.openInterest) : undefined,
+          premium: row.premium ? Number(row.premium) : undefined,
+          sentiment: row.optionType === 'call' ? 'bullish' : 'bearish',
+          timestamp: row.timestamp ? new Date(row.timestamp) : new Date(),
+        }));
+
+        const summary: OptionsFlowSummary = {
+          symbol,
+          entries,
+          updatedAt: new Date(),
+          source: 'marketdata',
+        };
+
+        this.recordSuccess('marketdata');
+        cache.set(cacheKey, summary, 60);
+        logger.info('Options flow: MarketData.app (fallback)', { symbol, count: entries.length });
+        return summary;
+      } catch (error) {
+        this.recordFailure('marketdata');
+        logger.warn('MarketData.app options flow failed', { error, symbol });
+        Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'marketdata', symbol } });
       }
     }
 
