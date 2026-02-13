@@ -63,13 +63,13 @@ fi
 echo ""
 
 echo "=== Frontend Checklist ==="
-echo "□ Set VITE_API_URL in Vercel to: $BACKEND_URL"
+echo "□ Set NEXT_PUBLIC_API_URL in Vercel to: $BACKEND_URL"
 echo "□ Redeploy frontend after setting environment variable"
 echo "□ Check login page shows correct API URL at bottom"
 echo ""
 
 echo "=== Summary ==="
 echo "If login still doesn't work:"
-echo "1. Verify VITE_API_URL is set in Vercel"
+echo "1. Verify NEXT_PUBLIC_API_URL is set in Vercel"
 echo "2. Run migrations: fly ssh console -a optionsengines && node dist/migrations/runner.js up"
 echo "3. Check LOGIN_TROUBLESHOOTING.md for detailed steps"

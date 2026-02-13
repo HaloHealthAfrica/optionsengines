@@ -4,12 +4,15 @@
  * Export all configuration utilities and types.
  */
 
-export {
+export type {
   Environment,
   TestScenario,
   FeatureFlagConfig,
   BaselineConfig,
   PerformanceConfig,
+} from './test-config';
+
+export {
   createDefaultFeatureFlags,
   createEngineBDisabledFlags,
   createPartialFeatureFlags,

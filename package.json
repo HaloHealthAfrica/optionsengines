@@ -25,7 +25,13 @@
     "perf": "tsx scripts/performance/run-performance.ts",
     "check:webhooks": "tsx scripts/check-webhooks.ts",
     "test:webhook": "tsx scripts/test-webhook-endpoint.ts",
-    "diagnose": "npm run check:webhooks && npm run test:webhook"
+    "diagnose": "npm run check:webhooks && npm run test:webhook",
+    "replay:webhooks": "tsx scripts/replay-webhooks.js",
+    "replay:webhooks:file": "tsx scripts/replay-webhooks-from-file.ts",
+    "test:production": "tsx scripts/e2e-production-test-with-sentry.ts",
+    "analyze:sentry": "tsx scripts/analyze-sentry-traces.ts",
+    "validate:e2e": "tsx scripts/run-full-e2e-sentry-validation.ts",
+    "verify:uw-schema": "tsx scripts/verify-unusual-whales-schema.ts"
   },
   "keywords": [
     "options",

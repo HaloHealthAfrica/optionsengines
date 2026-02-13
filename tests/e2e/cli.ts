@@ -15,6 +15,7 @@
  *   npm run test:e2e -- --nightly       # Run nightly extended tests
  */
 
+import { fileURLToPath } from 'url';
 import { createE2ETestSystem } from './index';
 import {
   Environment,
@@ -211,8 +212,10 @@ async function main(): Promise<void> {
   }
 }
 
-// Run CLI
-if (require.main === module) {
+// Run CLI when executed directly (ESM equivalent of require.main === module)
+const __filename = fileURLToPath(import.meta.url);
+const isMain = process.argv[1] && (process.argv[1] === __filename || process.argv[1].replace(/\\/g, '/') === __filename.replace(/\\/g, '/'));
+if (isMain) {
   main().catch((error) => {
     console.error('Fatal error:', error);
     process.exit(1);

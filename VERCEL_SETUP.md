@@ -4,7 +4,7 @@
 
 ### Project Settings
 - **Project Name**: `optionsengines` (or your preferred name)
-- **Framework Preset**: Vite
+- **Framework Preset**: Next.js
 - **Root Directory**: `frontend` ⚠️ IMPORTANT - must point to frontend folder
 - **Node.js Version**: 20.x (default)
 
@@ -19,7 +19,7 @@ Add these in Vercel Dashboard → Settings → Environment Variables:
 
 | Key | Value | Environments |
 |-----|-------|--------------|
-| `VITE_API_URL` | `https://optionsengines.fly.dev` | Production, Preview, Development |
+| `NEXT_PUBLIC_API_URL` | `https://optionsengines.fly.dev` | Production, Preview, Development |
 
 **Note**: Replace `optionsengines.fly.dev` with your actual Fly.io app URL.
 
@@ -29,7 +29,7 @@ Add these in Vercel Dashboard → Settings → Environment Variables:
 1. Go to https://vercel.com/new
 2. Import your GitHub repository
 3. Set Root Directory to `frontend`
-4. Add environment variable `VITE_API_URL`
+4. Add environment variable `NEXT_PUBLIC_API_URL`
 5. Click Deploy
 
 ### Method 2: Vercel CLI
@@ -47,7 +47,7 @@ Follow prompts and set:
 
 Then set environment variable:
 ```bash
-vercel env add VITE_API_URL production
+vercel env add NEXT_PUBLIC_API_URL production
 # Enter: https://optionsengines.fly.dev
 ```
 
@@ -97,9 +97,9 @@ Visit your Vercel URL and check:
 
 ### Issue: Environment variable not working
 **Solution**: 
-- Verify variable name starts with `VITE_`
+- Verify variable name is `NEXT_PUBLIC_API_URL` (Next.js exposes `NEXT_PUBLIC_*` to the browser)
 - Redeploy after adding environment variables
-- Check in browser console: `import.meta.env.VITE_API_URL`
+- Check in browser console: `process.env.NEXT_PUBLIC_API_URL`
 
 ### Issue: Build fails
 **Solution**: 

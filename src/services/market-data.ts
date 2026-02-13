@@ -12,9 +12,10 @@ import { retry } from '../utils/retry.js';
 import { CircuitBreaker } from './circuit-breaker.service.js';
 import { Candle, GexData, GexStrikeLevel, Indicators, OptionsFlowEntry, OptionsFlowSummary } from '../types/index.js';
 import { marketDataStream } from './market-data-stream.service.js';
+import { unusualWhalesOptionsService } from './unusual-whales-options.service.js';
 import * as Sentry from '@sentry/node';
 
-type Provider = 'alpaca' | 'polygon' | 'marketdata' | 'twelvedata';
+type Provider = 'alpaca' | 'polygon' | 'marketdata' | 'twelvedata' | 'unusualwhales';
 
 export class MarketDataService {
   private alpaca: AlpacaClient;
@@ -54,6 +55,17 @@ export class MarketDataService {
         })
       );
     });
+
+    // Circuit breaker for Unusual Whales options (when enabled)
+    if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey) {
+      this.circuitBreakers.set(
+        'unusualwhales',
+        new CircuitBreaker({
+          maxFailures: this.maxFailures,
+          resetTimeoutMs: this.resetTimeout,
+        })
+      );
+    }
 
     logger.info('Market Data Service initialized with providers', {
       providers: this.providerPriority,
@@ -330,6 +342,9 @@ export class MarketDataService {
     }
 
     const optionProviders: Provider[] = ['alpaca', 'polygon'];
+    if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey) {
+      optionProviders.push('unusualwhales');
+    }
 
     for (const providerName of optionProviders) {
       if (!this.checkCircuitBreaker(providerName)) {
@@ -340,12 +355,21 @@ export class MarketDataService {
       try {
         const price = await retry(
           async () => {
-            await rateLimiter.waitForToken(providerName);
+            if (providerName !== 'unusualwhales') {
+              await rateLimiter.waitForToken(providerName);
+            }
             switch (providerName) {
               case 'alpaca':
                 return this.alpaca.getOptionPrice(symbol, strike, expiration, optionType);
               case 'polygon':
                 return this.polygon.getOptionPrice(symbol, strike, expiration, optionType);
+              case 'unusualwhales':
+                return unusualWhalesOptionsService.getOptionPrice(
+                  symbol,
+                  strike,
+                  expiration,
+                  optionType
+                );
               default:
                 throw new Error('Unsupported provider');
             }
@@ -516,7 +540,8 @@ export class MarketDataService {
   }
 
   /**
-   * Get options chain from MarketData.app (used for max pain calculations)
+   * Get options chain from MarketData.app, with Unusual Whales fallback.
+   * Used for GEX and max pain calculations. UW rows have no gamma (GEX will be 0).
    */
   async getOptionsChain(symbol: string): Promise<MarketDataOptionRow[]> {
     const cacheKey = `options-chain:${symbol}`;
@@ -525,33 +550,46 @@ export class MarketDataService {
       return cached;
     }
 
-    if (!this.checkCircuitBreaker('marketdata')) {
-      throw new Error('MarketData.app unavailable (circuit breaker open)');
-    }
-
-    try {
-      const rows = await retry(
-        async () => {
-          await rateLimiter.waitForToken('twelvedata');
-          return this.marketData.getOptionsChain(symbol);
-        },
-        {
-          retries: this.maxRetries,
-          onRetry: (error, attempt, delayMs) => {
-            logger.warn(`Retry ${attempt} for marketdata options chain`, { error, delayMs });
+    if (this.checkCircuitBreaker('marketdata')) {
+      try {
+        const rows = await retry(
+          async () => {
+            await rateLimiter.waitForToken('twelvedata');
+            return this.marketData.getOptionsChain(symbol);
           },
-        }
-      );
+          {
+            retries: this.maxRetries,
+            onRetry: (error, attempt, delayMs) => {
+              logger.warn(`Retry ${attempt} for marketdata options chain`, { error, delayMs });
+            },
+          }
+        );
 
-      this.recordSuccess('marketdata');
-      cache.set(cacheKey, rows, 60);
-      return rows;
-    } catch (error) {
-      this.recordFailure('marketdata');
-      logger.error('Failed to fetch options chain', error, { symbol });
-      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'marketdata', symbol } });
-      throw error;
+        this.recordSuccess('marketdata');
+        cache.set(cacheKey, rows, 60);
+        return rows;
+      } catch (error) {
+        this.recordFailure('marketdata');
+        logger.warn('MarketData.app options chain failed, trying Unusual Whales fallback', { symbol, error });
+      }
     }
+
+    if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey && this.checkCircuitBreaker('unusualwhales')) {
+      try {
+        const rows = await unusualWhalesOptionsService.getChainAsMarketDataRows(symbol);
+        if (rows.length > 0) {
+          this.recordSuccess('unusualwhales');
+          cache.set(cacheKey, rows, 60);
+          logger.info('Options chain fallback: Unusual Whales', { symbol, count: rows.length });
+          return rows;
+        }
+      } catch (error) {
+        this.recordFailure('unusualwhales');
+        logger.warn('Unusual Whales options chain fallback failed', { symbol, error });
+      }
+    }
+
+    throw new Error('Failed to fetch options chain from all providers');
   }
 
   /**
@@ -572,7 +610,7 @@ export class MarketDataService {
       const [chain, currentPrice] = await retry(
         async () => {
           await rateLimiter.waitForToken('twelvedata');
-          const chainRows = await this.marketData.getOptionsChain(symbol);
+          const chainRows = await this.getOptionsChain(symbol);
           const price = await this.getStockPrice(symbol);
           return [chainRows, price] as const;
         },

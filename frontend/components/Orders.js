@@ -322,7 +322,7 @@ export default function Orders() {
                   <div className="flex items-center justify-between">
                     <span className="muted">Decision</span>
                       <span className="capitalize">
-                      {selectedItem.item.decision.engine ?? '--'} · {(selectedItem.item.decision.source ?? 'unknown').replace('_', ' ')}
+                      {selectedItem.item.decision.engine ?? '--'} · {(selectedItem.item.decision.source ?? '--').replace(/_/g, ' ')}
                     </span>
                   </div>
                   {selectedItem.item.decision.bias && (

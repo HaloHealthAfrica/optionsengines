@@ -113,7 +113,7 @@ export default function History() {
                 if (!data?.timeline) return;
                 const header = 'symbol,type,date,pnl,value';
                 const rows = data.timeline
-                  .map((item) => `${item.symbol},${item.type},${item.date},${item.pnl},${item.value}`)
+                  .map((item) => `${item.symbol ?? ''},${item.type ?? ''},${item.date ?? ''},${item.pnl ?? ''},${item.value ?? ''}`)
                   .join('\n');
                 const blob = new Blob([`${header}\n${rows}`], { type: 'text/csv' });
                 const url = URL.createObjectURL(blob);

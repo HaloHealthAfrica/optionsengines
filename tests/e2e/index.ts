@@ -8,8 +8,21 @@
  * Requirements: All requirements
  */
 
-// Export generators
-export {
+import { createTestRunner, createDefaultConfig } from './test-runner';
+import { createWebhookGenerator } from './generators/webhook-generator-impl';
+import { createGEXGenerator } from './generators/gex-generator-impl';
+import { createTestOrchestrator } from './orchestration/test-orchestrator-impl';
+import {
+  createEngineARegressionConfig,
+  createEngineBTestConfig,
+  createFeatureFlagTestConfig,
+  createCIConfig,
+  createNightlyConfig,
+  createScenarioConfig,
+} from './config';
+
+// Export generators (types + values)
+export type {
   WebhookGenerator,
   WebhookScenario,
   SyntheticWebhook,
@@ -18,6 +31,8 @@ export {
   GEXRegime,
   SyntheticGEX,
   GEXData,
+} from './generators';
+export {
   DefaultWebhookGenerator,
   createWebhookGenerator,
   DefaultGEXGenerator,
@@ -25,7 +40,7 @@ export {
 } from './generators';
 
 // Export orchestration types
-export {
+export type {
   TestOrchestrator,
   TestConfig,
   TestContext,
@@ -45,25 +60,29 @@ export {
   createTestOrchestrator,
 } from './orchestration/test-orchestrator-impl';
 
-// Export test runner
-export {
+// Export test runner (types + values)
+export type {
   TestPhase,
   TestExecutionResult,
   TestFailure,
   TestRunSummary,
   TestRunnerConfig,
+} from './test-runner';
+export {
   TestRunner,
   createTestRunner,
   createDefaultConfig,
 } from './test-runner';
 
-// Export configuration
-export {
+// Export configuration (types + values)
+export type {
   Environment,
   TestScenario,
   FeatureFlagConfig,
   BaselineConfig,
   PerformanceConfig,
+} from './config';
+export {
   createDefaultFeatureFlags,
   createEngineBDisabledFlags,
   createPartialFeatureFlags,
@@ -95,11 +114,6 @@ export class E2ETestSystem {
   private orchestrator: import('./orchestration/test-orchestrator').TestOrchestrator;
   
   constructor() {
-    const { createTestRunner } = require('./test-runner');
-    const { createWebhookGenerator } = require('./generators/webhook-generator-impl');
-    const { createGEXGenerator } = require('./generators/gex-generator-impl');
-    const { createTestOrchestrator } = require('./orchestration/test-orchestrator-impl');
-    
     this.runner = createTestRunner();
     this.webhookGenerator = createWebhookGenerator();
     this.gexGenerator = createGEXGenerator();
@@ -138,7 +152,6 @@ export class E2ETestSystem {
    * Run all test phases with default configuration
    */
   async runAllTests(): Promise<import('./test-runner').TestRunSummary> {
-    const { createDefaultConfig } = require('./test-runner');
     const config = createDefaultConfig();
     return this.runner.runAllPhases(config);
   }
@@ -154,7 +167,6 @@ export class E2ETestSystem {
    * Run a specific test phase
    */
   async runPhase(phaseNumber: number, config?: import('./test-runner').TestRunnerConfig): Promise<import('./test-runner').TestExecutionResult> {
-    const { createDefaultConfig } = require('./test-runner');
     const testConfig = config || createDefaultConfig();
     return this.runner.runPhase(phaseNumber, testConfig);
   }
@@ -163,7 +175,6 @@ export class E2ETestSystem {
    * Run Engine A regression tests
    */
   async runEngineARegression(): Promise<import('./test-runner').TestRunSummary> {
-    const { createEngineARegressionConfig } = require('./config');
     const config = createEngineARegressionConfig();
     return this.runner.runAllPhases(config);
   }
@@ -172,7 +183,6 @@ export class E2ETestSystem {
    * Run Engine B tests
    */
   async runEngineBTests(): Promise<import('./test-runner').TestRunSummary> {
-    const { createEngineBTestConfig } = require('./config');
     const config = createEngineBTestConfig();
     return this.runner.runAllPhases(config);
   }
@@ -181,7 +191,6 @@ export class E2ETestSystem {
    * Run feature flag tests
    */
   async runFeatureFlagTests(): Promise<import('./test-runner').TestRunSummary> {
-    const { createFeatureFlagTestConfig } = require('./config');
     const config = createFeatureFlagTestConfig();
     return this.runner.runAllPhases(config);
   }
@@ -190,7 +199,6 @@ export class E2ETestSystem {
    * Run CI/CD tests
    */
   async runCITests(): Promise<import('./test-runner').TestRunSummary> {
-    const { createCIConfig } = require('./config');
     const config = createCIConfig();
     return this.runner.runAllPhases(config);
   }
@@ -199,7 +207,6 @@ export class E2ETestSystem {
    * Run nightly extended tests
    */
   async runNightlyTests(): Promise<import('./test-runner').TestRunSummary> {
-    const { createNightlyConfig } = require('./config');
     const config = createNightlyConfig();
     return this.runner.runAllPhases(config);
   }
@@ -238,8 +245,6 @@ export async function runE2ETests(): Promise<import('./test-runner').TestRunSumm
  * Quick start function for running tests with environment configuration
  */
 export async function runE2ETestsForEnvironment(env: import('./config').Environment): Promise<import('./test-runner').TestRunSummary> {
-  const { createScenarioConfig } = require('./config');
-  const { createTestRunner } = require('./test-runner');
   
   const config = createScenarioConfig('e2e', env);
   const runner = createTestRunner();
@@ -251,8 +256,6 @@ export async function runE2ETestsForEnvironment(env: import('./config').Environm
  * Quick start function for running tests with scenario configuration
  */
 export async function runE2ETestsForScenario(scenario: import('./config').TestScenario): Promise<import('./test-runner').TestRunSummary> {
-  const { createScenarioConfig } = require('./config');
-  const { createTestRunner } = require('./test-runner');
   
   const config = createScenarioConfig(scenario);
   const runner = createTestRunner();

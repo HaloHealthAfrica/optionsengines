@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { authService } from '../services/auth.service.js';
 import { db } from '../services/database.service.js';
 import { marketData } from '../services/market-data.js';
+import { config } from '../config/index.js';
 import { rateLimiter } from '../services/rate-limiter.service.js';
 import { marketDataStream } from '../services/market-data-stream.service.js';
 import { errorTracker } from '../services/error-tracker.service.js';
@@ -492,6 +493,15 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
       down: downProviders,
       rate_limits: rateLimiter.getAllStats(),
     },
+    unusual_whales_options: {
+      enabled: config.unusualWhalesOptionsEnabled,
+      configured: Boolean(config.unusualWhalesApiKey),
+      status: config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey
+        ? 'ok'
+        : !config.unusualWhalesApiKey
+          ? 'not_configured'
+          : 'disabled',
+    },
   });
 });
 
@@ -519,13 +529,19 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
     audit_trail: [],
   };
 
-  const webhookRow =
-    type === 'webhook'
-      ? await db.query(
-          `SELECT * FROM webhook_events WHERE event_id = $1 LIMIT 1`,
-          [id]
-        )
-      : { rows: [] as any[] };
+  let webhookRow = { rows: [] as any[] };
+  if (type === 'webhook') {
+    webhookRow = await db.query(
+      `SELECT * FROM webhook_events WHERE event_id = $1 LIMIT 1`,
+      [id]
+    );
+    if (webhookRow.rows.length === 0) {
+      webhookRow = await db.query(
+        `SELECT * FROM webhook_events WHERE request_id = $1 LIMIT 1`,
+        [id]
+      );
+    }
+  }
 
   let signalId: string | null = null;
   let experimentId: string | null = null;
@@ -659,7 +675,7 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
     }
   }
 
-  let shadowTradeRow: { shadow_trade_id?: string } | null = null;
+  let shadowTradeRow: { shadow_trade_id?: string; meta_confidence?: number } | null = null;
 
   if (experimentId) {
     const [experimentResult, recommendationResult, agentResult, shadowResult] = await Promise.all([
@@ -675,7 +691,7 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
         [experimentId]
       ),
       db.query(
-        `SELECT shadow_trade_id FROM shadow_trades WHERE experiment_id = $1 LIMIT 1`,
+        `SELECT shadow_trade_id, meta_confidence FROM shadow_trades WHERE experiment_id = $1 LIMIT 1`,
         [experimentId]
       ),
     ]);
@@ -708,12 +724,18 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
         }));
       });
 
+      const confidenceFromMeta = metaRow != null && typeof metaRow.confidence === 'number' ? metaRow.confidence : null;
+      const confidenceFromShadow = shadowTradeRow != null && typeof shadowTradeRow.meta_confidence === 'number' ? shadowTradeRow.meta_confidence : null;
+      const firstAgent = agentDecisionRows[0];
+      const strategyFromAgent = firstAgent?.metadata && typeof firstAgent.metadata === 'object' && (firstAgent.metadata as Record<string, unknown>).strategy_used;
+      const strategyUsed = typeof strategyFromAgent === 'string' ? strategyFromAgent : null;
+
       detail.decision_engine = {
         engine: experiment.variant === 'A' ? 'Engine A' : 'Engine B',
         engine_outcome,
-        decision: engine_outcome ?? signal_type ?? null,
-        confidence_score: metaRow != null && typeof metaRow.confidence === 'number' ? metaRow.confidence : null,
-        strategy_used: null,
+        decision: engine_outcome ?? signal_type ?? 'hold',
+        confidence_score: confidenceFromMeta ?? confidenceFromShadow,
+        strategy_used: strategyUsed,
         decision_time_ms: webhookRowResolved?.processing_time_ms ?? detail.processing_time_ms ?? null,
         decision_timestamp: metaRow?.created_at ?? experiment.created_at ?? null,
         decision_factors,

@@ -4,7 +4,7 @@
  * Export all synthetic data generators for use in tests.
  */
 
-export {
+export type {
   WebhookGenerator,
   WebhookScenario,
   SyntheticWebhook,
@@ -16,7 +16,7 @@ export {
   createWebhookGenerator,
 } from './webhook-generator-impl';
 
-export {
+export type {
   GEXGenerator,
   GEXRegime,
   SyntheticGEX,

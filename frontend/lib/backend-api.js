@@ -1,6 +1,6 @@
 // Backend API client for proxying requests to the Express backend
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || 'http://localhost:8080';
 
 console.log('[Backend API] Configured URL:', BACKEND_URL);
 

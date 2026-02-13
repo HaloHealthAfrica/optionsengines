@@ -49,6 +49,16 @@ function requireCronSecret(req: Request, res: Response, next: () => void): void 
  * Call every 2–3 minutes.
  */
 router.post('/process-queue', requireCronSecret, async (_req: Request, res: Response) => {
+  // Skip when workers run (e.g. Fly.io) - set ENABLE_CRON_PROCESSING=false to disable
+  if (process.env.ENABLE_CRON_PROCESSING === 'false') {
+    res.status(200).json({
+      ok: true,
+      skip: true,
+      reason: 'Cron disabled (ENABLE_CRON_PROCESSING=false, workers likely running)',
+    });
+    return;
+  }
+
   const startTime = Date.now();
 
   try {

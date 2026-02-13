@@ -38,6 +38,9 @@ Set all required environment variables as secrets:
 # Database
 fly secrets set DATABASE_URL="postgresql://neondb_owner:npg_uCpWnrt3Pei8@ep-withered-mud-ah66kagz-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require"
 
+# Redis (required in production - create with: fly redis create -n optionsengines-redis -r iad --no-replicas --enable-eviction)
+fly secrets set REDIS_URL="rediss://default:password@fly-optionsengines-redis.upstash.io:6379"
+
 # Authentication
 fly secrets set JWT_SECRET="your-jwt-secret-here"
 fly secrets set HMAC_SECRET="your-hmac-secret-here"
@@ -56,6 +59,10 @@ fly secrets set MARKET_DATA_API_KEY="your-marketdata-key"
 
 # Optional: Polygon
 fly secrets set POLYGON_API_KEY="your-polygon-key"
+
+# Optional: Unusual Whales (options chain/price fallback)
+fly secrets set UNUSUAL_WHALES_API_KEY="your-unusual-whales-bearer-token"
+fly secrets set UNUSUAL_WHALES_OPTIONS_ENABLED="true"
 ```
 
 ### 4. Deploy to Fly.io
@@ -93,9 +100,13 @@ Your backend will be available at: `https://dual-engine-options-trading.fly.dev`
 
 Update `frontend/src/services/apiClient.ts` with your Fly.io backend URL:
 
-```typescript
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://dual-engine-options-trading.fly.dev';
+Set `NEXT_PUBLIC_API_URL` in `.env.local` or Vercel:
+
 ```
+NEXT_PUBLIC_API_URL=https://dual-engine-options-trading.fly.dev
+```
+
+The frontend uses `frontend/lib/backend-api.js` which reads `process.env.NEXT_PUBLIC_API_URL`.
 
 ### 2. Create Vercel Project
 
@@ -114,7 +125,7 @@ Follow the prompts:
 In Vercel dashboard or via CLI:
 
 ```bash
-vercel env add VITE_API_URL
+vercel env add NEXT_PUBLIC_API_URL
 # Enter: https://dual-engine-options-trading.fly.dev
 ```
 
@@ -178,6 +189,28 @@ fly scale memory 1024
 # Scale CPU
 fly scale vm shared-cpu-2x
 ```
+
+## Post-Deploy Verification
+
+Run the verification script to ensure required env vars are set:
+
+```bash
+# Unix/macOS
+./scripts/verify-production-env.sh
+
+# Windows (PowerShell)
+.\scripts\verify-production-env.ps1
+```
+
+**Checklist:**
+- [ ] `UNUSUAL_WHALES_API_KEY` set in Fly.io (for options chain/price fallback)
+- [ ] `ENABLE_CRON_PROCESSING` set when workers run: use `false` in Fly.io workers so Vercel cron does not duplicate work
+- [ ] `NEXT_PUBLIC_API_URL` set in Vercel to your Fly.io backend URL
+- [ ] `MAX_OPEN_POSITIONS`, `REDIS_URL` configured in Fly.io
+
+**Note:** When Fly.io workers run the queue (orchestrator, order creator, etc.), set `ENABLE_CRON_PROCESSING=false` in Vercel so the cron job skips processing. Otherwise both workers and cron would process the same queue.
+
+**Market hours & max positions:** See `tmp/PHASE5_MARKET_HOURS_AND_MAX_POSITIONS.md` for config tuning (e.g. `MAX_OPEN_POSITIONS`, `ALLOW_PREMARKET`, `ALLOW_AFTERHOURS`) and rejection reason analysis.
 
 ## Health Checks
 

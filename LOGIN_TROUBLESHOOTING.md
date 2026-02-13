@@ -2,14 +2,14 @@
 
 ## Common Issues and Solutions
 
-### Issue 1: VITE_API_URL Not Set in Vercel
+### Issue 1: NEXT_PUBLIC_API_URL Not Set in Vercel
 
 **Symptom**: Login page shows "Cannot connect to server" or "Failed to fetch"
 
 **Solution**:
 1. Go to Vercel Dashboard → Your Project → Settings → Environment Variables
 2. Add environment variable:
-   - **Key**: `VITE_API_URL`
+   - **Key**: `NEXT_PUBLIC_API_URL`
    - **Value**: `https://optionsengines.fly.dev` (replace with your actual Fly.io URL)
    - **Environments**: Check all (Production, Preview, Development)
 3. Redeploy the frontend (Vercel → Deployments → Redeploy)
@@ -142,7 +142,7 @@ Run through this checklist to verify everything is set up correctly:
 
 ### Frontend (Vercel)
 - [ ] Frontend is deployed: Check Vercel dashboard
-- [ ] `VITE_API_URL` is set: Check Vercel → Settings → Environment Variables
+- [ ] `NEXT_PUBLIC_API_URL` is set: Check Vercel → Settings → Environment Variables
 - [ ] API URL is correct: Check bottom of login page
 - [ ] CORS is configured: Backend allows your Vercel domain
 
@@ -216,7 +216,7 @@ Look for:
 → Set JWT_SECRET in Fly.io secrets
 
 **"Cannot connect to server"**
-→ Backend not deployed or VITE_API_URL not set
+→ Backend not deployed or NEXT_PUBLIC_API_URL not set
 
 **"Invalid credentials"**
 → Wrong password or user doesn't exist (check migration)

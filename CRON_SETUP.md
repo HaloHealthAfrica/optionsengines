@@ -23,6 +23,7 @@ Process pending signals when workers don't run (e.g. serverless). Uses DB lockin
 |----------|----------|-------------|
 | `CRON_SECRET` | Yes | Must match frontend. Used to verify cron requests. |
 | `CRON_BATCH_SIZE` | No | Max signals per run (default: 10) |
+| `ENABLE_CRON_PROCESSING` | No | Set to `false` when workers run (e.g. Fly.io) to skip cron |
 
 ## Setup Steps
 

@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authService } from '../services/auth.service.js';
 import { db } from '../services/database.service.js';
+import { marketData } from '../services/market-data.js';
 
 const router = Router();
 
@@ -137,7 +138,7 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
     ),
   ]);
 
-  const orders = pendingOrdersResult.rows.map((row: any) => ({
+  const ordersRaw = pendingOrdersResult.rows.map((row: any) => ({
     id: row.order_id,
     signal_id: row.signal_id,
     symbol: row.symbol,
@@ -145,12 +146,36 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
     strike: Number(row.strike),
     expiry: row.expiration ? new Date(row.expiration).toISOString().slice(0, 10) : null,
     qty: Number(row.quantity),
-    price: null,
+    price: null as number | null,
     status: mapOrderStatus(row.status),
     time: row.created_at ? new Date(row.created_at).toISOString() : null,
     pnl: null,
     decision: buildDecisionSummary(row),
   }));
+
+  // Enrich pending orders with live option price (from Alpaca, Polygon, or Unusual Whales)
+  const orders = await Promise.all(
+    ordersRaw.map(async (order) => {
+      if (order.symbol && order.strike != null && order.expiry && order.type) {
+        try {
+          const expiration = new Date(order.expiry);
+          const optionType = order.type.toLowerCase() as 'call' | 'put';
+          const price = await marketData.getOptionPrice(
+            order.symbol,
+            order.strike,
+            expiration,
+            optionType
+          );
+          if (price != null && Number.isFinite(price)) {
+            return { ...order, price };
+          }
+        } catch (err) {
+          // Keep price null on failure
+        }
+      }
+      return order;
+    })
+  );
 
   const trades = tradesResult.rows.map((row: any) => ({
     id: row.trade_id,

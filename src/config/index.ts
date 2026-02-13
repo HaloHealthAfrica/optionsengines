@@ -35,6 +35,7 @@ interface Config {
   marketDataApiKey: string;
   unusualWhalesApiKey: string;
   unusualWhalesGammaUrl: string;
+  unusualWhalesOptionsEnabled: boolean;
 
   // Performance
   slowRequestMs: number;
@@ -167,6 +168,7 @@ export const config: Config = {
     getEnvVar('MARKET_DATA_API_KEY', '') || getEnvVar('MARKETDATA_API_KEY', ''),
   unusualWhalesApiKey: getEnvVar('UNUSUAL_WHALES_API_KEY', ''),
   unusualWhalesGammaUrl: getEnvVar('UNUSUAL_WHALES_GAMMA_URL', ''),
+  unusualWhalesOptionsEnabled: getEnvVarBoolean('UNUSUAL_WHALES_OPTIONS_ENABLED', true),
 
   // Performance
   slowRequestMs: getEnvVarNumber('SLOW_REQUEST_MS', 2000),
