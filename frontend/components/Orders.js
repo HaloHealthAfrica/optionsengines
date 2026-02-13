@@ -25,6 +25,7 @@ export default function Orders() {
   const [orders, setOrders] = useState([]);
   const [trades, setTrades] = useState([]);
   const [positions, setPositions] = useState([]);
+  const [recentlyFilled, setRecentlyFilled] = useState([]);
   const [status, setStatus] = useState('idle');
   const [sortKey, setSortKey] = useState('time');
   const [filter, setFilter] = useState('all');
@@ -43,6 +44,7 @@ export default function Orders() {
         setOrders(payload.orders || []);
         setTrades(payload.trades || []);
         setPositions(payload.positions || []);
+        setRecentlyFilled(payload.recentlyFilled || []);
         setStatus('success');
         setLastUpdated(Date.now());
       } catch (error) {
@@ -65,7 +67,7 @@ export default function Orders() {
   const duplicateWarning = useMemo(() => {
     const seen = new Set();
     const duplicates = new Set();
-    const all = [...orders, ...trades];
+    const all = [...orders, ...recentlyFilled, ...trades];
     all.forEach((item) => {
       const id = item?.id || item?.order_id;
       if (!id) return;
@@ -76,10 +78,15 @@ export default function Orders() {
       }
     });
     return duplicates.size ? Array.from(duplicates) : null;
-  }, [orders, trades]);
+  }, [orders, trades, recentlyFilled]);
 
   const rows = useMemo(() => {
-    const source = activeTab === 'active' ? orders : activeTab === 'filled' ? trades : positions;
+    const source =
+      activeTab === 'active'
+        ? [...orders, ...recentlyFilled]
+        : activeTab === 'filled'
+          ? trades
+          : positions;
     const filtered =
       filter === 'all'
         ? source
@@ -90,12 +97,12 @@ export default function Orders() {
       if (sortKey === 'qty') return Number(b.qty || 0) - Number(a.qty || 0);
       return String(b.time || '').localeCompare(String(a.time || ''));
     });
-  }, [orders, trades, positions, activeTab, filter, sortKey]);
+  }, [orders, trades, positions, recentlyFilled, activeTab, filter, sortKey]);
 
   const columns =
     activeTab === 'closed'
-      ? ['Symbol', 'Type', 'Strike', 'Expiry', 'Qty', 'Entry', 'Realized P&L', 'Time']
-      : ['Symbol', 'Type', 'Strike', 'Expiry', 'Qty', 'Price', 'Status', 'Time'];
+      ? ['Symbol', 'Type', 'Strike', 'Expiry', 'Qty', 'Entry', 'Realized P&L', 'Engine', 'Time']
+      : ['Symbol', 'Type', 'Strike', 'Expiry', 'Qty', 'Price', 'Status', 'Engine', 'Time'];
 
   return (
     <section className="flex flex-col gap-6">
@@ -197,7 +204,9 @@ export default function Orders() {
               {status !== 'loading' && rows.length === 0 && (
                 <tr>
                   <td className="px-4 py-6 text-center text-sm text-slate-500" colSpan={columns.length}>
-                    No orders found for this filter.
+                    {activeTab === 'active'
+                      ? 'No pending or recently filled orders (last 2 min).'
+                      : 'No orders found for this filter.'}
                   </td>
                 </tr>
               )}
@@ -231,6 +240,11 @@ export default function Orders() {
                           ? `$${Number(item.realized_pnl).toFixed(2)}`
                           : '--'}
                       </td>
+                      <td className="px-4 py-4">
+                        <span className="text-xs text-slate-500">
+                          {item.engine ? `Engine ${item.engine}` : '--'}
+                        </span>
+                      </td>
                       <td className="px-4 py-4">{item.time ? new Date(item.time).toLocaleString() : '--'}</td>
                     </>
                   ) : (
@@ -241,6 +255,12 @@ export default function Orders() {
                       <td className="px-4 py-4">
                         <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusColors[item.status] ?? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}>
                           {item.status ?? '--'}
+                          {item.isRecentlyFilled ? ' (recent)' : ''}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className="text-xs text-slate-500">
+                          {item.engine ? `Engine ${item.engine}` : '--'}
                         </span>
                       </td>
                       <td className="px-4 py-4">{item.time ? new Date(item.time).toLocaleString() : '--'}</td>
@@ -291,6 +311,12 @@ export default function Orders() {
                 <span className="muted">Quantity</span>
                 <span>{selectedItem.item.qty ?? '--'}</span>
               </div>
+              {selectedItem.item.engine && (
+                <div className="flex items-center justify-between">
+                  <span className="muted">Engine</span>
+                  <span>Engine {selectedItem.item.engine}</span>
+                </div>
+              )}
               {selectedItem.type !== 'closed' && (
                 <div className="flex items-center justify-between">
                   <span className="muted">Status</span>

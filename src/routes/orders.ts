@@ -33,10 +33,10 @@ function mapOrderStatus(status: string): 'pending' | 'filled' | 'failed' {
 }
 
 function buildDecisionSummary(row: any): any | null {
-  const variant = row.variant || 'A';
+  const engineLetter = row.engine || row.variant || 'A';
   if (row.meta_bias || row.meta_confidence || row.meta_reasons || row.meta_block !== null) {
     return {
-      engine: `Engine ${variant}`,
+      engine: `Engine ${engineLetter}`,
       source: 'meta_decision',
       bias: row.meta_bias || null,
       confidence: row.meta_confidence ?? null,
@@ -48,20 +48,22 @@ function buildDecisionSummary(row: any): any | null {
 
   if (row.risk_check_result) {
     return {
-      engine: `Engine ${variant}`,
+      engine: `Engine ${engineLetter}`,
       source: 'risk_checks',
       risk: row.risk_check_result,
     };
   }
 
   return {
-    engine: `Engine ${variant}`,
+    engine: `Engine ${engineLetter}`,
     source: 'unknown',
   };
 }
 
+const RECENTLY_FILLED_WINDOW_SECONDS = 120;
+
 router.get('/', requireAuth, async (_req: Request, res: Response) => {
-  const [pendingOrdersResult, tradesResult, positionsResult] = await Promise.all([
+  const [pendingOrdersResult, tradesResult, recentlyFilledResult, positionsResult] = await Promise.all([
     db.query(
       `SELECT o.order_id,
               o.signal_id,
@@ -72,6 +74,7 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
               o.quantity,
               o.status,
               o.created_at,
+              o.engine,
               e.variant,
               md.bias AS meta_bias,
               md.confidence AS meta_confidence,
@@ -94,6 +97,7 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
               t.fill_price,
               t.fill_quantity,
               t.fill_timestamp,
+              COALESCE(t.engine, o.engine) AS engine,
               o.signal_id,
               o.symbol,
               o.type,
@@ -117,6 +121,37 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
        LIMIT 200`
     ),
     db.query(
+      `SELECT t.trade_id,
+              t.order_id,
+              t.fill_price,
+              t.fill_quantity,
+              t.fill_timestamp,
+              COALESCE(t.engine, o.engine) AS engine,
+              o.signal_id,
+              o.symbol,
+              o.type,
+              o.strike,
+              o.expiration,
+              o.quantity,
+              e.variant,
+              md.bias AS meta_bias,
+              md.confidence AS meta_confidence,
+              md.reasons AS meta_reasons,
+              md.block AS meta_block,
+              md.metadata AS meta_metadata,
+              rs.risk_check_result
+       FROM trades t
+       JOIN orders o ON o.order_id = t.order_id AND o.order_type = $1
+       LEFT JOIN experiments e ON e.signal_id = o.signal_id
+       LEFT JOIN agent_decisions md
+         ON md.signal_id = o.signal_id AND md.agent_name = 'meta_decision'
+       LEFT JOIN refactored_signals rs ON rs.signal_id = o.signal_id
+       WHERE t.fill_timestamp >= NOW() - INTERVAL '1 second' * $2
+       ORDER BY t.fill_timestamp DESC
+       LIMIT 50`,
+      ['paper', RECENTLY_FILLED_WINDOW_SECONDS]
+    ),
+    db.query(
       `SELECT position_id,
               symbol,
               option_symbol,
@@ -129,7 +164,8 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
               position_pnl_percent,
               entry_timestamp,
               exit_timestamp,
-              status
+              status,
+              engine
        FROM refactored_positions
        WHERE status = $1
        ORDER BY exit_timestamp DESC NULLS LAST
@@ -150,6 +186,7 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
     status: mapOrderStatus(row.status),
     time: row.created_at ? new Date(row.created_at).toISOString() : null,
     pnl: null,
+    engine: row.engine || null,
     decision: buildDecisionSummary(row),
   }));
 
@@ -190,6 +227,7 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
     status: 'filled',
     time: row.fill_timestamp ? new Date(row.fill_timestamp).toISOString() : null,
     pnl: null,
+    engine: row.engine || null,
     decision: buildDecisionSummary(row),
   }));
 
@@ -209,9 +247,27 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
         : null,
     status: row.status,
     time: row.exit_timestamp ? new Date(row.exit_timestamp).toISOString() : null,
+    engine: row.engine || null,
   }));
 
-  res.json({ orders, trades, positions });
+  const recentlyFilled = recentlyFilledResult.rows.map((row: any) => ({
+    id: row.trade_id,
+    order_id: row.order_id,
+    signal_id: row.signal_id,
+    symbol: row.symbol,
+    type: row.type === 'call' ? 'Call' : 'Put',
+    strike: Number(row.strike),
+    expiry: row.expiration ? new Date(row.expiration).toISOString().slice(0, 10) : null,
+    qty: Number(row.fill_quantity ?? row.quantity),
+    price: row.fill_price !== null && row.fill_price !== undefined ? Number(row.fill_price) : null,
+    status: 'filled',
+    time: row.fill_timestamp ? new Date(row.fill_timestamp).toISOString() : null,
+    engine: row.engine || null,
+    decision: buildDecisionSummary(row),
+    isRecentlyFilled: true,
+  }));
+
+  res.json({ orders, trades, positions, recentlyFilled });
 });
 
 export default router;

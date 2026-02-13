@@ -7,6 +7,9 @@ import { publishPositionUpdate, publishRiskUpdate } from '../services/realtime-u
 import * as Sentry from '@sentry/node';
 import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
 import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
+import { config } from '../config/index.js';
+import { evaluateExitDecision } from '../lib/exitEngine/index.js';
+import { buildExitDecisionInput } from '../lib/exitEngine/position-adapter.js';
 
 interface OpenPosition {
   position_id: string;
@@ -108,12 +111,15 @@ export class ExitMonitorWorker {
       for (const position of positions.rows) {
         try {
           const now = new Date();
-          const currentPrice = await marketData.getOptionPrice(
-            position.symbol,
-            position.strike,
-            new Date(position.expiration),
-            position.type
-          );
+          const [currentPrice, underlyingPrice] = await Promise.all([
+            marketData.getOptionPrice(
+              position.symbol,
+              position.strike,
+              new Date(position.expiration),
+              position.type
+            ),
+            marketData.getStockPrice(position.symbol),
+          ]);
 
           if (currentPrice == null || !Number.isFinite(currentPrice)) {
             logger.debug('Exit monitor skipped - no option price available', {
@@ -136,26 +142,47 @@ export class ExitMonitorWorker {
 
           let exitReason: string | null = null;
 
-          if (
-            rule.profit_target_percent !== undefined &&
-            pnlPercent >= rule.profit_target_percent
-          ) {
-            exitReason = 'profit_target';
-          } else if (
-            rule.stop_loss_percent !== undefined &&
-            pnlPercent <= -Math.abs(rule.stop_loss_percent)
-          ) {
-            exitReason = 'stop_loss';
-          } else if (
-            rule.max_hold_time_hours !== undefined &&
-            hoursInPosition >= rule.max_hold_time_hours
-          ) {
-            exitReason = 'max_hold_time';
-          } else if (
-            rule.min_dte_exit !== undefined &&
-            daysToExpiration <= rule.min_dte_exit
-          ) {
-            exitReason = 'min_dte_exit';
+          if (config.enableExitDecisionEngine) {
+            const underlying = Number.isFinite(underlyingPrice) ? underlyingPrice : position.entry_price * 100;
+            const input = buildExitDecisionInput(
+              position,
+              rule,
+              {
+                underlyingPrice: underlying,
+                optionMid: currentPrice,
+              },
+              now
+            );
+            const result = evaluateExitDecision(input);
+            if (result.action === 'FULL_EXIT' || result.action === 'PARTIAL_EXIT') {
+              exitReason = result.triggeredRules.length > 0
+                ? result.triggeredRules[0].rule.toLowerCase()
+                : 'exit_engine';
+            }
+          }
+
+          if (!exitReason) {
+            if (
+              rule.profit_target_percent !== undefined &&
+              pnlPercent >= rule.profit_target_percent
+            ) {
+              exitReason = 'profit_target';
+            } else if (
+              rule.stop_loss_percent !== undefined &&
+              pnlPercent <= -Math.abs(rule.stop_loss_percent)
+            ) {
+              exitReason = 'stop_loss';
+            } else if (
+              rule.max_hold_time_hours !== undefined &&
+              hoursInPosition >= rule.max_hold_time_hours
+            ) {
+              exitReason = 'max_hold_time';
+            } else if (
+              rule.min_dte_exit !== undefined &&
+              daysToExpiration <= rule.min_dte_exit
+            ) {
+              exitReason = 'min_dte_exit';
+            }
           }
 
           if (!exitReason) {

@@ -85,6 +85,10 @@ interface Config {
   stopLossPct: number;
   timeStopDte: number;
   maxHoldDays: number;
+  enableExitDecisionEngine: boolean;
+
+  // Capacity Management
+  minHoldMinutesForCapacityClose: number;
 
   // A/B Testing
   abSplitPercentage: number;
@@ -240,6 +244,10 @@ export const config: Config = {
   stopLossPct: getEnvVarNumber('STOP_LOSS_PCT', 50),
   timeStopDte: getEnvVarNumber('TIME_STOP_DTE', 1),
   maxHoldDays: getEnvVarNumber('MAX_HOLD_DAYS', 5),
+  enableExitDecisionEngine: getEnvVarBoolean('ENABLE_EXIT_DECISION_ENGINE', true),
+
+  // Capacity Management
+  minHoldMinutesForCapacityClose: getEnvVarNumber('MIN_HOLD_MINUTES_FOR_CAPACITY_CLOSE', 15),
 
   // A/B Testing
   abSplitPercentage: getEnvVarNumber('AB_SPLIT_PERCENTAGE', 0),

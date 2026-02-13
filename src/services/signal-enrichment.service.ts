@@ -148,10 +148,15 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     );
 
     const now = new Date();
+    const minHoldMinutes = config.minHoldMinutesForCapacityClose ?? 15;
     const closeCandidates = positionsToReview.rows.filter((row: any) => {
       const pnlPercent = Number(row.position_pnl_percent ?? 0);
       const hoursOpen =
         (now.getTime() - new Date(row.entry_timestamp).getTime()) / 3600000;
+      const minutesOpen = hoursOpen * 60;
+
+      const minHoldMet = minutesOpen >= minHoldMinutes;
+      if (!minHoldMet) return false;
 
       const nearTarget =
         config.autoCloseNearTarget && pnlPercent >= config.autoCloseNearTargetThresholdPct;
