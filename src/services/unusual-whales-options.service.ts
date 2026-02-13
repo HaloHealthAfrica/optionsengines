@@ -122,10 +122,20 @@ export class UnusualWhalesOptionsService {
     try {
       const ticks = await this.client.getNetPremTicks(ticker);
       if (ticks.length > 0) {
-        const totalCallPremium = ticks.reduce((s, t) => s + (t.callPremium ?? 0), 0);
-        const totalPutPremium = ticks.reduce((s, t) => s + (t.putPremium ?? 0), 0);
+        let totalCallPremium = ticks.reduce((s, t) => s + (t.callPremium ?? 0), 0);
+        let totalPutPremium = ticks.reduce((s, t) => s + (t.putPremium ?? 0), 0);
         const totalCallVolume = ticks.reduce((s, t) => s + (t.callVolume ?? 0), 0);
         const totalPutVolume = ticks.reduce((s, t) => s + (t.putVolume ?? 0), 0);
+        const totalNetPremium = ticks.reduce((s, t) => s + (t.netPremium ?? 0), 0);
+
+        // API may return only net_premium; derive call/put from net
+        if (totalCallPremium === 0 && totalPutPremium === 0 && totalNetPremium !== 0) {
+          if (totalNetPremium > 0) {
+            totalCallPremium = totalNetPremium;
+          } else {
+            totalPutPremium = -totalNetPremium;
+          }
+        }
 
         if (totalCallPremium > 0 || totalPutPremium > 0) {
           const entries: OptionsFlowEntry[] = [];
@@ -168,10 +178,63 @@ export class UnusualWhalesOptionsService {
         }
       }
     } catch (err) {
-      logger.warn('UW net-prem-ticks failed, trying option chain', { ticker, error: err });
+      logger.warn('UW net-prem-ticks failed, trying flow-per-strike-intraday', { ticker, error: err });
     }
 
-    // Fallback: option chain (volume * premium) - chain often has volume=0 for all contracts
+    // Fallback 2: flow-per-strike-intraday - flow by strike for the day
+    try {
+      const rows = await this.client.getFlowPerStrikeIntraday(ticker);
+      if (rows.length > 0) {
+        const totalCallPremium = rows.reduce((s, r) => s + (r.callPremium ?? 0), 0);
+        const totalPutPremium = rows.reduce((s, r) => s + (r.putPremium ?? 0), 0);
+        const totalCallVolume = rows.reduce((s, r) => s + (r.callVolume ?? 0), 0);
+        const totalPutVolume = rows.reduce((s, r) => s + (r.putVolume ?? 0), 0);
+
+        if (totalCallPremium > 0 || totalPutPremium > 0) {
+          const entries: OptionsFlowEntry[] = [];
+          if (totalCallPremium > 0) {
+            entries.push({
+              optionSymbol: `${ticker} flow-per-strike calls`,
+              side: 'call',
+              strike: 0,
+              expiration: new Date(),
+              volume: totalCallVolume,
+              premium: totalCallPremium,
+              sentiment: 'bullish',
+              timestamp: new Date(),
+            });
+          }
+          if (totalPutPremium > 0) {
+            entries.push({
+              optionSymbol: `${ticker} flow-per-strike puts`,
+              side: 'put',
+              strike: 0,
+              expiration: new Date(),
+              volume: totalPutVolume,
+              premium: totalPutPremium,
+              sentiment: 'bearish',
+              timestamp: new Date(),
+            });
+          }
+          logger.info('Options flow: Unusual Whales flow-per-strike-intraday', {
+            ticker,
+            rowsCount: rows.length,
+            callPremium: totalCallPremium,
+            putPremium: totalPutPremium,
+          });
+          return {
+            symbol: ticker,
+            entries,
+            updatedAt: new Date(),
+            source: 'unusualwhales',
+          };
+        }
+      }
+    } catch (err) {
+      logger.warn('UW flow-per-strike-intraday failed, trying option chain', { ticker, error: err });
+    }
+
+    // Fallback 3: option chain (volume * premium) - chain often has volume=0 for all contracts
     const contracts = await this.getCachedChain(ticker);
     if (!contracts.length) return null;
 

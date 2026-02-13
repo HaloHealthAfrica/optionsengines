@@ -93,6 +93,7 @@ async function main() {
       const today = new Date().toISOString().slice(0, 10);
       const netPremUrl = `${BASE_URL}/stock/${TICKER}/net-prem-ticks?date=${today}`;
       const netPremPayload = (await fetchJson(netPremUrl)) as Record<string, unknown>;
+      console.log('   Raw top-level keys:', Object.keys(netPremPayload).join(', '));
       const ticks = (netPremPayload?.data ?? netPremPayload?.ticks ?? netPremPayload) as unknown[];
       const arr = Array.isArray(ticks) ? ticks : [];
 
@@ -101,15 +102,30 @@ async function main() {
       if (arr.length > 0) {
         const last = arr[arr.length - 1] as Record<string, unknown>;
         console.log('   Sample tick keys:', Object.keys(last).join(', '));
-        console.log('   Sample tick:', JSON.stringify(last, null, 2).slice(0, 400) + '...');
-        console.log('\n   *** FIX: Use net-prem-ticks for netflow instead of option-contracts ***');
+        console.log('   Sample tick:', JSON.stringify(last, null, 2).slice(0, 500) + '...');
       }
     } catch (e) {
       console.log('   Net-prem-ticks request failed:', (e as Error).message);
-      console.log('   (May require different plan or params - check UW API docs)');
     }
 
-    // 3. Flow alerts (alternative)
+    // 2b. Flow-per-strike-intraday
+    console.log('\n## 2b. Flow Per Strike Intraday\n');
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const flowUrl = `${BASE_URL}/stock/${TICKER}/flow-per-strike-intraday?date=${today}`;
+      const flowPayload = (await fetchJson(flowUrl)) as Record<string, unknown>;
+      const rows = (flowPayload?.data ?? flowPayload?.result ?? flowPayload) as unknown[];
+      const arr = Array.isArray(rows) ? rows : [];
+      console.log(`   Flow-per-strike-intraday returned: ${arr.length} rows`);
+      if (arr.length > 0) {
+        const first = arr[0] as Record<string, unknown>;
+        console.log('   Sample row keys:', Object.keys(first).join(', '));
+      }
+    } catch (e) {
+      console.log('   Flow-per-strike-intraday failed:', (e as Error).message);
+    }
+
+    // 3. Flow alerts
     console.log('\n## 3. Flow Alerts\n');
     console.log('   Endpoint: GET /option-trades/flow-alerts');
     console.log('   Returns recent flow alerts - we have getFlowAlerts() but do not use it for Flow page.\n');

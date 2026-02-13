@@ -267,6 +267,7 @@ export class UnusualWhalesOptionsClient {
     if (!(await this.rateLimit())) return [];
 
     const dateStr = date ?? new Date().toISOString().slice(0, 10);
+    // Try with date param; some UW plans may use different param (e.g. date, trading_date)
     const url = `${BASE_URL}/stock/${encodeURIComponent(ticker)}/net-prem-ticks?date=${dateStr}`;
 
     try {
@@ -289,11 +290,11 @@ export class UnusualWhalesOptionsClient {
   }
 
   private normalizeNetPremTick(r: Record<string, unknown>): UnusualWhalesNetPremTick {
-    const callVol = this.toNum(r.call_volume ?? r.callVolume) ?? 0;
-    const putVol = this.toNum(r.put_volume ?? r.putVolume) ?? 0;
-    const callPrem = this.toNum(r.call_premium ?? r.callPremium ?? r.call_prem) ?? 0;
-    const putPrem = this.toNum(r.put_premium ?? r.putPremium ?? r.put_prem) ?? 0;
-    const netPrem = this.toNum(r.net_premium ?? r.netPremium ?? r.net_prem) ?? (callPrem - putPrem);
+    const callVol = this.toNum(r.call_volume ?? r.callVolume ?? r.call_vol) ?? 0;
+    const putVol = this.toNum(r.put_volume ?? r.putVolume ?? r.put_vol) ?? 0;
+    const callPrem = this.toNum(r.call_premium ?? r.callPremium ?? r.call_prem ?? r.callPrem) ?? 0;
+    const putPrem = this.toNum(r.put_premium ?? r.putPremium ?? r.put_prem ?? r.putPrem) ?? 0;
+    const netPrem = this.toNum(r.net_premium ?? r.netPremium ?? r.net_prem ?? r.netPrem ?? r.net_premium_flow) ?? (callPrem - putPrem);
     return {
       timestamp: this.toNum(r.timestamp ?? r.time ?? r.t) ?? Date.now(),
       callVolume: callVol,
@@ -301,6 +302,49 @@ export class UnusualWhalesOptionsClient {
       callPremium: callPrem,
       putPremium: putPrem,
       netPremium: netPrem,
+    };
+  }
+
+  /**
+   * Fetch flow per strike intraday. Returns flow data by strike for a trading day.
+   * GET /stock/:ticker/flow-per-strike-intraday?date=YYYY-MM-DD
+   */
+  async getFlowPerStrikeIntraday(ticker: string, date?: string): Promise<UnusualWhalesFlowPerStrikeRow[]> {
+    if (!this.apiKey) return [];
+
+    if (!(await this.rateLimit())) return [];
+
+    const dateStr = date ?? new Date().toISOString().slice(0, 10);
+    const url = `${BASE_URL}/stock/${encodeURIComponent(ticker)}/flow-per-strike-intraday?date=${dateStr}`;
+
+    try {
+      const response = await fetch(url, { headers: this.headers });
+      if (!response.ok) {
+        logger.warn('UW flow-per-strike-intraday request failed', { status: response.status, ticker });
+        return [];
+      }
+      const payload = (await response.json()) as Record<string, unknown>;
+      const data = payload?.data ?? payload?.result ?? payload;
+      const arr = Array.isArray(data) ? data : [];
+      return arr.map((r: unknown) => this.normalizeFlowPerStrikeRow(r as Record<string, unknown>));
+    } catch (error) {
+      logger.warn('UW flow-per-strike-intraday fetch failed', { error, ticker });
+      return [];
+    }
+  }
+
+  private normalizeFlowPerStrikeRow(r: Record<string, unknown>): UnusualWhalesFlowPerStrikeRow {
+    const callPrem = this.toNum(r.call_premium ?? r.callPremium) ?? 0;
+    const putPrem = this.toNum(r.put_premium ?? r.putPremium) ?? 0;
+    const callVol = this.toNum(r.call_volume ?? r.callVolume) ?? 0;
+    const putVol = this.toNum(r.put_volume ?? r.putVolume) ?? 0;
+    return {
+      strike: this.toNum(r.strike ?? r.strike_price) ?? 0,
+      callPremium: callPrem,
+      putPremium: putPrem,
+      callVolume: callVol,
+      putVolume: putVol,
+      netPremium: callPrem - putPrem,
     };
   }
 
@@ -359,6 +403,15 @@ export interface UnusualWhalesNetPremTick {
   putVolume: number;
   callPremium: number;
   putPremium: number;
+  netPremium: number;
+}
+
+export interface UnusualWhalesFlowPerStrikeRow {
+  strike: number;
+  callPremium: number;
+  putPremium: number;
+  callVolume: number;
+  putVolume: number;
   netPremium: number;
 }
 
