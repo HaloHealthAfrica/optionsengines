@@ -214,11 +214,11 @@ export default function Orders() {
                   tabIndex={0}
                   role="button"
                 >
-                  <td className="px-4 py-4 font-medium">{item.symbol}</td>
-                  <td className="px-4 py-4">{item.type}</td>
-                  <td className="px-4 py-4">{item.strike}</td>
-                  <td className="px-4 py-4">{item.expiry}</td>
-                  <td className="px-4 py-4">{item.qty}</td>
+                  <td className="px-4 py-4 font-medium">{item.symbol ?? '--'}</td>
+                  <td className="px-4 py-4">{item.type ?? '--'}</td>
+                  <td className="px-4 py-4">{item.strike ?? '--'}</td>
+                  <td className="px-4 py-4">{item.expiry ?? '--'}</td>
+                  <td className="px-4 py-4">{item.qty ?? '--'}</td>
                   {activeTab === 'closed' ? (
                     <>
                       <td className="px-4 py-4">
@@ -239,8 +239,8 @@ export default function Orders() {
                         {item.price !== null && item.price !== undefined ? `$${Number(item.price).toFixed(2)}` : '--'}
                       </td>
                       <td className="px-4 py-4">
-                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusColors[item.status]}`}>
-                          {item.status}
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusColors[item.status] ?? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}>
+                          {item.status ?? '--'}
                         </span>
                       </td>
                       <td className="px-4 py-4">{item.time ? new Date(item.time).toLocaleString() : '--'}</td>
@@ -273,28 +273,28 @@ export default function Orders() {
             <div className="mt-4 grid gap-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="muted">Symbol</span>
-                <span>{selectedItem.item.symbol}</span>
+                <span>{selectedItem.item.symbol ?? '--'}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="muted">Type</span>
-                <span>{selectedItem.item.type}</span>
+                <span>{selectedItem.item.type ?? '--'}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="muted">Strike</span>
-                <span>{selectedItem.item.strike}</span>
+                <span>{selectedItem.item.strike ?? '--'}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="muted">Expiry</span>
-                <span>{selectedItem.item.expiry}</span>
+                <span>{selectedItem.item.expiry ?? '--'}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="muted">Quantity</span>
-                <span>{selectedItem.item.qty}</span>
+                <span>{selectedItem.item.qty ?? '--'}</span>
               </div>
               {selectedItem.type !== 'closed' && (
                 <div className="flex items-center justify-between">
                   <span className="muted">Status</span>
-                  <span className="capitalize">{selectedItem.item.status}</span>
+                  <span className="capitalize">{selectedItem.item.status ?? '--'}</span>
                 </div>
               )}
               {selectedItem.type === 'closed' && (
@@ -321,8 +321,8 @@ export default function Orders() {
                 <>
                   <div className="flex items-center justify-between">
                     <span className="muted">Decision</span>
-                    <span className="capitalize">
-                      {selectedItem.item.decision.engine} · {selectedItem.item.decision.source.replace('_', ' ')}
+                      <span className="capitalize">
+                      {selectedItem.item.decision.engine ?? '--'} · {(selectedItem.item.decision.source ?? 'unknown').replace('_', ' ')}
                     </span>
                   </div>
                   {selectedItem.item.decision.bias && (

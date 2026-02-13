@@ -1396,7 +1396,7 @@ export default function Monitoring({ initialView = 'overview' }) {
                         </div>
                         <div className="flex items-center justify-between">
                           <span>Type</span>
-                          <span className="font-semibold text-slate-700 dark:text-slate-200">{detailOrder.order_type}</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">{detailOrder.order_type || '--'}</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span>Status</span>

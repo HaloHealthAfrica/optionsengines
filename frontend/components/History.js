@@ -128,25 +128,25 @@ export default function History() {
             </button>
           </div>
           <div className="mt-4 flex flex-col gap-3">
-            {(data?.timeline || []).map((trade) => (
+            {(data?.timeline || []).map((trade, idx) => (
               <div
-                key={`${trade.symbol}-${trade.date}`}
+                key={`${trade.symbol ?? 'n'}-${trade.date ?? ''}-${idx}`}
                 className="flex items-center justify-between rounded-2xl border border-slate-100 px-4 py-3 text-sm dark:border-slate-800"
               >
                 <div className="flex items-center gap-3">
                   <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-500/10 text-sm font-semibold text-brand-600">
-                    {trade.symbol.slice(0, 1)}
+                    {trade.symbol ? String(trade.symbol).slice(0, 1) : '--'}
                   </span>
                   <div>
-                  <p className="font-medium">{trade.symbol} · {trade.type}</p>
+                  <p className="font-medium">{trade.symbol ?? '--'} · {trade.type ?? '--'}</p>
                   <p className="muted text-xs">
                     {trade.date ? new Date(trade.date).toLocaleDateString() : '--'}
                   </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className={trade.pnl.startsWith('-') ? 'text-rose-500' : 'text-emerald-500'}>{trade.pnl}</p>
-                  <p className="muted text-xs">{trade.value}</p>
+                  <p className={trade.pnl != null && String(trade.pnl).startsWith('-') ? 'text-rose-500' : 'text-emerald-500'}>{trade.pnl ?? '--'}</p>
+                  <p className="muted text-xs">{trade.value ?? '--'}</p>
                 </div>
               </div>
             ))}

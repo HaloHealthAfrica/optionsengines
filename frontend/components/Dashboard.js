@@ -126,17 +126,17 @@ export default function Dashboard() {
             {(data?.recentActivity || Array.from({ length: 4 })).map((item, idx) =>
               item ? (
                 <div
-                  key={`${item.symbol}-${idx}`}
+                  key={`${item.symbol ?? 'n'}-${idx}`}
                   className="flex items-center justify-between rounded-2xl border border-slate-100 px-4 py-3 text-sm dark:border-slate-800"
                 >
                   <div>
-                    <p className="font-medium">{item.symbol}</p>
+                    <p className="font-medium">{item.symbol ?? '--'}</p>
                     <p className="muted text-xs">
-                      {item.action} · {item.time}
+                      {item.action ?? '--'} · {item.time ?? '--'}
                     </p>
                   </div>
-                  <span className={item.pnl.startsWith('-') ? 'text-rose-500' : 'text-emerald-500'}>
-                    {item.pnl}
+                  <span className={item.pnl != null && String(item.pnl).startsWith('-') ? 'text-rose-500' : 'text-emerald-500'}>
+                    {item.pnl ?? '--'}
                   </span>
                 </div>
               ) : (
