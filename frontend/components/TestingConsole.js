@@ -231,7 +231,7 @@ export default function TestingConsole() {
 
       <div className="grid gap-6 lg:grid-cols-[1.2fr,1fr]">
         <div className="card p-6">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {['single', 'batch', 'custom', 'audit'].map((item) => (
               <button
                 key={item}
