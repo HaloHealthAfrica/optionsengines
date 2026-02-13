@@ -124,7 +124,7 @@ export default function Settings() {
               </div>
               <input
                 type="number"
-                min={50}
+                min={30}
                 max={95}
                 value={flowEdits.confluenceMinThreshold ?? flowConfig?.confluenceMinThreshold ?? 75}
                 onChange={(e) => setFlowEdits((prev) => ({ ...prev, confluenceMinThreshold: Number(e.target.value) }))}

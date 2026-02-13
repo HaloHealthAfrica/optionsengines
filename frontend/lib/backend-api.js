@@ -239,6 +239,22 @@ export async function backendGetFlowConfig(token) {
   return response.json();
 }
 
+export async function backendPatchFlowConfig(token, updates) {
+  const response = await backendFetch('/flow/config', {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(updates),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to update flow config');
+  }
+
+  return response.json();
+}
+
 export async function backendGetFlow(token, symbol = 'SPY') {
   const response = await backendFetch(`/flow/${encodeURIComponent(symbol)}`, {
     headers: {
