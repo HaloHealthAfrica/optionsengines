@@ -17,8 +17,3 @@ Sentry.init({
   release: process.env.APP_VERSION,
   attachStacktrace: true,
 });
-
-Sentry.captureMessage('BOOT_START', {
-  level: 'info',
-  tags: { stage: 'bootstrap' },
-});

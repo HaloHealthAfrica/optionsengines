@@ -65,10 +65,6 @@ export class RedisCacheService {
       this.client.on('connect', () => {
         this.isConnected = true;
         logger.info('Redis cache connected');
-        Sentry.captureMessage('REDIS_CONNECTED', {
-          level: 'info',
-          tags: { stage: 'redis' },
-        });
       });
 
       this.client.on('error', (error: Error) => {
@@ -80,10 +76,6 @@ export class RedisCacheService {
       this.client.on('close', () => {
         this.isConnected = false;
         logger.warn('Redis connection closed');
-        Sentry.captureMessage('REDIS_DISCONNECTED', {
-          level: 'warning',
-          tags: { stage: 'redis' },
-        });
       });
 
       // Test connection with a timeout to avoid hanging
@@ -117,10 +109,6 @@ export class RedisCacheService {
       this.client = null;
       this.isConnected = false;
       logger.info('Redis cache disconnected');
-      Sentry.captureMessage('REDIS_DISCONNECTED', {
-        level: 'info',
-        tags: { stage: 'redis' },
-      });
     }
   }
 

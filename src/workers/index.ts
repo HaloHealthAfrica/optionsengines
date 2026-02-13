@@ -10,7 +10,6 @@ import { OrchestratorWorker } from './orchestrator-worker.js';
 import { createOrchestratorService } from '../orchestrator/container.js';
 import { createEngineAInvoker, createEngineBInvoker } from '../orchestrator/engine-invokers.js';
 import { MarketWebhookPipelineWorker } from './market-webhook-pipeline.js';
-import * as Sentry from '@sentry/node';
 import { startTradeEngineHeartbeat, stopTradeEngineHeartbeat } from '../services/trade-engine-health.service.js';
 
 const signalProcessor = new SignalProcessorWorker();
@@ -54,10 +53,6 @@ export function startWorkers(): void {
 
   workersStarted = true;
   logger.info('All workers started');
-  Sentry.captureMessage('TRADE_ENGINE_STARTED', {
-    level: 'info',
-    tags: { stage: 'workers' },
-  });
   startTradeEngineHeartbeat();
 }
 
@@ -84,8 +79,4 @@ export async function stopWorkers(timeoutMs: number = 30000): Promise<void> {
   workersStarted = false;
   logger.info('All workers stopped');
   stopTradeEngineHeartbeat();
-  Sentry.captureMessage('TRADE_ENGINE_STOPPED', {
-    level: 'info',
-    tags: { stage: 'workers' },
-  });
 }

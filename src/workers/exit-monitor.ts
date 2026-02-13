@@ -53,10 +53,6 @@ export class ExitMonitorWorker {
 
     logger.info('Exit monitor worker started', { intervalMs });
     updateWorkerStatus('ExitMonitorWorker', { running: true });
-    Sentry.captureMessage('WORKER_START', {
-      level: 'info',
-      tags: { worker: 'ExitMonitorWorker' },
-    });
   }
 
   stop(): void {
@@ -65,10 +61,6 @@ export class ExitMonitorWorker {
       this.timer = null;
       logger.info('Exit monitor worker stopped');
       updateWorkerStatus('ExitMonitorWorker', { running: false });
-      Sentry.captureMessage('WORKER_STOP', {
-        level: 'info',
-        tags: { worker: 'ExitMonitorWorker' },
-      });
     }
   }
 
@@ -122,6 +114,15 @@ export class ExitMonitorWorker {
             new Date(position.expiration),
             position.type
           );
+
+          if (currentPrice == null || !Number.isFinite(currentPrice)) {
+            logger.debug('Exit monitor skipped - no option price available', {
+              positionId: position.position_id,
+              symbol: position.symbol,
+              optionSymbol: position.option_symbol,
+            });
+            continue;
+          }
 
           const unrealizedPnl =
             (currentPrice - position.entry_price) * position.quantity * 100;

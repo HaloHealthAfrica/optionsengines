@@ -90,10 +90,11 @@ export class DatabaseService {
           duration,
           query: text.substring(0, 100),
         });
-        Sentry.captureMessage('DB_SLOW_QUERY', {
+        Sentry.addBreadcrumb({
+          category: 'db',
+          message: 'Slow query',
           level: 'warning',
-          tags: { stage: 'db' },
-          extra: { durationMs: duration, query: text.substring(0, 200) },
+          data: { durationMs: duration, query: text.substring(0, 200) },
         });
       }
 

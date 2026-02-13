@@ -257,6 +257,10 @@ export function validateConfig(): void {
     errors.push('JWT_SECRET must be at least 32 characters');
   }
 
+  if (config.nodeEnv === 'production' && !config.redisUrl) {
+    errors.push('REDIS_URL is required in production');
+  }
+
   if (config.appMode !== 'PAPER' && config.appMode !== 'LIVE') {
     errors.push('APP_MODE must be either PAPER or LIVE');
   }

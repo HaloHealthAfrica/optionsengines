@@ -43,10 +43,6 @@ export class PositionRefresherWorker {
 
     logger.info('Position refresher worker started', { intervalMs });
     updateWorkerStatus('PositionRefresherWorker', { running: true });
-    Sentry.captureMessage('WORKER_START', {
-      level: 'info',
-      tags: { worker: 'PositionRefresherWorker' },
-    });
   }
 
   stop(): void {
@@ -55,10 +51,6 @@ export class PositionRefresherWorker {
       this.timer = null;
       logger.info('Position refresher worker stopped');
       updateWorkerStatus('PositionRefresherWorker', { running: false });
-      Sentry.captureMessage('WORKER_STOP', {
-        level: 'info',
-        tags: { worker: 'PositionRefresherWorker' },
-      });
     }
   }
 
@@ -102,13 +94,9 @@ export class PositionRefresherWorker {
             position.strike,
             new Date(position.expiration),
             position.type
-          ).catch(() => {
-            // Silently skip if all providers fail (missing API keys)
-            logger.debug('Skipping position price update due to API unavailability', { positionId: position.position_id });
-            return null;
-          });
+          );
 
-          if (currentPrice === null) {
+          if (currentPrice == null || !Number.isFinite(currentPrice)) {
             continue;
           }
 

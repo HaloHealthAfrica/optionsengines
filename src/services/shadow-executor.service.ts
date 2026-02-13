@@ -43,11 +43,6 @@ export class ShadowExecutor {
         experimentId,
         signalId: signal.signalId,
       });
-      Sentry.captureMessage('SHADOW_EXECUTION_SKIPPED', {
-        level: 'info',
-        tags: { stage: 'shadow', experimentId },
-        extra: { signalId: signal.signalId },
-      });
       return;
     }
 
@@ -70,6 +65,15 @@ export class ShadowExecutor {
       expiration,
       optionType
     );
+
+    if (optionPrice == null || !Number.isFinite(optionPrice)) {
+      logger.warn('Shadow trade skipped - option price unavailable', {
+        experimentId,
+        signalId: signal.signalId,
+        symbol: signal.symbol,
+      });
+      return;
+    }
 
     const entryTimestamp = new Date();
 
@@ -140,11 +144,6 @@ export class ShadowExecutor {
       signalId: signal.signalId,
       shadowTradeId,
     });
-    Sentry.captureMessage('SHADOW_TRADE_SIMULATED', {
-      level: 'info',
-      tags: { stage: 'shadow', experimentId },
-      extra: { signalId: signal.signalId, shadowTradeId },
-    });
   }
 
   async refreshShadowPositions(): Promise<void> {
@@ -160,6 +159,9 @@ export class ShadowExecutor {
         new Date(position.expiration),
         position.type
       );
+      if (currentPrice == null || !Number.isFinite(currentPrice)) {
+        continue;
+      }
       const unrealizedPnl =
         (currentPrice - position.entry_price) * position.quantity * 100;
       await db.query(
@@ -192,6 +194,9 @@ export class ShadowExecutor {
         new Date(position.expiration),
         position.type
       );
+      if (currentPrice == null || !Number.isFinite(currentPrice)) {
+        continue;
+      }
       const unrealizedPnl =
         (currentPrice - position.entry_price) * position.quantity * 100;
       const costBasis = position.entry_price * position.quantity * 100;

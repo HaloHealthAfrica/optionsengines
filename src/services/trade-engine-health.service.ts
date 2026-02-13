@@ -59,52 +59,36 @@ export function startTradeEngineHeartbeat(): void {
     const queueDepth = await getQueueDepth();
     const dbStatus = db.getConnectionStatus();
     const redisAvailable = redisCache.isAvailable();
-    const workers = Array.from(workerStatus.entries()).reduce<Record<string, WorkerStatus>>(
-      (acc, [name, status]) => {
-        acc[name] = status;
-        return acc;
-      },
-      {}
-    );
 
     const lastProcessedAgeMin = lastSignalProcessedAt
       ? (now.getTime() - lastSignalProcessedAt.getTime()) / 60000
       : null;
 
-    Sentry.captureMessage('TRADE_ENGINE_HEARTBEAT', {
-      level: 'info',
-      tags: {
-        stage: 'health',
-        status: 'running',
-      },
-      extra: {
-        queueDepth,
-        dbConnected: dbStatus.connected,
-        dbReconnectAttempts: dbStatus.reconnectAttempts,
-        redisAvailable,
-        workers,
-        lastSignalProcessedAt: lastSignalProcessedAt?.toISOString() ?? null,
-        lastSignalId,
-        lastProcessedAgeMin,
-      },
+    logger.debug('Trade engine heartbeat', {
+      queueDepth,
+      dbConnected: dbStatus.connected,
+      redisAvailable,
+      lastProcessedAgeMin,
+      lastSignalId,
     });
 
-    if (lastProcessedAgeMin !== null && lastProcessedAgeMin >= stallMinutes) {
-      Sentry.captureMessage('TRADE_ENGINE_STALLED', {
-        level: 'warning',
-        tags: { stage: 'health', status: 'stalled' },
-        extra: {
-          lastProcessedAgeMin,
-          queueDepth,
-          lastSignalProcessedAt: lastSignalProcessedAt?.toISOString() ?? null,
-        },
+    const isStalled =
+      lastProcessedAgeMin !== null &&
+      lastProcessedAgeMin >= stallMinutes &&
+      (queueDepth ?? 0) > 0;
+
+    if (isStalled) {
+      logger.warn('Trade engine stalled - queue has pending signals but no processing', {
+        lastProcessedAgeMin,
+        queueDepth,
+        lastSignalProcessedAt: lastSignalProcessedAt?.toISOString() ?? null,
       });
-    } else if (lastProcessedAgeMin !== null && lastProcessedAgeMin >= idleMinutes) {
-      Sentry.captureMessage('TRADE_ENGINE_IDLE', {
-        level: 'info',
-        tags: { stage: 'health', status: 'idle' },
-        extra: { lastProcessedAgeMin, queueDepth },
-      });
+    } else if (
+      lastProcessedAgeMin !== null &&
+      lastProcessedAgeMin >= idleMinutes &&
+      (queueDepth ?? 0) === 0
+    ) {
+      logger.debug('Trade engine idle', { lastProcessedAgeMin, queueDepth });
     }
   }, Number.isFinite(heartbeatIntervalMs) ? heartbeatIntervalMs : 60000);
 

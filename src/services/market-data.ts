@@ -74,10 +74,7 @@ export class MarketDataService {
     const canRequest = breaker.canRequest();
     if (!canRequest) {
       logger.debug(`Skipping ${provider} (circuit breaker open)`);
-      Sentry.captureMessage('MARKET_DATA_CIRCUIT_OPEN', {
-        level: 'warning',
-        tags: { provider },
-      });
+      logger.warn('Market data circuit breaker open', { provider });
     }
     return canRequest;
   }
@@ -101,10 +98,11 @@ export class MarketDataService {
     const status = breaker.getStatus();
     if (status.state === 'open') {
       logger.error(`Circuit breaker opened for ${provider} after ${status.failures} failures`);
-      Sentry.captureMessage('MARKET_DATA_CIRCUIT_OPENED', {
-        level: 'error',
-        tags: { provider },
-        extra: { failures: status.failures },
+      Sentry.addBreadcrumb({
+        category: 'market-data',
+        message: 'Circuit breaker opened',
+        level: 'warning',
+        data: { provider, failures: status.failures },
       });
     }
   }
@@ -154,6 +152,7 @@ export class MarketDataService {
           },
           {
             retries: this.maxRetries,
+            providerAware: true,
             onRetry: (error, attempt, delayMs) => {
               logger.warn(`Retry ${attempt} for ${providerName} candles`, { error, delayMs });
             },
@@ -238,6 +237,7 @@ export class MarketDataService {
           },
           {
             retries: this.maxRetries,
+            providerAware: true,
             onRetry: (error, attempt, delayMs) => {
               logger.warn(`Retry ${attempt} for ${providerName} price`, { error, delayMs });
             },
@@ -312,24 +312,23 @@ export class MarketDataService {
   }
 
   /**
-   * Get option price with caching (Alpaca and Polygon support options)
+   * Get option price with caching (Alpaca and Polygon support options).
+   * Returns null when all providers fail or return partial/empty data. Does not throw.
    */
   async getOptionPrice(
     symbol: string,
     strike: number,
     expiration: Date,
     optionType: 'call' | 'put'
-  ): Promise<number> {
+  ): Promise<number | null> {
     const cacheKey = `option:${symbol}:${strike}:${expiration.toISOString()}:${optionType}`;
 
-    // Check cache first
     const cached = cache.get<number>(cacheKey);
-    if (cached) {
+    if (cached != null) {
       logger.debug('Option price retrieved from cache', { symbol, strike, optionType });
       return cached;
     }
 
-    // Try providers that support options (Alpaca and Polygon)
     const optionProviders: Provider[] = ['alpaca', 'polygon'];
 
     for (const providerName of optionProviders) {
@@ -353,22 +352,26 @@ export class MarketDataService {
           },
           {
             retries: this.maxRetries,
+            providerAware: true,
             onRetry: (error, attempt, delayMs) => {
               logger.warn(`Retry ${attempt} for ${providerName} option price`, { error, delayMs });
             },
           }
         );
 
-        this.recordSuccess(providerName);
-        cache.set(cacheKey, price, 30);
-        logger.info(`Option price fetched from ${providerName}`, { symbol, strike, optionType, price });
-        Sentry.addBreadcrumb({
-          category: 'market-data',
-          message: 'Option price fetched',
-          level: 'info',
-          data: { provider: providerName, symbol, strike, optionType },
-        });
-        return price;
+        if (price != null && Number.isFinite(price)) {
+          this.recordSuccess(providerName);
+          cache.set(cacheKey, price, 30);
+          logger.info(`Option price fetched from ${providerName}`, { symbol, strike, optionType, price });
+          Sentry.addBreadcrumb({
+            category: 'market-data',
+            message: 'Option price fetched',
+            level: 'info',
+            data: { provider: providerName, symbol, strike, optionType },
+          });
+          return price;
+        }
+        logger.debug(`${providerName} returned null/partial option price`, { symbol, strike, optionType });
       } catch (error) {
         logger.warn(`${providerName} option price fetch failed`, { error });
         Sentry.captureException(error, {
@@ -378,7 +381,8 @@ export class MarketDataService {
       }
     }
 
-    throw new Error('All option data providers failed');
+    logger.warn('All option data providers failed or returned no price', { symbol, strike, optionType });
+    return null;
   }
 
   /**
@@ -655,7 +659,7 @@ export class MarketDataService {
       };
 
       this.recordSuccess('marketdata');
-      cache.set(cacheKey, gexData, 60);
+      cache.set(cacheKey, gexData, 300); // GEX TTL 300s minimum
       return gexData;
     } catch (error) {
       this.recordFailure('marketdata');

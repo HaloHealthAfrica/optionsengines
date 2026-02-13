@@ -246,11 +246,6 @@ async function buildEngineBRecommendation(
         signal_id: signal.signal_id,
         reasons: metaDecision.reasons,
       });
-      Sentry.captureMessage('ENGINE_B_REJECTED', {
-        level: 'info',
-        tags: { stage: 'engine', engine: 'B', signalId: signal.signal_id },
-        extra: { reasons: metaDecision.reasons },
-      });
       return null;
     }
 

@@ -170,19 +170,18 @@ export class AlpacaClient {
   }
 
   /**
-   * Get option price (contract quote)
+   * Get option price (contract quote).
+   * Returns null when bid/ask both missing (partial data) instead of throwing.
+   * Uses bid or ask when only one exists.
    */
   async getOptionPrice(
     symbol: string,
     strike: number,
     expiration: Date,
     optionType: 'call' | 'put'
-  ): Promise<number> {
+  ): Promise<number | null> {
     try {
-      // Format option symbol: SPY240119C00450000
       const optionSymbol = this.formatOptionSymbol(symbol, strike, expiration, optionType);
-
-      // Use options quotes endpoint (latest)
       const endpoint = `/v1beta1/options/quotes/latest?symbols=${optionSymbol}`;
 
       type AlpacaOptionQuoteResponse =
@@ -198,23 +197,30 @@ export class AlpacaClient {
             ? response.quotes?.[optionSymbol]
             : response;
 
-      if (!quote || typeof quote.bp !== 'number' || typeof quote.ap !== 'number') {
-        throw new Error(`No option quote returned for ${optionSymbol}`);
+      if (!quote) {
+        logger.debug('Alpaca option quote empty', { optionSymbol });
+        return null;
       }
 
-      // Use mid price (average of bid and ask)
-      const bid = quote.bp;
-      const ask = quote.ap;
-      const mid = (bid + ask) / 2;
+      const bid = typeof quote.bp === 'number' ? quote.bp : null;
+      const ask = typeof quote.ap === 'number' ? quote.ap : null;
 
-      logger.debug('Alpaca option price fetched', {
-        optionSymbol,
-        bid,
-        ask,
-        mid,
-      });
+      if (bid != null && ask != null) {
+        const mid = (bid + ask) / 2;
+        logger.debug('Alpaca option price fetched', { optionSymbol, bid, ask, mid });
+        return mid;
+      }
+      if (bid != null) {
+        logger.debug('Alpaca option partial (bid only)', { optionSymbol, bid });
+        return bid;
+      }
+      if (ask != null) {
+        logger.debug('Alpaca option partial (ask only)', { optionSymbol, ask });
+        return ask;
+      }
 
-      return mid;
+      logger.debug('Alpaca option quote missing bid/ask', { optionSymbol });
+      return null;
     } catch (error) {
       logger.error('Failed to fetch Alpaca option price', error, {
         symbol,

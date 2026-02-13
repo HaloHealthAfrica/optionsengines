@@ -4,6 +4,9 @@ import { logger } from '../utils/logger.js';
 import { GexData, OptionsFlowSummary } from '../types/index.js';
 import { redisCache } from './redis-cache.service.js';
 
+/** In-flight GEX fetches by symbol for promise coalescing */
+const gexInFlight = new Map<string, Promise<GexData>>();
+
 type MaxPainResult = {
   symbol: string;
   maxPainStrike: number | null;
@@ -36,11 +39,19 @@ export class PositioningService {
       };
     }
 
-    // Cache miss - fetch from external API with fallback
+    // Cache miss - fetch from external API with fallback (coalesce concurrent requests)
     logger.debug('GEX cache miss', { symbol, cacheKey });
     
+    let promise = gexInFlight.get(symbol);
+    if (!promise) {
+      promise = this.fetchGexFromExternalAPI(symbol).finally(() => {
+        gexInFlight.delete(symbol);
+      });
+      gexInFlight.set(symbol, promise);
+    }
+    
     try {
-      const gex = await this.fetchGexFromExternalAPI(symbol);
+      const gex = await promise;
 
       // Store in cache with 5-minute TTL
       const ttl = redisCache.getTTLForType('gex');

@@ -47,7 +47,8 @@ export class MarketDataClient {
   }
 
   /**
-   * Make request to MarketData.app API
+   * Make request to MarketData.app API.
+   * 404 with {s:no_data} is a valid empty state - returns null to signal caller to use [].
    */
   private async request<T>(endpoint: string): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
@@ -59,16 +60,27 @@ export class MarketDataClient {
         },
       });
 
+      const responseText = await response.text();
+
+      if (response.status === 404) {
+        try {
+          const body = JSON.parse(responseText);
+          if (body?.s === 'no_data') {
+            return { s: 'no_data', data: [], options: [] } as unknown as T;
+          }
+        } catch {
+          // not JSON
+        }
+      }
+
       if (!response.ok) {
-        const errorText = await response.text();
         throw new Error(
-          `MarketData.app API error: ${response.status} ${response.statusText} - ${errorText}`
+          `MarketData.app API error: ${response.status} ${response.statusText} - ${responseText}`
         );
       }
 
-      const data: any = await response.json();
+      const data: any = responseText ? JSON.parse(responseText) : {};
 
-      // Check for API error in response
       if (data.s === 'error') {
         throw new Error(`MarketData.app API error: ${data.errmsg || 'Unknown error'}`);
       }
@@ -186,13 +198,17 @@ export class MarketDataClient {
   }
 
   /**
-   * Get options chain data for GEX calculations
+   * Get options chain data for GEX calculations.
+   * 404 no_data returns [] (valid empty state).
    */
   async getOptionsChain(symbol: string): Promise<MarketDataOptionRow[]> {
     try {
       const endpoint = `/v1/options/chain/${symbol}/`;
       const response = await this.request<any>(endpoint);
 
+      if (response?.s === 'no_data') {
+        return [];
+      }
       const rows: any[] = response?.options ?? response?.data ?? response?.rows ?? [];
       const normalized = rows
         .map((row) => {
@@ -225,13 +241,17 @@ export class MarketDataClient {
   }
 
   /**
-   * Get options flow data
+   * Get options flow data.
+   * 404 no_data returns [] (valid empty state).
    */
   async getOptionsFlow(symbol: string, limit: number = 50): Promise<MarketDataOptionRow[]> {
     try {
       const endpoint = `/v1/options/flow/${symbol}/?limit=${limit}`;
       const response = await this.request<any>(endpoint);
 
+      if (response?.s === 'no_data') {
+        return [];
+      }
       const rows: any[] = response?.data ?? response?.flow ?? response?.rows ?? [];
       const normalized = rows
         .map((row) => {

@@ -23,25 +23,13 @@ interface PendingOrder {
   experiment_id?: string | null;
 }
 
-async function fetchOptionPriceWithRetry(
+async function fetchOptionPrice(
   symbol: string,
   strike: number,
   expiration: Date,
-  optionType: 'call' | 'put',
-  maxRetries: number = 3
+  optionType: 'call' | 'put'
 ): Promise<number | null> {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      return await marketData.getOptionPrice(symbol, strike, expiration, optionType);
-    } catch (error) {
-      if (attempt === maxRetries) {
-        return null;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
-    }
-  }
-
-  return null;
+  return marketData.getOptionPrice(symbol, strike, expiration, optionType);
 }
 
 export class PaperExecutorWorker {
@@ -67,10 +55,6 @@ export class PaperExecutorWorker {
 
     logger.info('Paper executor worker started', { intervalMs });
     updateWorkerStatus('PaperExecutorWorker', { running: true });
-    Sentry.captureMessage('WORKER_START', {
-      level: 'info',
-      tags: { worker: 'PaperExecutorWorker' },
-    });
   }
 
   stop(): void {
@@ -79,10 +63,6 @@ export class PaperExecutorWorker {
       this.timer = null;
       logger.info('Paper executor worker stopped');
       updateWorkerStatus('PaperExecutorWorker', { running: false });
-      Sentry.captureMessage('WORKER_STOP', {
-        level: 'info',
-        tags: { worker: 'PaperExecutorWorker' },
-      });
     }
   }
 
@@ -151,7 +131,7 @@ export class PaperExecutorWorker {
 
       const processOrder = async (order: PendingOrder): Promise<'filled' | 'failed'> => {
         try {
-          const price = await fetchOptionPriceWithRetry(
+          const price = await fetchOptionPrice(
             order.symbol,
             order.strike,
             new Date(order.expiration),

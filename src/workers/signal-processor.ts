@@ -33,10 +33,6 @@ export class SignalProcessorWorker {
 
     logger.info('Signal processor worker started', { intervalMs });
     updateWorkerStatus('SignalProcessorWorker', { running: true });
-    Sentry.captureMessage('WORKER_START', {
-      level: 'info',
-      tags: { worker: 'SignalProcessorWorker' },
-    });
   }
 
   stop(): void {
@@ -45,10 +41,6 @@ export class SignalProcessorWorker {
       this.timer = null;
       logger.info('Signal processor worker stopped');
       updateWorkerStatus('SignalProcessorWorker', { running: false });
-      Sentry.captureMessage('WORKER_STOP', {
-        level: 'info',
-        tags: { worker: 'SignalProcessorWorker' },
-      });
     }
   }
 

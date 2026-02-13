@@ -15,6 +15,8 @@ interface ApprovedSignal {
   direction: 'long' | 'short';
   timeframe: string;
   timestamp: Date;
+  experiment_id?: string | null;
+  engine?: 'A' | 'B' | null;
 }
 
 function calculateExpiration(dteDays: number): Date {
@@ -71,10 +73,6 @@ export class OrderCreatorWorker {
 
     logger.info('Order creator worker started', { intervalMs });
     updateWorkerStatus('OrderCreatorWorker', { running: true });
-    Sentry.captureMessage('WORKER_START', {
-      level: 'info',
-      tags: { worker: 'OrderCreatorWorker' },
-    });
   }
 
   stop(): void {
@@ -83,10 +81,6 @@ export class OrderCreatorWorker {
       this.timer = null;
       logger.info('Order creator worker stopped');
       updateWorkerStatus('OrderCreatorWorker', { running: false });
-      Sentry.captureMessage('WORKER_STOP', {
-        level: 'info',
-        tags: { worker: 'OrderCreatorWorker' },
-      });
     }
   }
 
@@ -113,8 +107,10 @@ export class OrderCreatorWorker {
 
     try {
       const signals = await db.query<ApprovedSignal>(
-        `SELECT s.*
+        `SELECT s.signal_id, s.symbol, s.direction, s.timeframe, s.timestamp,
+                s.experiment_id, e.variant AS engine
          FROM signals s
+         LEFT JOIN experiments e ON e.signal_id = s.signal_id
          LEFT JOIN orders o ON o.signal_id = s.signal_id
          WHERE s.status = $1 AND o.order_id IS NULL
          ORDER BY s.created_at ASC
@@ -152,6 +148,9 @@ export class OrderCreatorWorker {
 
           const quantity = Math.max(1, Math.floor(maxPositionSize * capacityRatio));
 
+          const engine = signal.engine ?? 'A';
+          const experimentId = signal.experiment_id ?? null;
+
           await db.query(
             `INSERT INTO orders (
               signal_id,
@@ -174,8 +173,8 @@ export class OrderCreatorWorker {
               expiration,
               optionType,
               quantity,
-              'A',
-              null,
+              engine,
+              experimentId,
               'paper',
               'pending_execution',
             ]

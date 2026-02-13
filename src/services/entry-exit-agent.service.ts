@@ -11,5 +11,8 @@ export async function buildEntryExitPlan(
   optionType: 'call' | 'put'
 ): Promise<EntryExitPlan> {
   const entryPrice = await marketData.getOptionPrice(symbol, strike, expiration, optionType);
+  if (entryPrice == null || !Number.isFinite(entryPrice)) {
+    throw new Error('Option price unavailable');
+  }
   return { entryPrice };
 }

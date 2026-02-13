@@ -9,6 +9,19 @@ import { logger } from '../utils/logger.js';
 
 const router = Router();
 
+const MAX_PAYLOAD_BYTES = 128 * 1024; // 128KB
+const MAX_RAW_PAYLOAD_BYTES = 32 * 1024; // 32KB for DB storage
+
+function safeStringifyForPayload(obj: unknown, maxBytes: number): string {
+  try {
+    const str = JSON.stringify(obj ?? null);
+    if (Buffer.byteLength(str, 'utf8') <= maxBytes) return str;
+    return JSON.stringify({ _truncated: true, _preview: str.slice(0, 500) + '...' });
+  } catch {
+    return 'null';
+  }
+}
+
 // Webhook payload schema
 export const webhookSchema = z
   .object({
@@ -312,7 +325,7 @@ export async function processWebhookPayload(input: {
           testMetaForLog?.isTest || false,
           testMetaForLog?.testSessionId || null,
           testMetaForLog?.testScenario || null,
-          JSON.stringify(logBody ?? null),
+          safeStringifyForPayload(logBody, MAX_RAW_PAYLOAD_BYTES),
         ]
       );
       webhookEventId = result.rows[0]?.event_id || webhookEventId;
@@ -322,16 +335,37 @@ export async function processWebhookPayload(input: {
   };
 
   try {
-    // Log incoming request
+    // Reject oversized payloads early
+    if (input.rawBody && input.rawBody.length > MAX_PAYLOAD_BYTES) {
+      logger.warn('Webhook payload too large', { requestId, bytes: input.rawBody.length, maxBytes: MAX_PAYLOAD_BYTES });
+      await logWebhookEvent({ status: 'invalid_payload', errorMessage: 'Payload too large' });
+      return {
+        httpStatus: 413,
+        status: 'REJECTED',
+        requestId,
+        response: {
+          status: 'REJECTED',
+          error: 'Payload too large',
+          request_id: requestId,
+          webhook_event_id: webhookEventId,
+        },
+      };
+    }
+
+    // Log incoming request (wrap in try/catch to avoid logging failures from crashing)
     logBody =
       input.payload && typeof input.payload === 'object' && 'secret' in (input.payload as Record<string, any>)
         ? { ...(input.payload as Record<string, any>), secret: '[REDACTED]' }
         : input.payload;
-    logger.info('Webhook received', {
-      requestId,
-      ip: input.ip,
-      body: logBody,
-    });
+    try {
+      logger.info('Webhook received', {
+        requestId,
+        ip: input.ip,
+        body: logBody,
+      });
+    } catch (logErr) {
+      logger.warn('Failed to log webhook body', { requestId, error: logErr });
+    }
 
     // Validate HMAC signature if provided
     const signature = input.signature;

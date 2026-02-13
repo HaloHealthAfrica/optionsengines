@@ -39,10 +39,6 @@ export class OrchestratorWorker {
 
     logger.info('Orchestrator worker started', { intervalMs: this.intervalMs });
     updateWorkerStatus('OrchestratorWorker', { running: true });
-    Sentry.captureMessage('WORKER_START', {
-      level: 'info',
-      tags: { worker: 'OrchestratorWorker' },
-    });
   }
 
   stop(): void {
@@ -52,10 +48,6 @@ export class OrchestratorWorker {
       this.timer = null;
       logger.info('Orchestrator worker stopped');
       updateWorkerStatus('OrchestratorWorker', { running: false });
-      Sentry.captureMessage('WORKER_STOP', {
-        level: 'info',
-        tags: { worker: 'OrchestratorWorker' },
-      });
     }
   }
 
@@ -93,11 +85,7 @@ export class OrchestratorWorker {
       );
       if (results.length > 0) {
         setLastSignalProcessed(null, new Date());
-        Sentry.captureMessage('TRADE_ENGINE_PROCESSING', {
-          level: 'info',
-          tags: { worker: 'OrchestratorWorker' },
-          extra: { signals: results.length },
-        });
+        logger.debug('Orchestrator batch processed signals', { signals: results.length });
       }
       const durations = results
         .map((result) => result.duration_ms)
@@ -158,15 +146,6 @@ export class OrchestratorWorker {
             depth,
             durationSec: Math.round(elapsedSec),
             threshold: config.processingQueueDepthAlert,
-          });
-          Sentry.captureMessage('PROCESSING_QUEUE_DEPTH_HIGH', {
-            level: 'warning',
-            tags: { worker: 'OrchestratorWorker' },
-            extra: {
-              depth,
-              durationSec: Math.round(elapsedSec),
-              threshold: config.processingQueueDepthAlert,
-            },
           });
         }
       } else {
