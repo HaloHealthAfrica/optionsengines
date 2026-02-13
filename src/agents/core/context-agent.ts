@@ -1,4 +1,4 @@
-// Context Agent - market regime and session context
+// Context Agent - market regime and session context (GAP-001: uses netGex, dealerPosition, zero gamma)
 import { BaseAgent } from '../base-agent.js';
 import { AgentOutput, EnrichedSignal, MarketData } from '../../types/index.js';
 
@@ -7,7 +7,7 @@ export class ContextAgent extends BaseAgent {
     super('context', 'core');
   }
 
-  async analyze(_signal: EnrichedSignal, marketData: MarketData): Promise<AgentOutput> {
+  async analyze(signal: EnrichedSignal, marketData: MarketData): Promise<AgentOutput> {
     const { sessionContext, indicators, currentPrice } = marketData;
     const atr = indicators.atr[indicators.atr.length - 1] ?? 0;
 
@@ -32,7 +32,8 @@ export class ContextAgent extends BaseAgent {
 
     const gex = marketData.gex;
     if (gex) {
-      const { zeroGammaLevel, volatilityExpectation } = gex;
+      const { zeroGammaLevel, volatilityExpectation, netGex, dealerPosition } = gex;
+
       if (volatilityExpectation === 'compressed') {
         reasons.push('gamma_compressed');
         confidence = Math.min(confidence, 55);
@@ -42,6 +43,29 @@ export class ContextAgent extends BaseAgent {
       if (zeroGammaLevel != null && currentPrice > 0) {
         const distPct = Math.abs(currentPrice - zeroGammaLevel) / currentPrice;
         if (distPct < 0.01) reasons.push('near_zero_gamma');
+      }
+
+      if (netGex != null && Number.isFinite(netGex)) {
+        reasons.push(`netGex_${netGex > 0 ? 'positive' : netGex < 0 ? 'negative' : 'neutral'}`);
+        if (dealerPosition === 'long_gamma') {
+          reasons.push('dealer_long_gamma');
+          if (signal.direction === 'long') {
+            bias = 'bullish';
+            confidence = Math.min(confidence + 5, 75);
+          } else if (signal.direction === 'short') {
+            bias = 'bearish';
+            confidence = Math.min(confidence + 5, 75);
+          }
+        } else if (dealerPosition === 'short_gamma') {
+          reasons.push('dealer_short_gamma');
+          if (signal.direction === 'long') {
+            bias = 'bullish';
+            confidence = Math.min(confidence + 5, 75);
+          } else if (signal.direction === 'short') {
+            bias = 'bearish';
+            confidence = Math.min(confidence + 5, 75);
+          }
+        }
       }
     }
 

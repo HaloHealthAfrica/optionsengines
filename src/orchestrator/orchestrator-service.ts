@@ -211,6 +211,15 @@ export class OrchestratorService {
           level: 'info',
         });
         const market_context = await this.createMarketContext(signal);
+        const contextWithEnrichment = {
+          ...market_context,
+          enrichment: {
+            enrichedData: enrichment.enrichedData ?? {},
+            riskResult: enrichment.riskResult ?? {},
+            rejectionReason: enrichment.rejectionReason,
+            decisionOnly: enrichment.decisionOnly,
+          },
+        };
         const experiment = await this.createExperiment(signal);
         signal.experiment_id = experiment.experiment_id;
         Sentry.setTag('engine', experiment.variant);
@@ -221,7 +230,7 @@ export class OrchestratorService {
           level: 'info',
           data: { execution_mode: policy.execution_mode, variant: experiment.variant },
         });
-        const { engineA, engineB } = await this.distributeSignal(signal, market_context, experiment);
+        const { engineA, engineB } = await this.distributeSignal(signal, contextWithEnrichment, experiment);
         Sentry.addBreadcrumb({
           category: 'engine',
           message: 'Engine invoked',

@@ -341,10 +341,11 @@ export class MarketDataService {
       return cached;
     }
 
-    const optionProviders: Provider[] = ['alpaca', 'polygon'];
+    const optionProviders: Provider[] = [];
     if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey) {
       optionProviders.push('unusualwhales');
     }
+    optionProviders.push('alpaca', 'polygon');
 
     for (const providerName of optionProviders) {
       if (!this.checkCircuitBreaker(providerName)) {

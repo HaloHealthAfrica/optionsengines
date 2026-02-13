@@ -28,6 +28,14 @@ export interface Signal {
 /**
  * MarketContext - Complete market state snapshot at signal time
  */
+/** Enrichment data passed to engines (not persisted) */
+export interface EngineEnrichment {
+  enrichedData: Record<string, unknown>;
+  riskResult: Record<string, unknown>;
+  rejectionReason: string | null;
+  decisionOnly?: boolean;
+}
+
 export interface MarketContext {
   context_id?: string; // UUID (optional, assigned on creation)
   signal_id: string; // Foreign key to signals
@@ -41,6 +49,8 @@ export interface MarketContext {
   marketIntel?: MarketIntelContext;
   context_hash: string; // SHA-256 of context for audit
   created_at?: Date;
+  /** Enrichment passed from orchestrator for Engine A entry decision (not persisted) */
+  enrichment?: EngineEnrichment;
 }
 
 /**

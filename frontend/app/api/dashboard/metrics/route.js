@@ -19,10 +19,10 @@ function transformBackendDashboard(backend) {
   };
 
   const metrics = [
-    { label: 'Total P&L', value: formatPnl(lastPnl), delta: `${pnlDelta >= 0 ? '+' : ''}${pnlDelta.toFixed(1)}%`, trend: pnlDelta >= 0 ? 'up' : 'down' },
-    { label: 'Win Rate', value: sourcePerf[0] ? `${sourcePerf[0].acceptance_rate ?? 0}%` : '--', delta: '--', trend: 'neutral' },
-    { label: 'Active Positions', value: String(positions.length), delta: '--', trend: 'neutral' },
-    { label: 'Profit Factor', value: '--', delta: '--', trend: 'neutral' },
+    { id: 'total-pnl', label: 'Total P&L', value: formatPnl(lastPnl), delta: `${pnlDelta >= 0 ? '+' : ''}${pnlDelta.toFixed(1)}%`, trend: pnlDelta >= 0 ? 'up' : 'down' },
+    { id: 'win-rate', label: 'Win Rate', value: sourcePerf[0] ? `${sourcePerf[0].acceptance_rate ?? 0}%` : '--', delta: '--', trend: 'neutral' },
+    { id: 'active-positions', label: 'Active Positions', value: String(positions.length), delta: '--', trend: 'neutral' },
+    { id: 'profit-factor', label: 'Profit Factor', value: '--', delta: '--', trend: 'neutral' },
   ];
 
   const performance = pnlCurve.map((p) => ({
@@ -34,10 +34,24 @@ function transformBackendDashboard(backend) {
     const pnl = p.position_pnl_percent ?? p.unrealized_pnl;
     const pnlStr = pnl != null ? (Number(pnl) >= 0 ? `+${Number(pnl).toFixed(1)}%` : `${Number(pnl).toFixed(1)}%`) : '--';
     const time = p.entry_timestamp ? timeAgo(p.entry_timestamp) : '--';
-    return { symbol: p.symbol ?? '--', action: 'Opened', time, pnl: pnlStr };
+    return {
+      symbol: p.symbol ?? '--',
+      action: 'Opened',
+      time,
+      pnl: pnlStr,
+      position_id: p.position_id,
+      position: p,
+    };
   });
 
-  return { metrics, performance, recentActivity };
+  return {
+    metrics,
+    performance,
+    recentActivity,
+    positions,
+    pnl_curve: pnlCurve,
+    source_performance: sourcePerf,
+  };
 }
 
 function formatChartDate(dateStr) {
@@ -74,9 +88,15 @@ export async function GET(request) {
     console.error('Backend dashboard fetch failed, using mock data:', error);
 
     const response = Response.json({
-      metrics: portfolioMetrics,
+      metrics: portfolioMetrics.map((m, i) => ({
+        ...m,
+        id: ['total-pnl', 'win-rate', 'active-positions', 'profit-factor'][i] ?? `metric-${i}`,
+      })),
       performance: performanceSeries,
-      recentActivity,
+      recentActivity: recentActivity.map((a) => ({ ...a, position_id: null, position: null })),
+      positions: [],
+      pnl_curve: [],
+      source_performance: [],
     });
     response.headers.set('Cache-Control', 'no-store');
     response.headers.set('x-data-source', 'mock');

@@ -9,6 +9,8 @@ import { logger } from '../utils/logger.js';
 import { selectStrike } from '../services/strike-selection.service.js';
 import { buildEntryExitPlan } from '../services/entry-exit-agent.service.js';
 import { buildSignalEnrichment } from '../services/signal-enrichment.service.js';
+import { buildEntryDecisionInput } from '../services/entry-decision-adapter.service.js';
+import { evaluateEntryDecision } from '../lib/entryEngine/index.js';
 import { marketData } from '../services/market-data.js';
 import { ContextAgent } from '../agents/core/context-agent.js';
 import { TechnicalAgent } from '../agents/core/technical-agent.js';
@@ -43,6 +45,39 @@ async function buildRecommendation(
   context?: MarketContext
 ): Promise<TradeRecommendation | null> {
   try {
+    if (engine === 'A' && context?.enrichment) {
+      const entryInput = buildEntryDecisionInput(signal, context, context.enrichment);
+      const entryResult = evaluateEntryDecision(entryInput);
+      if (entryResult.action === 'BLOCK') {
+        logger.info('Engine A entry decision blocked', {
+          signal_id: signal.signal_id,
+          symbol: signal.symbol,
+          rationale: entryResult.rationale,
+        });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'Engine A entry blocked by tier rules',
+          level: 'info',
+          data: { signal_id: signal.signal_id, rationale: entryResult.rationale },
+        });
+        return null;
+      }
+      if (entryResult.action === 'WAIT') {
+        logger.info('Engine A entry decision wait', {
+          signal_id: signal.signal_id,
+          symbol: signal.symbol,
+          rationale: entryResult.rationale,
+        });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'Engine A entry delayed by tier rules',
+          level: 'info',
+          data: { signal_id: signal.signal_id, rationale: entryResult.rationale },
+        });
+        return null;
+      }
+    }
+
     Sentry.addBreadcrumb({
       category: 'engine',
       message: `Engine ${engine} strike selection`,
