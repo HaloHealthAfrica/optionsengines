@@ -10,6 +10,7 @@ import { logger } from '../utils/logger.js';
 export const MTF_BIAS_STREAMS = {
   MTF_BIAS: 'mtf_bias_stream',
   MARKET_STATE: 'market_state_stream',
+  GAMMA_CONTEXT: 'gamma_context_stream',
   SETUP_VALIDATION: 'setup_validation_stream',
   TRADE_EXECUTION: 'trade_execution_stream',
 } as const;
@@ -166,6 +167,11 @@ class MTFBiasStreamService {
   /** Publish to market_state_stream (state aggregator output). */
   async publishMarketState(payload: Record<string, unknown>): Promise<string | null> {
     return this.publish(MTF_BIAS_STREAMS.MARKET_STATE, payload);
+  }
+
+  /** Publish to gamma_context_stream (Gamma Metrics Service output). */
+  async publishGammaContext(payload: Record<string, unknown>): Promise<string | null> {
+    return this.publish(MTF_BIAS_STREAMS.GAMMA_CONTEXT, payload);
   }
 
   /** Publish to setup_validation_stream. */

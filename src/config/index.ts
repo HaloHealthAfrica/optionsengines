@@ -136,6 +136,12 @@ interface Config {
   dealerStrategyWeight: number;
   dealerUwNeutralThreshold: number;
 
+  // Gamma Metrics Service (Phase 3: polling UW, publishing to gamma_context_stream)
+  enableGammaMetricsService: boolean;
+  gammaMetricsRthIntervalMs: number;
+  gammaMetricsEthIntervalMs: number;
+  gammaMetricsSymbols: string[];
+
   // Logging
   logLevel: string;
 }
@@ -342,6 +348,16 @@ export const config: Config = {
     'GAMMA_NEUTRAL_THRESHOLD',
     100_000_000
   ),
+
+  enableGammaMetricsService: getEnvVarBoolean('ENABLE_GAMMA_METRICS_SERVICE', false),
+  gammaMetricsRthIntervalMs: getEnvVarNumber('GAMMA_METRICS_RTH_INTERVAL_MS', 120_000),
+  gammaMetricsEthIntervalMs: getEnvVarNumber('GAMMA_METRICS_ETH_INTERVAL_MS', 300_000),
+  gammaMetricsSymbols: (
+    getEnvVar('GAMMA_METRICS_SYMBOLS', 'SPY,QQQ,IWM') || 'SPY,QQQ,IWM'
+  )
+    .split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean),
 
   // Logging
   logLevel: getEnvVar('LOG_LEVEL', 'info'),

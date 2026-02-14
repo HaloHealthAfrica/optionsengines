@@ -78,6 +78,10 @@ export interface MTFBiasWebhookPayload {
   risk_context: RiskContextBlock;
 }
 
+export type GammaEnvironment = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL';
+export type GammaMagnitude = 'LOW' | 'MEDIUM' | 'HIGH';
+export type VolRegimeBias = 'EXPANSION_LIKELY' | 'COMPRESSION_LIKELY' | 'NEUTRAL';
+
 export interface SymbolMarketState {
   symbol: string;
   last_event_id: string;
@@ -97,6 +101,19 @@ export interface SymbolMarketState {
   resolution_trace: Record<string, unknown> | null;
   full_mtf_json: Record<string, unknown>;
   last_updated_at: Date;
+  /** Phase 1: price-derived bias (Pine MTF) */
+  price_bias_consensus?: string | null;
+  price_bias_score?: number | null;
+  price_confidence_score?: number | null;
+  /** Phase 1: gamma context */
+  gamma_environment?: GammaEnvironment | null;
+  gamma_magnitude?: GammaMagnitude | null;
+  gamma_flip_level?: number | null;
+  distance_to_flip?: number | null;
+  call_wall?: number | null;
+  put_wall?: number | null;
+  gamma_updated_at?: Date | null;
+  vol_regime_bias?: VolRegimeBias | null;
 }
 
 export interface MarketStateUpdatedEvent {

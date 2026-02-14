@@ -12,11 +12,18 @@ import type { SymbolMarketState } from '../../lib/mtfBias/types.js';
 
 const VOL_STATE_DEFAULT = 'UNKNOWN';
 
+const PRICE_BIAS_MAP: Record<string, 'BULLISH' | 'BEARISH' | 'NEUTRAL'> = {
+  BULLISH: 'BULLISH',
+  BEARISH: 'BEARISH',
+  NEUTRAL: 'NEUTRAL',
+  HOLD: 'NEUTRAL',
+};
+
 function payloadToState(
   eventId: string,
   symbol: string,
   payload: MTFBiasWebhookPayloadV1
-): Omit<SymbolMarketState, 'last_updated_at'> {
+): Omit<SymbolMarketState, 'last_updated_at'> & { latest_price_payload: Record<string, unknown> } {
   const c = payload.mtf.consensus;
   const r = payload.mtf.regime;
   const inv = payload.risk_context.invalidation?.level;
@@ -39,6 +46,7 @@ function payloadToState(
     resolved_source: 'MTF_BIAS_ENGINE_V1',
     resolution_trace: null,
     full_mtf_json: { mtf: payload.mtf, levels: payload.levels } as unknown as Record<string, unknown>,
+    latest_price_payload: payload as unknown as Record<string, unknown>,
   };
 }
 
@@ -47,22 +55,42 @@ export async function processMTFBiasEvent(
   symbol: string,
   payload: MTFBiasWebhookPayloadV1
 ): Promise<SymbolMarketState | null> {
+  const eventTsMs = payload.event_ts_ms ?? Date.now();
+
+  try {
+    const existing = await db.query(
+      'SELECT 1 FROM market_state_history WHERE event_id = $1 LIMIT 1',
+      [eventId]
+    );
+    if (existing.rows.length > 0) {
+      return null;
+    }
+  } catch {
+    /* continue */
+  }
+
   const state = payloadToState(eventId, symbol, payload);
+  const priceBiasConsensus = PRICE_BIAS_MAP[state.bias_consensus] ?? 'NEUTRAL';
 
   try {
     await db.transaction(async (client) => {
       await client.query(
       `INSERT INTO symbol_market_state (
-        symbol, last_event_id, bias_consensus, bias_score, confidence_score,
+        symbol, last_event_id, last_event_ts_ms, bias_consensus, bias_score, confidence_score,
+        price_bias_consensus, price_bias_score, price_confidence_score,
         alignment_score, conflict_score, regime_type, chop_score, vol_state,
         entry_mode_hint, invalidation_level, resolved_bias, resolved_confidence,
-        resolved_source, resolution_trace, full_mtf_json, last_updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+        resolved_source, resolution_trace, full_mtf_json, latest_price_payload, last_updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW())
       ON CONFLICT (symbol) DO UPDATE SET
         last_event_id = EXCLUDED.last_event_id,
+        last_event_ts_ms = EXCLUDED.last_event_ts_ms,
         bias_consensus = EXCLUDED.bias_consensus,
         bias_score = EXCLUDED.bias_score,
         confidence_score = EXCLUDED.confidence_score,
+        price_bias_consensus = EXCLUDED.price_bias_consensus,
+        price_bias_score = EXCLUDED.price_bias_score,
+        price_confidence_score = EXCLUDED.price_confidence_score,
         alignment_score = EXCLUDED.alignment_score,
         conflict_score = EXCLUDED.conflict_score,
         regime_type = EXCLUDED.regime_type,
@@ -75,12 +103,17 @@ export async function processMTFBiasEvent(
         resolved_source = EXCLUDED.resolved_source,
         resolution_trace = EXCLUDED.resolution_trace,
         full_mtf_json = EXCLUDED.full_mtf_json,
+        latest_price_payload = EXCLUDED.latest_price_payload,
         last_updated_at = NOW()`,
       [
         state.symbol,
         state.last_event_id,
+        eventTsMs,
         state.bias_consensus,
         state.bias_score,
+        state.confidence_score,
+        priceBiasConsensus,
+        Math.round(state.bias_score),
         state.confidence_score,
         state.alignment_score,
         state.conflict_score,
@@ -94,13 +127,14 @@ export async function processMTFBiasEvent(
         state.resolved_source,
         state.resolution_trace ? JSON.stringify(state.resolution_trace) : null,
         JSON.stringify(state.full_mtf_json),
+        JSON.stringify(state.latest_price_payload),
       ]
     );
 
     await client.query(
-      `INSERT INTO market_state_history (symbol, event_id, snapshot)
-       VALUES ($1, $2, $3)`,
-      [symbol, eventId, JSON.stringify(state)]
+      `INSERT INTO market_state_history (symbol, event_id, event_type, event_ts_ms, source, snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [symbol, eventId, 'MTF_BIAS_UPDATED', eventTsMs, 'MTF_BIAS_ENGINE_V1', JSON.stringify(state)]
     );
     });
 

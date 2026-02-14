@@ -10,6 +10,7 @@ import { alertService } from '../services/alert.service.js';
 import { config } from '../config/index.js';
 import { getFlowConfig, updateFlowConfig } from '../services/flow-config.service.js';
 import { marketData } from '../services/market-data.js';
+import { logger } from '../utils/logger.js';
 
 const router = Router();
 
@@ -247,14 +248,24 @@ router.get('/:symbol', requireAuth, async (req: Request, res: Response) => {
         isUnusual: zScoreResult.isUnusual,
         sampleSize: zScoreResult.sampleSize,
       } : null,
-      circuitBreakers: config.unusualWhalesOptionsEnabled ? marketData.getCircuitBreakerStatus() : undefined,
+      circuitBreakers: config.unusualWhalesOptionsEnabled
+        ? (() => {
+            try {
+              return marketData.getCircuitBreakerStatus();
+            } catch {
+              return undefined;
+            }
+          })()
+        : undefined,
       flowDebug: flow.flowDebug,
       allowedSymbols: FLOW_ALLOWED_SYMBOLS,
     });
   } catch (error) {
+    logger.error('Flow fetch failed', { symbol, error });
     return res.status(500).json({
       error: 'Failed to fetch flow data',
       symbol,
+      detail: error instanceof Error ? error.message : String(error),
     });
   }
 });

@@ -122,8 +122,20 @@ export class PositioningService {
         };
       }
       
-      // No stale data available, re-throw error
-      throw error;
+      // Return neutral fallback so Flow page can load; avoid 5xx
+      logger.warn('Returning neutral GEX fallback (no cache)', { symbol });
+      return {
+        symbol,
+        netGex: 0,
+        totalCallGex: 0,
+        totalPutGex: 0,
+        dealerPosition: 'neutral',
+        volatilityExpectation: 'neutral',
+        updatedAt: new Date(),
+        levels: [],
+        cached: false,
+        stale: true,
+      };
     }
   }
 

@@ -12,6 +12,7 @@ import { createEngineAInvoker, createEngineBInvoker } from '../orchestrator/engi
 import { MarketWebhookPipelineWorker } from './market-webhook-pipeline.js';
 import { MTFBiasPipelineWorker } from './mtf-bias-pipeline.worker.js';
 import { UwFlowPollerWorker } from './uw-flow-poller.worker.js';
+import { GammaMetricsWorker } from './gamma-metrics.worker.js';
 import { startTradeEngineHeartbeat, stopTradeEngineHeartbeat } from '../services/trade-engine-health.service.js';
 
 const signalProcessor = new SignalProcessorWorker();
@@ -29,6 +30,7 @@ const orchestrator = new OrchestratorWorker(
 const marketWebhookPipeline = new MarketWebhookPipelineWorker();
 const mtfBiasPipeline = new MTFBiasPipelineWorker();
 const uwFlowPoller = new UwFlowPollerWorker();
+const gammaMetricsWorker = new GammaMetricsWorker();
 
 let workersStarted = false;
 
@@ -56,6 +58,9 @@ export function startWorkers(): void {
   }
   if (config.enableUwFlowPoller) {
     uwFlowPoller.start();
+  }
+  if (config.enableGammaMetricsService) {
+    gammaMetricsWorker.start();
   }
   paperExecutor.start(config.paperExecutorInterval);
   positionRefresher.start(config.positionRefresherInterval);
@@ -86,6 +91,9 @@ export async function stopWorkers(timeoutMs: number = 30000): Promise<void> {
       : Promise.resolve(),
     config.enableUwFlowPoller
       ? uwFlowPoller.stop()
+      : Promise.resolve(),
+    config.enableGammaMetricsService
+      ? gammaMetricsWorker.stop()
       : Promise.resolve(),
     paperExecutor.stopAndDrain(timeoutMs),
     positionRefresher.stopAndDrain(timeoutMs),

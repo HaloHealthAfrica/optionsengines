@@ -106,6 +106,10 @@ export const MTFBiasWebhookSchemaV1 = z
 
 export type MTFBiasWebhookPayloadV1 = z.infer<typeof MTFBiasWebhookSchemaV1>;
 
+/** Alias for Phase 1 MarketStateWriter - Pine MTF Bias payload */
+export const MTFBiasPayloadV1 = MTFBiasWebhookSchemaV1;
+export type MTFBiasPayloadV1Type = MTFBiasWebhookPayloadV1;
+
 /** Validate schema_version if present. Reject unknown versions. */
 export const SCHEMA_VERSIONS = [MTF_BIAS_SCHEMA_VERSION, '1'] as const;
 
