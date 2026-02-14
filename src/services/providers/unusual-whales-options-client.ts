@@ -290,14 +290,18 @@ export class UnusualWhalesOptionsClient {
   }
 
   private normalizeNetPremTick(r: Record<string, unknown>): UnusualWhalesNetPremTick {
-    const callVol = this.toNum(r.call_volume ?? r.callVolume ?? r.call_vol) ?? 0;
-    const putVol = this.toNum(r.put_volume ?? r.putVolume ?? r.put_vol) ?? 0;
+    // API returns net_call_volume, net_put_volume (can be negative)
+    const callVol = this.toNum(r.net_call_volume ?? r.call_volume ?? r.callVolume ?? r.call_vol) ?? 0;
+    const putVol = this.toNum(r.net_put_volume ?? r.put_volume ?? r.putVolume ?? r.put_vol) ?? 0;
     // API returns net_call_premium, net_put_premium (can be negative)
-    const callPrem = this.toNum(r.call_premium ?? r.callPremium ?? r.net_call_premium ?? r.netCallPremium) ?? 0;
-    const putPrem = this.toNum(r.put_premium ?? r.putPremium ?? r.net_put_premium ?? r.netPutPremium) ?? 0;
+    const callPrem = this.toNum(r.net_call_premium ?? r.call_premium ?? r.callPremium ?? r.netCallPremium) ?? 0;
+    const putPrem = this.toNum(r.net_put_premium ?? r.put_premium ?? r.putPremium ?? r.netPutPremium) ?? 0;
     const netPrem = this.toNum(r.net_premium ?? r.netPremium ?? r.net_prem ?? r.netPrem ?? r.net_premium_flow) ?? (callPrem - putPrem);
+    // API uses tape_time (ISO string); fallback to timestamp/time/t
+    const tsRaw = r.tape_time ?? r.timestamp ?? r.time ?? r.t;
+    const ts = typeof tsRaw === 'string' ? new Date(tsRaw).getTime() : this.toNum(tsRaw);
     return {
-      timestamp: this.toNum(r.timestamp ?? r.time ?? r.t) ?? Date.now(),
+      timestamp: Number.isFinite(ts) ? ts : Date.now(),
       callVolume: callVol,
       putVolume: putVol,
       callPremium: callPrem,

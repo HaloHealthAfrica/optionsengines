@@ -137,9 +137,12 @@ export class UnusualWhalesOptionsService {
           }
         }
 
-        if (totalCallPremium > 0 || totalPutPremium > 0) {
+        // API returns net_call_premium/net_put_premium which can be negative (bid-side decreases)
+        // Consider valid if we have any non-zero premium (positive or negative)
+        const hasFlowData = totalCallPremium !== 0 || totalPutPremium !== 0;
+        if (hasFlowData) {
           const entries: OptionsFlowEntry[] = [];
-          if (totalCallPremium > 0) {
+          if (totalCallPremium !== 0) {
             entries.push({
               optionSymbol: `${ticker} net-prem calls`,
               side: 'call',
@@ -147,11 +150,11 @@ export class UnusualWhalesOptionsService {
               expiration: new Date(),
               volume: totalCallVolume,
               premium: totalCallPremium,
-              sentiment: 'bullish',
+              sentiment: totalCallPremium > 0 ? 'bullish' : 'bearish',
               timestamp: new Date(),
             });
           }
-          if (totalPutPremium > 0) {
+          if (totalPutPremium !== 0) {
             entries.push({
               optionSymbol: `${ticker} net-prem puts`,
               side: 'put',
@@ -159,7 +162,7 @@ export class UnusualWhalesOptionsService {
               expiration: new Date(),
               volume: totalPutVolume,
               premium: totalPutPremium,
-              sentiment: 'bearish',
+              sentiment: totalPutPremium > 0 ? 'bearish' : 'bullish',
               timestamp: new Date(),
             });
           }
