@@ -270,7 +270,9 @@ router.get('/:symbol', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-/** Market Tide - time series of net prem ticks for chart (price, NCP, NPP, volume) */
+/** Market Tide - time series of net prem ticks for chart (price, NCP, NPP, volume).
+ *  Primary: Unusual Whales net-prem-ticks. Fallback: derive from MarketData.app options flow.
+ */
 router.get('/:symbol/market-tide', requireAuth, async (req: Request, res: Response) => {
   const symbol = String(req.params.symbol || 'SPY').toUpperCase();
   if (!FLOW_ALLOWED_SYMBOLS.includes(symbol)) {
@@ -279,7 +281,49 @@ router.get('/:symbol/market-tide', requireAuth, async (req: Request, res: Respon
   try {
     const { unusualWhalesOptionsService } = await import('../services/unusual-whales-options.service.js');
     const { marketData } = await import('../services/market-data.js');
-    const ticks = await unusualWhalesOptionsService.getNetPremTicks(symbol);
+    let ticks = await unusualWhalesOptionsService.getNetPremTicks(symbol);
+    let source: 'unusualwhales' | 'marketdata' = 'unusualwhales';
+
+    // Fallback: derive time series from MarketData.app options flow when Unusual Whales returns empty
+    if (ticks.length === 0) {
+      try {
+        const flow = await marketData.getOptionsFlow(symbol, 200);
+        if (flow.entries.length > 0) {
+          const bucketMs = 60 * 60 * 1000; // 1-hour buckets
+          const buckets = new Map<number, { callPremium: number; putPremium: number; callVolume: number; putVolume: number }>();
+          for (const e of flow.entries) {
+            const ts = e.timestamp instanceof Date ? e.timestamp.getTime() : new Date(e.timestamp as string).getTime();
+            if (!Number.isFinite(ts)) continue;
+            const bucket = Math.floor(ts / bucketMs) * bucketMs;
+            const b = buckets.get(bucket) ?? { callPremium: 0, putPremium: 0, callVolume: 0, putVolume: 0 };
+            const prem = Number(e.premium ?? 0);
+            const vol = Number(e.volume ?? 0);
+            if (e.side === 'call') {
+              b.callPremium += prem;
+              b.callVolume += vol;
+            } else {
+              b.putPremium += prem;
+              b.putVolume += vol;
+            }
+            buckets.set(bucket, b);
+          }
+          ticks = Array.from(buckets.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([ts, b]) => ({
+              timestamp: ts,
+              callPremium: b.callPremium,
+              putPremium: b.putPremium,
+              callVolume: b.callVolume,
+              putVolume: b.putVolume,
+              netPremium: b.callPremium - b.putPremium,
+            }));
+          source = 'marketdata';
+        }
+      } catch {
+        /* fallback failed, keep empty */
+      }
+    }
+
     let currentPrice = 0;
     try {
       currentPrice = await marketData.getStockPrice(symbol);
@@ -300,6 +344,7 @@ router.get('/:symbol/market-tide', requireAuth, async (req: Request, res: Respon
     const totalVol = lastTick ? (lastTick.callVolume ?? 0) + (lastTick.putVolume ?? 0) : 0;
     return res.json({
       symbol,
+      source,
       currentPrice: Number.isFinite(currentPrice) ? currentPrice : null,
       timeSeries,
       summary: {

@@ -527,6 +527,11 @@ export default function Flow() {
             {(activeTab === 'Details' || activeTab === 'Overview') && (
               <div className="card p-6">
                 <h2 className="text-lg font-semibold">Flow Summary</h2>
+                {(data?.flowDebug && (data?.optionsFlow?.premium === '$0' || data?.optionsFlow?.premium === '--')) ? (
+                  <p className="muted mt-2 text-xs">
+                    Flow data unavailable ({data.flowDebug}). Check Unusual Whales API and MarketData.app options flow.
+                  </p>
+                ) : null}
                 <div className="mt-4 grid gap-3">
                   <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-3 dark:bg-slate-900/60">
                     <span className="muted text-xs">Net Premium</span>

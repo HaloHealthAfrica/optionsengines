@@ -109,11 +109,14 @@ export default function MarketTideChart({ symbol }) {
             </span>
           </div>
         </div>
-        <p className="muted mt-1 text-xs">Powered by unusualwhales.com</p>
+        <p className="muted mt-1 text-xs">
+          Powered by {tideData?.source === 'marketdata' ? 'MarketData.app (fallback)' : 'unusualwhales.com'}
+        </p>
         <div className="mt-4 h-72">
           {chartData.length === 0 ? (
-            <div className="flex h-full items-center justify-center rounded-2xl bg-slate-50 dark:bg-slate-900/40">
-              <p className="muted text-sm">No intraday data for {symbol}</p>
+            <div className="flex h-full flex-col items-center justify-center gap-2 rounded-2xl bg-slate-50 dark:bg-slate-900/40">
+              <p className="muted text-sm">No intraday flow data for {symbol}</p>
+              <p className="muted text-xs">Unusual Whales returned empty; MarketData.app fallback had no flow.</p>
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
