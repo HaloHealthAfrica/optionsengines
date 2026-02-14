@@ -109,6 +109,10 @@ interface Config {
   // Market webhook pipeline
   enableMarketWebhookPipeline: boolean;
 
+  // MTF Bias Processing System
+  enableMTFBiasPipeline: boolean;
+  requireMTFBiasForEntry: boolean;
+
   // Confluence (Flow page, trade gate, position sizing)
   confluenceMinThreshold: number;
   enableConfluenceGate: boolean;
@@ -294,6 +298,13 @@ export const config: Config = {
 
   // Market webhook pipeline
   enableMarketWebhookPipeline: getEnvVarBoolean('ENABLE_MARKET_WEBHOOK_PIPELINE', true),
+
+  // MTF Bias Processing System
+  enableMTFBiasPipeline: getEnvVarBoolean('ENABLE_MTF_BIAS_PIPELINE', true),
+  requireMTFBiasForEntry: getEnvVarBoolean(
+    'REQUIRE_MTF_BIAS_FOR_ENTRY',
+    nodeEnv !== 'test'
+  ),
 
   // Confluence
   confluenceMinThreshold: getEnvVarNumber('CONFLUENCE_MIN_THRESHOLD', 50),

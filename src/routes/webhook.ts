@@ -624,10 +624,36 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
 }
 
 /**
- * POST /webhook - Receive TradingView signals
+ * POST /webhook - Receive TradingView signals and MTF Bias payloads
+ * MTF Bias (event_type=BIAS_SNAPSHOT) routed here when TradingView can only send to /webhook
  */
-router.post('/', (req: Request, res: Response) => {
-  handleWebhook(req, res);
+router.post('/', async (req: Request, res: Response) => {
+  const body = req.body;
+  if (
+    body &&
+    typeof body === 'object' &&
+    body.event_type === 'BIAS_SNAPSHOT' &&
+    typeof body.event_id_raw === 'string'
+  ) {
+    const { handleMTFBiasWebhook } = await import('../services/mtf-bias-webhook-handler.service.js');
+    const result = await handleMTFBiasWebhook(body);
+    if (result.ok) {
+      return res.status(200).json({
+        success: true,
+        event_id: result.eventId,
+        symbol: result.symbol,
+        status: result.status,
+      });
+    }
+    if (result.status === 422) {
+      return res.status(422).json({
+        error: result.error,
+        details: result.details,
+      });
+    }
+    return res.status(500).json({ error: result.error });
+  }
+  return handleWebhook(req, res);
 });
 
 /**

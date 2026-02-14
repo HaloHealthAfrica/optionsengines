@@ -23,6 +23,7 @@ import { TTMSpecialist } from '../agents/specialists/ttm-specialist.js';
 import { SatylandSubAgent } from '../agents/subagents/satyland-sub-agent.js';
 import { eventLogger } from '../services/event-logger.service.js';
 import { EnrichedSignal, MarketData, Indicators } from '../types/index.js';
+import { getMTFBiasContext } from '../services/mtf-bias/mtf-bias-state.service.js';
 import * as Sentry from '@sentry/node';
 
 function applyGammaSizingMultiplier(
@@ -44,6 +45,20 @@ async function buildRecommendation(
   context?: MarketContext
 ): Promise<TradeRecommendation | null> {
   try {
+    if (config.requireMTFBiasForEntry) {
+      const mtfBias = await getMTFBiasContext(signal.symbol);
+      if (!mtfBias) {
+        logger.info('Engine A/B HOLD: no MTF bias state', { symbol: signal.symbol });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'MTF bias required but missing - HOLD',
+          level: 'info',
+          data: { symbol: signal.symbol },
+        });
+        return null;
+      }
+    }
+
     if (engine === 'A' && context?.enrichment) {
       const entryInput = buildEntryDecisionInput(signal, context, context.enrichment);
       const entryResult = evaluateEntryDecision(entryInput);
@@ -127,6 +142,20 @@ async function buildEngineBRecommendation(
   context?: MarketContext
 ): Promise<TradeRecommendation | null> {
   try {
+    if (config.requireMTFBiasForEntry) {
+      const mtfBias = await getMTFBiasContext(signal.symbol);
+      if (!mtfBias) {
+        logger.info('Engine B HOLD: no MTF bias state', { symbol: signal.symbol });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'MTF bias required but missing - HOLD',
+          level: 'info',
+          data: { symbol: signal.symbol },
+        });
+        return null;
+      }
+    }
+
     Sentry.addBreadcrumb({
       category: 'engine',
       message: 'Engine B enrichment start',

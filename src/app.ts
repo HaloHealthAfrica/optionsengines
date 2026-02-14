@@ -24,6 +24,7 @@ import testingRoutes from './routes/testing.js';
 import webhookSchemaRoutes from './routes/webhooks.js';
 import marketIntelRoutes from './routes/market-intel.js';
 import marketWebhookRoutes from './routes/market-webhooks.js';
+import mtfBiasWebhookRoutes from './routes/mtf-bias-webhook.js';
 import cronRoutes from './routes/cron.js';
 import gammaRoutes from './routes/gamma.js';
 
@@ -75,6 +76,7 @@ app.use('/', engine2Routes);
 app.use('/api/v1/testing', testingRoutes);
 app.use('/api/v1/webhooks', webhookSchemaRoutes);
 app.use('/api/webhooks', marketWebhookRoutes);
+app.use('/api/webhooks', mtfBiasWebhookRoutes);
 app.use('/api/cron', cronRoutes);
 
 // Sentry error handler (must be before other error middleware)

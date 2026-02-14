@@ -10,6 +10,7 @@ import { OrchestratorWorker } from './orchestrator-worker.js';
 import { createOrchestratorService } from '../orchestrator/container.js';
 import { createEngineAInvoker, createEngineBInvoker } from '../orchestrator/engine-invokers.js';
 import { MarketWebhookPipelineWorker } from './market-webhook-pipeline.js';
+import { MTFBiasPipelineWorker } from './mtf-bias-pipeline.worker.js';
 import { UwFlowPollerWorker } from './uw-flow-poller.worker.js';
 import { startTradeEngineHeartbeat, stopTradeEngineHeartbeat } from '../services/trade-engine-health.service.js';
 
@@ -26,6 +27,7 @@ const orchestrator = new OrchestratorWorker(
   config.orchestratorIntervalMs
 );
 const marketWebhookPipeline = new MarketWebhookPipelineWorker();
+const mtfBiasPipeline = new MTFBiasPipelineWorker();
 const uwFlowPoller = new UwFlowPollerWorker();
 
 let workersStarted = false;
@@ -48,6 +50,9 @@ export function startWorkers(): void {
   }
   if (config.enableMarketWebhookPipeline) {
     marketWebhookPipeline.start();
+  }
+  if (config.enableMTFBiasPipeline) {
+    mtfBiasPipeline.start();
   }
   if (config.enableUwFlowPoller) {
     uwFlowPoller.start();
@@ -75,6 +80,9 @@ export async function stopWorkers(timeoutMs: number = 30000): Promise<void> {
       : orderCreator.stopAndDrain(timeoutMs),
     config.enableMarketWebhookPipeline
       ? marketWebhookPipeline.stopAndDrain(timeoutMs)
+      : Promise.resolve(),
+    config.enableMTFBiasPipeline
+      ? mtfBiasPipeline.stopAndDrain(timeoutMs)
       : Promise.resolve(),
     config.enableUwFlowPoller
       ? uwFlowPoller.stop()
