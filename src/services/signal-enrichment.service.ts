@@ -1,3 +1,4 @@
+// Phase 1-4 E2E gap fixes applied — per-call timeouts, test bypass, enrichment persistence
 import { db } from './database.service.js';
 import { marketData } from './market-data.js';
 import { positioningService } from './positioning.service.js';

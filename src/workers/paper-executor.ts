@@ -1,4 +1,4 @@
-// Paper Executor Worker - Executes paper orders and updates positions
+// Paper Executor Worker - Executes paper orders and updates positions (transaction-safe, slippage model)
 import { db } from '../services/database.service.js';
 import { marketData } from '../services/market-data.js';
 import { logger } from '../utils/logger.js';
