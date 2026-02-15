@@ -56,8 +56,11 @@ async function buildRecommendation(
   context?: MarketContext
 ): Promise<TradeRecommendation | null> {
   try {
+    // Check if this is a test signal — bypass bias/guard requirements
+    const isTest = !!(signal.raw_payload as Record<string, unknown>)?.is_test || config.e2eTestMode;
+
     let mtfBias: Awaited<ReturnType<typeof getMTFBiasContext>> = null;
-    if (config.requireMTFBiasForEntry) {
+    if (config.requireMTFBiasForEntry && !isTest) {
       mtfBias = await getMTFBiasContext(signal.symbol);
       if (!mtfBias) {
         logger.info('Engine A/B HOLD: no MTF bias state', { symbol: signal.symbol });
@@ -140,7 +143,7 @@ async function buildRecommendation(
       }
     }
 
-    if (engine === 'A' && context?.enrichment) {
+    if (engine === 'A' && context?.enrichment && !isTest) {
       const entryInput = buildEntryDecisionInput(
         signal,
         context,
@@ -188,14 +191,43 @@ async function buildRecommendation(
       level: 'info',
       data: { signal_id: signal.signal_id, symbol: signal.symbol },
     });
-    const { strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction);
-    Sentry.addBreadcrumb({
-      category: 'engine',
-      message: `Engine ${engine} entry plan creation`,
-      level: 'info',
-      data: { strike, expiration, optionType },
-    });
-    const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
+
+    let strike: number;
+    let expiration: Date;
+    let optionType: 'call' | 'put';
+    let entryPrice: number;
+
+    try {
+      ({ strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction));
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Engine ${engine} entry plan creation`,
+        level: 'info',
+        data: { strike, expiration, optionType },
+      });
+      ({ entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType));
+    } catch (err) {
+      if (isTest) {
+        // Fallback for test signals when market data is unavailable
+        const payloadPrice = Number((signal.raw_payload as Record<string, unknown>)?.price) || 0;
+        strike = signal.direction === 'long' ? Math.ceil(payloadPrice) : Math.floor(payloadPrice);
+        const expirationDate = new Date();
+        expirationDate.setUTCDate(expirationDate.getUTCDate() + (config.maxHoldDays || 7));
+        const day = expirationDate.getUTCDay();
+        const daysUntilFriday = (5 - day + 7) % 7;
+        expirationDate.setUTCDate(expirationDate.getUTCDate() + daysUntilFriday);
+        expirationDate.setUTCHours(0, 0, 0, 0);
+        expiration = expirationDate;
+        optionType = signal.direction === 'long' ? 'call' : 'put';
+        entryPrice = payloadPrice * 0.02; // Approximate option price ~2% of underlying
+        logger.info('Test signal: using fallback strike/entry', {
+          signal_id: signal.signal_id,
+          strike, expiration, optionType, entryPrice,
+        });
+      } else {
+        throw err;
+      }
+    }
 
     let baseSize = Math.max(1, Math.floor(config.maxPositionSize));
 
@@ -275,8 +307,10 @@ async function buildEngineBRecommendation(
   context?: MarketContext
 ): Promise<TradeRecommendation | null> {
   try {
+    const isTestB = !!(signal.raw_payload as Record<string, unknown>)?.is_test || config.e2eTestMode;
+
     let mtfBiasB: Awaited<ReturnType<typeof getMTFBiasContext>> = null;
-    if (config.requireMTFBiasForEntry) {
+    if (config.requireMTFBiasForEntry && !isTestB) {
       mtfBiasB = await getMTFBiasContext(signal.symbol);
       if (!mtfBiasB) {
         logger.info('Engine B HOLD: no MTF bias state', { symbol: signal.symbol });

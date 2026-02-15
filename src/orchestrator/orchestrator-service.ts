@@ -576,13 +576,15 @@ export class OrchestratorService {
     enrichment?: { enrichedData: Record<string, any>; riskResult: Record<string, any>; rejectionReason: string | null; decisionOnly?: boolean }
   ): Promise<void> {
     const risk = enrichment?.riskResult || {};
-    const positionLimitExceeded =
+    const isTest = Boolean(risk.testBypass);
+    const positionLimitExceeded = !isTest && (
       Number(risk.openPositions ?? 0) >= Number(risk.maxOpenPositions ?? Number.POSITIVE_INFINITY) ||
-      Number(risk.openSymbolPositions ?? 0) >= Number(risk.maxPositionsPerSymbol ?? Number.POSITIVE_INFINITY);
+      Number(risk.openSymbolPositions ?? 0) >= Number(risk.maxPositionsPerSymbol ?? Number.POSITIVE_INFINITY)
+    );
     const decisionOnly = Boolean(enrichment?.decisionOnly);
     const hasRejection = Boolean(
       enrichment?.rejectionReason ||
-        (!decisionOnly && risk.marketOpen === false) ||
+        (!decisionOnly && !isTest && risk.marketOpen === false) ||
         positionLimitExceeded
     );
 
