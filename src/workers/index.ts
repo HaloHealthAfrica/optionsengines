@@ -46,6 +46,7 @@ export function startWorkers(): void {
 
   if (config.enableOrchestrator) {
     orchestrator.start();
+    orderCreator.start(config.orderCreatorInterval);
   } else {
     signalProcessor.start(config.signalProcessorInterval);
     orderCreator.start(config.orderCreatorInterval);
@@ -80,9 +81,7 @@ export async function stopWorkers(timeoutMs: number = 30000): Promise<void> {
     config.enableOrchestrator
       ? orchestrator.stopAndDrain(timeoutMs)
       : signalProcessor.stopAndDrain(timeoutMs),
-    config.enableOrchestrator
-      ? Promise.resolve()
-      : orderCreator.stopAndDrain(timeoutMs),
+    orderCreator.stopAndDrain(timeoutMs),
     config.enableMarketWebhookPipeline
       ? marketWebhookPipeline.stopAndDrain(timeoutMs)
       : Promise.resolve(),

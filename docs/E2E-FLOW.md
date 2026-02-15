@@ -304,6 +304,8 @@ npx tsx scripts/run-e2e-full-pipeline.ts --send --url=https://optionsengines.fly
 
 ## Where the System Breaks (Diagnosis)
 
+**Why webhooks don't reach decision engines:** The most common cause is `REQUIRE_MTF_BIAS_FOR_ENTRY=true` with no bias state. The orchestrator checks bias *before* invoking engines; if `getMTFBiasContext(symbol)` returns null, it HOLDs and never calls Engine A/B. Set `REQUIRE_MTF_BIAS_FOR_ENTRY=false` to bypass for testing.
+
 Based on observed failures and code analysis:
 
 ### 1. **Market Data (Primary Blocker)**
@@ -321,18 +323,18 @@ Based on observed failures and code analysis:
 
 ---
 
-### 2. **Bias State Missing (Orchestrator Block)**
+### 2. **Bias State Missing (Primary Blocker – Webhooks Not Reaching Engines)**
 
-**Symptom:** Engines return HOLD; signals stay pending or get rejected.
+**Symptom:** Webhooks accepted but signals never reach decision engines; engines return HOLD; "Engine A/B HOLD: no MTF bias state" in logs.
 
 **Cause:**
-- `requireMTFBiasForEntry=true` (default in non-test) but no MTF bias webhooks received
-- Bias state not in Redis or `bias_state_current` / `bias_state_history`
-- Bias state stale (older than staleness threshold) → behavior `block` → HOLD
+- `REQUIRE_MTF_BIAS_FOR_ENTRY=true` (default in production) but no MTF bias webhooks received
+- Bias state not in Redis or `symbol_market_state` / `bias_state_current` / `bias_state_history`
+- Before engines are invoked, `getMTFBiasContext(symbol)` is called; if null → **HOLD** (engines never run)
 
-**Impact:** Orchestrator never approves signals; Order Creator never sees approved signals.
+**Impact:** Orchestrator picks up signals but HOLDs before invoking Engine A/B. Order Creator never sees approved signals.
 
-**Fix:** Ensure MTF bias webhooks flow to `/webhook` or `/api/webhooks/mtf-bias`. Set `REQUIRE_MTF_BIAS_FOR_ENTRY=false` for testing without bias. Or seed bias state.
+**Fix:** Set `REQUIRE_MTF_BIAS_FOR_ENTRY=false` for testing without bias. Or ensure MTF bias webhooks flow to `/webhook` or `/api/webhooks/mtf-bias` and seed bias state.
 
 ---
 
