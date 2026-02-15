@@ -6,6 +6,20 @@ import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { evaluateMarketSession, normalizeMarketSession } from '../utils/market-session.js';
 
+/** Per-call timeout for external API calls during enrichment (ms) */
+const ENRICHMENT_CALL_TIMEOUT_MS = 8000;
+
+/** Wraps a promise with a timeout. Rejects with a descriptive error on timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timeout: ${label} exceeded ${ms}ms`)), ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
 export type SignalEnrichmentResult = {
   enrichedData: Record<string, any>;
   riskResult: Record<string, any>;
@@ -24,6 +38,13 @@ type SignalLike = {
   timestamp: Date | string;
   raw_payload?: Record<string, any> | null;
 };
+
+/** Detect whether this signal is a test signal that should bypass market gates */
+function isTestSignal(signal: SignalLike): boolean {
+  if (config.e2eTestMode) return true;
+  const payload = signal.raw_payload ?? {};
+  return !!(payload.is_test || payload.metadata?.is_test);
+}
 
 export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalEnrichmentResult> {
   const riskResult: Record<string, any> = {};
@@ -92,7 +113,9 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     grace_minutes: config.marketCloseGraceMinutes,
   };
 
-  if (!isMarketOpen) {
+  const testBypass = isTestSignal(signal);
+
+  if (!isMarketOpen && !testBypass) {
     const signalAgeMinutes = (Date.now() - signalTimestamp.getTime()) / 60000;
     riskResult.signalAgeMinutes = Math.round(signalAgeMinutes * 10) / 10;
     if (signalAgeMinutes > config.signalMaxAgeMinutes) {
@@ -114,6 +137,11 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
         rejectionReason = 'market_closed';
       }
     }
+  } else if (!isMarketOpen && testBypass) {
+    logger.info('Test signal bypassing market hours gate', { signal_id: signal.signal_id, symbol: signal.symbol });
+    riskResult.testBypass = true;
+    riskResult.marketOpen = false;
+    riskResult.testBypassReason = 'is_test_or_e2e';
   }
 
   const riskLimits = await db.query(
@@ -249,28 +277,55 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
   let indicators: Record<string, any> = {};
   let currentPrice = 0;
 
+  // Use payload price as fallback for test signals when market data is unavailable
+  const fallbackPrice = toNumber(payload.price) ?? 0;
+
   try {
-    currentPrice = await marketData.getStockPrice(signal.symbol);
+    currentPrice = await withTimeout(
+      marketData.getStockPrice(signal.symbol),
+      ENRICHMENT_CALL_TIMEOUT_MS,
+      `getStockPrice(${signal.symbol})`
+    );
   } catch (error) {
     logger.warn('Failed to fetch current price for enrichment', { error, symbol: signal.symbol });
-    rejectionReason = rejectionReason || 'market_data_unavailable';
+    if (testBypass && fallbackPrice > 0) {
+      currentPrice = fallbackPrice;
+      logger.info('Test signal using payload price as fallback', { price: currentPrice });
+    } else {
+      rejectionReason = rejectionReason || 'market_data_unavailable';
+    }
   }
 
   try {
-    candles = await marketData.getCandles(signal.symbol, signal.timeframe, 200);
+    candles = await withTimeout(
+      marketData.getCandles(signal.symbol, signal.timeframe, 200),
+      ENRICHMENT_CALL_TIMEOUT_MS,
+      `getCandles(${signal.symbol})`
+    );
   } catch (error) {
     logger.warn('Failed to fetch candles for enrichment', { error, symbol: signal.symbol });
-    rejectionReason = rejectionReason || 'market_data_unavailable';
+    if (!testBypass) {
+      rejectionReason = rejectionReason || 'market_data_unavailable';
+    }
+    // Test signals proceed without candles
   }
 
   try {
-    indicators = await marketData.getIndicators(signal.symbol, signal.timeframe);
+    indicators = await withTimeout(
+      marketData.getIndicators(signal.symbol, signal.timeframe),
+      ENRICHMENT_CALL_TIMEOUT_MS,
+      `getIndicators(${signal.symbol})`
+    );
   } catch (error) {
     logger.warn('Failed to fetch indicators for enrichment', { error, symbol: signal.symbol });
-    rejectionReason = rejectionReason || 'market_data_unavailable';
+    if (!testBypass) {
+      rejectionReason = rejectionReason || 'market_data_unavailable';
+    }
+    // Fallback indicators using available price
+    const fallback = currentPrice || fallbackPrice;
     indicators = {
-      ema8: [currentPrice],
-      ema21: [currentPrice],
+      ema8: [fallback],
+      ema21: [fallback],
       atr: [0],
       ttmSqueeze: { state: 'off', momentum: 0 },
     };
@@ -279,12 +334,20 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
   let gexData = null;
   let optionsFlow = null;
   try {
-    gexData = await positioningService.getGexSnapshot(signal.symbol);
+    gexData = await withTimeout(
+      positioningService.getGexSnapshot(signal.symbol),
+      ENRICHMENT_CALL_TIMEOUT_MS,
+      `getGexSnapshot(${signal.symbol})`
+    );
   } catch (error) {
     logger.warn('GEX data unavailable for signal', { error, symbol: signal.symbol });
   }
   try {
-    optionsFlow = await positioningService.getOptionsFlowSnapshot(signal.symbol, 50);
+    optionsFlow = await withTimeout(
+      positioningService.getOptionsFlowSnapshot(signal.symbol, 50),
+      ENRICHMENT_CALL_TIMEOUT_MS,
+      `getOptionsFlowSnapshot(${signal.symbol})`
+    );
   } catch (error) {
     logger.warn('Options flow data unavailable for signal', { error, symbol: signal.symbol });
   }

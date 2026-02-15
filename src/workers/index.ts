@@ -46,7 +46,9 @@ export function startWorkers(): void {
 
   if (config.enableOrchestrator) {
     orchestrator.start();
-    orderCreator.start(config.orderCreatorInterval);
+    // OrderCreatorWorker disabled when orchestrator is active — orchestrator creates
+    // orders inline via createPaperOrders() to prevent duplicate order creation.
+    logger.info('OrderCreatorWorker skipped (orchestrator creates orders inline)');
   } else {
     signalProcessor.start(config.signalProcessorInterval);
     orderCreator.start(config.orderCreatorInterval);

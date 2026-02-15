@@ -10,9 +10,11 @@ type ClientState = {
   symbol: string;
 };
 
+import type { WSMessageType } from '../types/index.js';
+
 type BroadcastPayload = {
-  type: 'intel_update' | 'position_update' | 'positions_snapshot' | 'risk_update';
-  data: any;
+  type: WSMessageType | 'positions_snapshot';
+  data: unknown;
 };
 
 let wss: WebSocketServer | null = null;
@@ -196,7 +198,7 @@ export function stopRealtimeWebSocketServer(): void {
   });
 }
 
-export function broadcastRealtime(type: BroadcastPayload['type'], data: any, symbol?: string): void {
+export function broadcastRealtime(type: BroadcastPayload['type'], data: unknown, symbol?: string): void {
   if (!wss) {
     return;
   }

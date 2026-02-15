@@ -198,6 +198,24 @@ async function buildRecommendation(
     const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
 
     let baseSize = Math.max(1, Math.floor(config.maxPositionSize));
+
+    // Apply confluence sizing multiplier when enabled (Gap 9 fix)
+    if (config.enableConfluenceSizing) {
+      const confluence = context?.enrichment?.enrichedData?.confluence as
+        | { positionSizeMultiplier?: number; score?: number }
+        | undefined;
+      if (confluence && typeof confluence.positionSizeMultiplier === 'number') {
+        baseSize = Math.max(1, Math.floor(baseSize * confluence.positionSizeMultiplier));
+        logger.info('Confluence sizing applied', {
+          symbol: signal.symbol,
+          engine,
+          confluenceScore: confluence.score,
+          multiplier: confluence.positionSizeMultiplier,
+          adjustedBaseSize: baseSize,
+        });
+      }
+    }
+
     const gammaCtx = context?.enrichment?.gammaDecision
       ? {
           regime: context.enrichment.gammaDecision.regime,
@@ -482,6 +500,24 @@ async function buildEngineBRecommendation(
     const { strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction);
     const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
     let baseSize = Math.max(1, Math.floor(config.maxPositionSize));
+
+    // Apply confluence sizing multiplier for Engine B (Gap 9 fix)
+    if (config.enableConfluenceSizing) {
+      const confluence = context?.enrichment?.enrichedData?.confluence as
+        | { positionSizeMultiplier?: number; score?: number }
+        | undefined;
+      if (confluence && typeof confluence.positionSizeMultiplier === 'number') {
+        baseSize = Math.max(1, Math.floor(baseSize * confluence.positionSizeMultiplier));
+        logger.info('Confluence sizing applied', {
+          symbol: signal.symbol,
+          engine: 'B',
+          confluenceScore: confluence.score,
+          multiplier: confluence.positionSizeMultiplier,
+          adjustedBaseSize: baseSize,
+        });
+      }
+    }
+
     const gammaCtx = context?.enrichment?.gammaDecision
       ? {
           regime: context.enrichment.gammaDecision.regime,

@@ -443,6 +443,8 @@ export async function processWebhookPayload(input: {
 
     const payload = parseResult.data;
     const { secret: _secret, ...payloadForStorage } = payload;
+    // Thread trace ID into payload so it propagates through the entire pipeline
+    (payloadForStorage as Record<string, unknown>).trace_id = requestId;
     testMetaForLog = extractTestMetadata(payload);
     const symbol = payload.symbol ?? payload.ticker ?? (payload as { meta?: { ticker?: string } }).meta?.ticker;
     symbolForLog = symbol;

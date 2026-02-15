@@ -1017,4 +1017,63 @@ router.get('/related', requireAuth, async (req: Request, res: Response) => {
   });
 });
 
+/**
+ * GET /api/monitoring/engine-comparison
+ * Compare Engine A vs Engine B performance across key metrics (Gap 19 fix)
+ */
+router.get('/engine-comparison', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const result = await db.query(`
+      WITH engine_stats AS (
+        SELECT
+          rp.engine,
+          COUNT(*) AS total_trades,
+          COUNT(*) FILTER (WHERE rp.status = 'closed') AS closed_trades,
+          ROUND(AVG(rp.realized_pnl)::numeric, 2) AS avg_pnl,
+          ROUND(SUM(rp.realized_pnl)::numeric, 2) AS total_pnl,
+          COUNT(*) FILTER (WHERE rp.realized_pnl > 0) AS winners,
+          COUNT(*) FILTER (WHERE rp.realized_pnl <= 0 AND rp.status = 'closed') AS losers,
+          ROUND(AVG(EXTRACT(EPOCH FROM (rp.exit_timestamp - rp.entry_timestamp)) / 60)::numeric, 1) AS avg_hold_minutes,
+          ROUND(AVG(rp.position_pnl_percent)::numeric, 2) AS avg_pnl_percent
+        FROM refactored_positions rp
+        WHERE rp.engine IS NOT NULL
+        GROUP BY rp.engine
+      )
+      SELECT
+        engine,
+        total_trades,
+        closed_trades,
+        avg_pnl,
+        total_pnl,
+        winners,
+        losers,
+        CASE WHEN closed_trades > 0 THEN ROUND((winners::numeric / closed_trades) * 100, 1) ELSE 0 END AS win_rate,
+        avg_hold_minutes,
+        avg_pnl_percent
+      FROM engine_stats
+      ORDER BY engine
+    `);
+
+    const comparison: Record<string, unknown> = {};
+    for (const row of result.rows) {
+      comparison[`engine_${row.engine}`] = {
+        total_trades: row.total_trades,
+        closed_trades: row.closed_trades,
+        avg_pnl: parseFloat(row.avg_pnl) || 0,
+        total_pnl: parseFloat(row.total_pnl) || 0,
+        winners: row.winners,
+        losers: row.losers,
+        win_rate: parseFloat(row.win_rate) || 0,
+        avg_hold_minutes: parseFloat(row.avg_hold_minutes) || 0,
+        avg_pnl_percent: parseFloat(row.avg_pnl_percent) || 0,
+      };
+    }
+
+    return res.json({ engine_comparison: comparison });
+  } catch (error) {
+    logger.error('Engine comparison query failed', error);
+    return res.status(500).json({ error: 'Failed to fetch engine comparison' });
+  }
+});
+
 export default router;

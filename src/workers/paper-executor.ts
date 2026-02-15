@@ -25,13 +25,24 @@ interface PendingOrder {
   experiment_id?: string | null;
 }
 
+/** Simulated slippage as a fraction of bid-ask spread (0 = no slippage, 0.5 = half spread) */
+const PAPER_SLIPPAGE_FRACTION = 0.25;
+
 async function fetchOptionPrice(
   symbol: string,
   strike: number,
   expiration: Date,
   optionType: 'call' | 'put'
 ): Promise<number | null> {
-  return marketData.getOptionPrice(symbol, strike, expiration, optionType);
+  const mid = await marketData.getOptionPrice(symbol, strike, expiration, optionType);
+  if (mid === null || mid <= 0) return mid;
+
+  // Apply simulated slippage: assume bid-ask spread is ~2% of mid
+  // For entry (buy) orders, slippage increases cost; for exit (sell) orders, it decreases proceeds.
+  // Since we don't know order side here, apply a small adverse adjustment.
+  const estimatedSpread = mid * 0.02; // 2% of mid price
+  const slippage = estimatedSpread * PAPER_SLIPPAGE_FRACTION;
+  return Math.max(0.01, mid + slippage); // Slightly worse than mid for realism
 }
 
 export class PaperExecutorWorker {
@@ -150,127 +161,121 @@ export class PaperExecutorWorker {
 
           const fillTimestamp = new Date();
 
-          await db.query(
-            `INSERT INTO trades (order_id, fill_price, fill_quantity, fill_timestamp, commission, engine, experiment_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [
-              order.order_id,
-              price,
-              order.quantity,
-              fillTimestamp,
-              0,
-              order.engine ?? null,
-              order.experiment_id ?? null,
-            ]
-          );
+          // --- Begin atomic fill transaction ---
+          let positionId: string | null = null;
+          let closedPositionId: string | null = null;
+          let pnlForCapture: { pnlR: number; pnlPercent: number; durationMinutes: number; existingPosition: any } | null = null;
 
-          await db.query(
-            `UPDATE orders SET status = $1 WHERE order_id = $2`,
-            ['filled', order.order_id]
-          );
+          // Fetch bias state BEFORE the transaction (non-critical, can fail gracefully)
+          let entryBiasScore: number | null = null;
+          let entryRegimeType: string | null = null;
+          let entryModeHint: string | null = null;
+          let entryMacroClass: string | null = null;
+          let entryAccel: number | null = null;
+          try {
+            const biasState = await getCurrentState(order.symbol);
+            if (biasState) {
+              entryMacroClass = biasState.macroClass ?? null;
+              entryAccel = biasState.acceleration?.stateStrengthDelta ?? null;
+              entryBiasScore = (biasState as any).biasScore ?? (biasState as any).confidence ?? null;
+              entryRegimeType = (biasState as any).regimeType ?? null;
+              entryModeHint = biasState.riskContext?.entryModeHint ?? null;
+            }
+          } catch { /* optional — bias state not critical for position creation */ }
 
-          const existingPositionResult = await db.query(
-            `SELECT * FROM refactored_positions 
-             WHERE option_symbol = $1 AND status IN ('open', 'closing')
-             ORDER BY entry_timestamp DESC LIMIT 1`,
-            [order.option_symbol]
-          );
-
-          const existingPosition = existingPositionResult.rows[0];
-          if (existingPosition && existingPosition.status === 'closing') {
-            const realizedPnl =
-              (price - existingPosition.entry_price) * existingPosition.quantity * 100;
-            const costBasis = existingPosition.entry_price * existingPosition.quantity * 100;
-            const pnlPercent = costBasis > 0 ? (realizedPnl / costBasis) * 100 : 0;
-            const pnlR = costBasis > 0 ? realizedPnl / (costBasis * 0.01) : 0;
-            const entryTs = new Date(existingPosition.entry_timestamp);
-            const durationMinutes = Math.max(
-              0,
-              (fillTimestamp.getTime() - entryTs.getTime()) / 60_000
+          await db.transaction(async (txClient) => {
+            // 1. Insert trade
+            await txClient.query(
+              `INSERT INTO trades (order_id, fill_price, fill_quantity, fill_timestamp, commission, engine, experiment_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [order.order_id, price, order.quantity, fillTimestamp, 0, order.engine ?? null, order.experiment_id ?? null]
             );
 
-            await db.query(
-              `UPDATE refactored_positions
-               SET status = $1,
-                   exit_timestamp = $2,
-                   realized_pnl = $3,
-                   last_updated = $2
-               WHERE position_id = $4`,
-              ['closed', fillTimestamp, realizedPnl, existingPosition.position_id]
+            // 2. Update order status
+            await txClient.query(
+              `UPDATE orders SET status = $1 WHERE order_id = $2`,
+              ['filled', order.order_id]
             );
 
+            // 3. Find existing position (use FOR UPDATE to prevent race with exit monitor)
+            const existingPositionResult = await txClient.query(
+              `SELECT * FROM refactored_positions
+               WHERE option_symbol = $1 AND status IN ('open', 'closing')
+               ORDER BY entry_timestamp DESC LIMIT 1
+               FOR UPDATE SKIP LOCKED`,
+              [order.option_symbol]
+            );
+
+            const existingPosition = existingPositionResult.rows[0];
+            if (existingPosition && existingPosition.status === 'closing') {
+              const realizedPnl =
+                (price - existingPosition.entry_price) * existingPosition.quantity * 100;
+              const costBasis = existingPosition.entry_price * existingPosition.quantity * 100;
+              const pnlPercent = costBasis > 0 ? (realizedPnl / costBasis) * 100 : 0;
+              const pnlR = costBasis > 0 ? realizedPnl / (costBasis * 0.01) : 0;
+              const entryTs = new Date(existingPosition.entry_timestamp);
+              const durationMinutes = Math.max(0, (fillTimestamp.getTime() - entryTs.getTime()) / 60_000);
+
+              await txClient.query(
+                `UPDATE refactored_positions
+                 SET status = $1, exit_timestamp = $2, realized_pnl = $3, last_updated = $2
+                 WHERE position_id = $4`,
+                ['closed', fillTimestamp, realizedPnl, existingPosition.position_id]
+              );
+
+              closedPositionId = existingPosition.position_id;
+              pnlForCapture = { pnlR, pnlPercent, durationMinutes: Math.round(durationMinutes), existingPosition };
+            } else {
+              // New position
+              const insertResult = await txClient.query(
+                `INSERT INTO refactored_positions (
+                  symbol, option_symbol, strike, expiration, type, quantity,
+                  entry_price, engine, experiment_id, status, entry_timestamp, last_updated,
+                  entry_bias_score, entry_regime_type, entry_mode_hint,
+                  entry_macro_class, entry_acceleration_state_strength_delta
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16)
+                RETURNING position_id`,
+                [
+                  order.symbol, order.option_symbol, order.strike, order.expiration,
+                  order.type, order.quantity, price, order.engine ?? null,
+                  order.experiment_id ?? null, 'open', fillTimestamp,
+                  entryBiasScore, entryRegimeType, entryModeHint,
+                  entryMacroClass, entryAccel,
+                ]
+              );
+              positionId = insertResult.rows[0]?.position_id ?? null;
+            }
+          });
+          // --- End atomic fill transaction ---
+
+          // Post-transaction side effects (WebSocket, performance capture)
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated inside transaction callback
+          if (closedPositionId && pnlForCapture) {
+            const cap = pnlForCapture as { pnlR: number; pnlPercent: number; durationMinutes: number; existingPosition: any };
+            const existingPosition = cap.existingPosition;
             captureTradeOutcome({
               positionId: existingPosition.position_id,
               symbol: existingPosition.symbol,
               direction: existingPosition.type === 'call' ? 'long' : 'short',
               entryBiasScore: existingPosition.entry_bias_score,
-              entryMacroClass: (existingPosition as { entry_macro_class?: string }).entry_macro_class,
+              entryMacroClass: existingPosition.entry_macro_class,
               entryRegime: existingPosition.entry_regime_type,
               entryIntent: existingPosition.entry_mode_hint,
               entryAcceleration: existingPosition.entry_acceleration_state_strength_delta,
-              pnlR,
-              pnlPercent,
-              durationMinutes: Math.round(durationMinutes),
+              pnlR: cap.pnlR,
+              pnlPercent: cap.pnlPercent,
+              durationMinutes: cap.durationMinutes,
               exitReasonCodes: existingPosition.exit_reason
                 ? [String(existingPosition.exit_reason)]
                 : [],
               timestamp: fillTimestamp,
-            }).catch((err) => logger.warn('Performance capture failed', { err, positionId: existingPosition.position_id }));
+            }).catch((err) => logger.warn('Performance capture failed', { err, positionId: closedPositionId }));
 
-            await publishPositionUpdate(existingPosition.position_id);
+            await publishPositionUpdate(closedPositionId);
             await publishRiskUpdate();
-          } else {
-            let entryMacroClass: string | null = null;
-            let entryAccel: number | null = null;
-            try {
-              const biasState = await getCurrentState(order.symbol);
-              if (biasState) {
-                entryMacroClass = biasState.macroClass;
-                entryAccel = biasState.acceleration?.stateStrengthDelta ?? null;
-              }
-            } catch {
-              /* optional */
-            }
-
-            const insertResult = await db.query(
-              `INSERT INTO refactored_positions (
-                symbol,
-                option_symbol,
-                strike,
-                expiration,
-                type,
-                quantity,
-                entry_price,
-                engine,
-                experiment_id,
-                status,
-                entry_timestamp,
-                last_updated,
-                entry_macro_class,
-                entry_acceleration_state_strength_delta
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13)
-              RETURNING position_id`,
-              [
-                order.symbol,
-                order.option_symbol,
-                order.strike,
-                order.expiration,
-                order.type,
-                order.quantity,
-                price,
-                order.engine ?? null,
-                order.experiment_id ?? null,
-                'open',
-                fillTimestamp,
-                entryMacroClass,
-                entryAccel,
-              ]
-            );
-            const positionId = insertResult.rows[0]?.position_id;
-            if (positionId) {
-              await publishPositionUpdate(positionId);
-              await publishRiskUpdate();
-            }
+          } else if (positionId) {
+            await publishPositionUpdate(positionId);
+            await publishRiskUpdate();
           }
 
           return 'filled';

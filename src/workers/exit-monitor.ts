@@ -243,25 +243,39 @@ export class ExitMonitorWorker {
             continue;
           }
 
+          // Atomic position update + exit order creation to prevent double-close race
           const isPartialExit = exitQuantity < position.quantity;
+          let updateResult;
           if (isPartialExit) {
-            await db.query(
+            updateResult = await db.query(
               `UPDATE refactored_positions
                SET quantity = quantity - $1,
                    last_updated = $2
-               WHERE position_id = $3 AND quantity >= $1`,
+               WHERE position_id = $3 AND status = 'open' AND quantity >= $1
+               RETURNING position_id`,
               [exitQuantity, now, position.position_id]
             );
           } else {
-            await db.query(
+            updateResult = await db.query(
               `UPDATE refactored_positions
                SET status = $1,
                    exit_reason = $2,
                    last_updated = $3
-               WHERE position_id = $4`,
+               WHERE position_id = $4 AND status = 'open'
+               RETURNING position_id`,
               ['closing', exitReason, now, position.position_id]
             );
           }
+
+          // Guard: if no rows updated, another process already closed/is closing this position
+          if (!updateResult.rows.length) {
+            logger.info('Position already closing/closed, skipping exit order', {
+              positionId: position.position_id,
+              exitReason,
+            });
+            continue;
+          }
+
           await publishPositionUpdate(position.position_id);
           await publishRiskUpdate();
 

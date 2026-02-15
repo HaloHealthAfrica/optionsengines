@@ -105,6 +105,16 @@ export class OrchestratorService {
     }
   }
 
+  /** Non-transient failures that will not succeed on retry */
+  private static NON_TRANSIENT_FAILURES = new Set([
+    'market_data_unavailable',
+    'signal_stale',
+    'market_closed',
+    'max_open_positions_exceeded',
+    'max_positions_per_symbol_exceeded',
+    'confluence_below_threshold',
+  ]);
+
   private async handleProcessingFailure(
     signal: Signal,
     reason: string,
@@ -112,7 +122,9 @@ export class OrchestratorService {
     durationMs: number
   ): Promise<ExperimentResult> {
     const attempts = Number(signal.processing_attempts ?? 0);
-    if (attempts < 1) {
+    const isTransient = !OrchestratorService.NON_TRANSIENT_FAILURES.has(reason);
+
+    if (attempts < 1 && isTransient) {
       const nextRetryAt = new Date(Date.now() + retryDelayMs);
       await this.signalProcessor.scheduleRetry(
         signal.signal_id,
@@ -120,6 +132,11 @@ export class OrchestratorService {
         nextRetryAt,
         reason
       );
+      logger.info('Transient failure — retry scheduled', {
+        signal_id: signal.signal_id,
+        reason,
+        next_retry_at: nextRetryAt.toISOString(),
+      });
       return {
         experiment: {} as any,
         policy: {} as any,
@@ -128,6 +145,13 @@ export class OrchestratorService {
         error: `retry_scheduled:${reason}`,
         duration_ms: durationMs,
       };
+    }
+
+    if (!isTransient) {
+      logger.info('Non-transient failure — rejecting immediately without retry', {
+        signal_id: signal.signal_id,
+        reason,
+      });
     }
 
     await this.signalProcessor.updateStatus(signal.signal_id, 'rejected', reason);
@@ -145,6 +169,11 @@ export class OrchestratorService {
 
   async processSignal(signal: Signal): Promise<ExperimentResult> {
     const startedAt = Date.now();
+    // Extract trace_id from payload for distributed tracing (Gap 16 fix)
+    const traceId = (signal.raw_payload as Record<string, unknown>)?.trace_id as string | undefined;
+    if (traceId) {
+      Sentry.setTag('trace_id', traceId);
+    }
     return await Sentry.startSpan(
       {
         name: 'orchestrator.processSignal',
@@ -152,6 +181,7 @@ export class OrchestratorService {
         attributes: {
           signalId: signal.signal_id,
           symbol: signal.symbol,
+          ...(traceId ? { traceId } : {}),
         },
       },
       async () => {
@@ -163,6 +193,28 @@ export class OrchestratorService {
             data: { signal_id: signal.signal_id, symbol: signal.symbol },
           });
           const enrichment = await buildSignalEnrichment(signal);
+
+          // Persist enrichment for audit and replay (Gap 8 fix)
+          try {
+            await db.query(
+              `INSERT INTO refactored_signals (signal_id, enriched_data, risk_check_result, rejection_reason, processed_at)
+               VALUES ($1, $2, $3, $4, NOW())
+               ON CONFLICT (signal_id) DO UPDATE SET
+                 enriched_data = EXCLUDED.enriched_data,
+                 risk_check_result = EXCLUDED.risk_check_result,
+                 rejection_reason = EXCLUDED.rejection_reason,
+                 processed_at = NOW()`,
+              [
+                signal.signal_id,
+                JSON.stringify(enrichment.enrichedData ?? {}),
+                JSON.stringify(enrichment.riskResult ?? {}),
+                enrichment.rejectionReason,
+              ]
+            );
+          } catch (persistErr) {
+            logger.warn('Failed to persist enrichment to refactored_signals', { error: persistErr, signal_id: signal.signal_id });
+          }
+
           Sentry.addBreadcrumb({
             category: 'enrichment',
             message: 'Enrichment complete',
@@ -360,7 +412,14 @@ export class OrchestratorService {
           engine_b_recommendation,
           enrichment
         );
-        if (!enrichment.decisionOnly) {
+        // Test signals bypass decisionOnly to allow full pipeline testing
+        const isTest = !!(signal.raw_payload as Record<string,any>)?.is_test || config.e2eTestMode;
+        if (!enrichment.decisionOnly || isTest) {
+          if (enrichment.decisionOnly && isTest) {
+            logger.info('Test signal bypassing decisionOnly gate for order creation', {
+              signal_id: signal.signal_id,
+            });
+          }
           await this.createPaperOrders(
             signal,
             experiment.experiment_id,

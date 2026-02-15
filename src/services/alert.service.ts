@@ -7,15 +7,41 @@ import { getFlowConfigSync } from './flow-config.service.js';
 import { db } from './database.service.js';
 
 const lastAlertBySymbol = new Map<string, number>();
+const MAX_RETRIES = 2;
+const INITIAL_BACKOFF_MS = 500;
 
 function getCooldownMs(): number {
   return (config.alertCooldownMinutes ?? 30) * 60 * 1000;
 }
 
+/** Retry wrapper with exponential backoff for webhook delivery (Gap 17 fix) */
+async function withRetry(
+  fn: () => Promise<boolean>,
+  label: string,
+  maxRetries = MAX_RETRIES,
+  initialBackoff = INITIAL_BACKOFF_MS
+): Promise<boolean> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const ok = await fn();
+      if (ok) return true;
+      // Non-OK response — worth retrying (might be rate limit)
+    } catch (error) {
+      logger.warn(`${label} attempt ${attempt + 1} failed`, { error });
+    }
+    if (attempt < maxRetries) {
+      const delay = initialBackoff * Math.pow(2, attempt);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  logger.warn(`${label} failed after ${maxRetries + 1} attempts`);
+  return false;
+}
+
 async function sendDiscord(payload: Record<string, unknown>): Promise<boolean> {
   const url = config.discordWebhookUrl;
   if (!url) return false;
-  try {
+  return withRetry(async () => {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -26,16 +52,13 @@ async function sendDiscord(payload: Record<string, unknown>): Promise<boolean> {
       return false;
     }
     return true;
-  } catch (error) {
-    logger.warn('Discord webhook error', { error });
-    return false;
-  }
+  }, 'Discord webhook');
 }
 
 async function sendSlack(payload: Record<string, unknown>): Promise<boolean> {
   const url = config.slackWebhookUrl;
   if (!url) return false;
-  try {
+  return withRetry(async () => {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -46,10 +69,7 @@ async function sendSlack(payload: Record<string, unknown>): Promise<boolean> {
       return false;
     }
     return true;
-  } catch (error) {
-    logger.warn('Slack webhook error', { error });
-    return false;
-  }
+  }, 'Slack webhook');
 }
 
 /**

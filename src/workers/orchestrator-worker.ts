@@ -124,6 +124,8 @@ export class OrchestratorWorker {
     }
   }
 
+  private queueAlertSentAt: number | null = null;
+
   private async monitorQueueDepth(): Promise<void> {
     try {
       const result = await db.query(
@@ -147,9 +149,25 @@ export class OrchestratorWorker {
             durationSec: Math.round(elapsedSec),
             threshold: config.processingQueueDepthAlert,
           });
+
+          // Send Sentry alert and Discord notification (Gap 18 fix)
+          // Only alert once per 15 minutes to avoid noise
+          const alertCooldownMs = 15 * 60 * 1000;
+          if (!this.queueAlertSentAt || Date.now() - this.queueAlertSentAt > alertCooldownMs) {
+            Sentry.captureMessage(`Queue depth critically high: ${depth} signals pending for ${Math.round(elapsedSec)}s`, {
+              level: 'warning',
+              tags: { worker: 'OrchestratorWorker', alert: 'queue_depth' },
+              extra: { depth, durationSec: Math.round(elapsedSec), threshold: config.processingQueueDepthAlert },
+            });
+            this.queueAlertSentAt = Date.now();
+          }
         }
       } else {
         this.queueDepthHighSince = null;
+        // Reset alert cooldown when queue recovers
+        if (depth === 0) {
+          this.queueAlertSentAt = null;
+        }
       }
     } catch (error) {
       logger.warn('Failed to monitor queue depth', { error });

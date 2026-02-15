@@ -1,4 +1,10 @@
-// Signal Processor Worker - Enriches signals and applies risk checks
+/**
+ * @deprecated Legacy Signal Processor Worker — ONLY used when ENABLE_ORCHESTRATOR=false.
+ * Prefer the OrchestratorWorker pipeline which includes experiments, policy engine,
+ * dual-engine A/B routing, and inline order creation.
+ *
+ * This worker will be removed in a future release.
+ */
 import { db } from '../services/database.service.js';
 import { logger } from '../utils/logger.js';
 import { Signal } from '../types/index.js';
@@ -16,6 +22,7 @@ export class SignalProcessorWorker {
   private isRunning = false;
 
   start(intervalMs: number): void {
+    logger.warn('DEPRECATED: SignalProcessorWorker is running. Enable ENABLE_ORCHESTRATOR=true for the full pipeline.');
     registerWorkerErrorHandlers('SignalProcessorWorker');
     if (this.timer) {
       return;

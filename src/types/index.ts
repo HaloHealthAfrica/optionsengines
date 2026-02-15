@@ -346,3 +346,63 @@ export interface RateLimiterConfig {
   twelveDataLimit: number;
   polygonLimit: number;
 }
+
+// ─── WebSocket Message Types (Gap 20 fix) ───────────────────────────────
+
+/** Discriminated union of all WebSocket messages shared between server and frontend */
+export type WSMessageType = 'position_update' | 'risk_update' | 'intel_update' | 'heartbeat' | 'error';
+
+export interface WSPositionUpdate {
+  type: 'position_update';
+  data: {
+    id: string;
+    symbol: string;
+    option_symbol: string;
+    type: 'call' | 'put';
+    strike: number;
+    expiry: string | null;
+    qty: number;
+    entry_price: number | null;
+    current_price: number | null;
+    unrealized_pnl: number | null;
+    realized_pnl: number | null;
+    pnl_percent: number | null;
+    status: 'open' | 'closing' | 'closed';
+    entry_time: string | null;
+    exit_time: string | null;
+    updated_at: string | null;
+  };
+}
+
+export interface WSRiskUpdate {
+  type: 'risk_update';
+  data: {
+    timestamp: string;
+    open_positions: number;
+    max_open_positions: number;
+    max_positions_per_symbol: number | null;
+    max_position_size: number | null;
+    max_total_exposure: number | null;
+    max_exposure_percent: number | null;
+    unrealized_pnl: number;
+    realized_pnl: number;
+  };
+}
+
+export interface WSIntelUpdate {
+  type: 'intel_update';
+  data: Record<string, unknown>;
+  symbol?: string;
+}
+
+export interface WSHeartbeat {
+  type: 'heartbeat';
+  data: { timestamp: string };
+}
+
+export interface WSError {
+  type: 'error';
+  data: { message: string; code?: string };
+}
+
+export type WSMessage = WSPositionUpdate | WSRiskUpdate | WSIntelUpdate | WSHeartbeat | WSError;

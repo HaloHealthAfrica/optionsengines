@@ -112,6 +112,10 @@ export class PolicyEngine {
       throw new Error(`Invalid execution mode: ${execution_mode}`);
     }
 
+    if (execution_mode === 'SPLIT_CAPITAL') {
+      throw new Error('SPLIT_CAPITAL mode is not implemented — use ENGINE_A_PRIMARY or ENGINE_B_PRIMARY');
+    }
+
     if (execution_mode === 'SHADOW_ONLY') {
       if (executed_engine !== null) {
         throw new Error('SHADOW_ONLY cannot execute real trades');
