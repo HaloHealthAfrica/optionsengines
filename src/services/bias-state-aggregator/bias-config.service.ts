@@ -70,3 +70,39 @@ export function invalidateBiasConfigCache(): void {
   cachedConfig = null;
   cachedAt = 0;
 }
+
+export interface StalenessConfig {
+  behavior: 'reduce_risk' | 'block';
+  riskMultiplier: number;
+}
+
+let cachedStalenessConfig: StalenessConfig | null = null;
+let cachedStalenessAt = 0;
+
+/** Load staleness config from DB or return defaults */
+export async function getStalenessConfig(): Promise<StalenessConfig> {
+  const now = Date.now();
+  if (cachedStalenessConfig && now - cachedStalenessAt < CACHE_TTL_MS) {
+    return cachedStalenessConfig;
+  }
+  try {
+    const r = await db.query(
+      `SELECT config_json FROM bias_config WHERE config_key = 'staleness' LIMIT 1`
+    );
+    const row = r.rows[0];
+    if (row?.config_json) {
+      const parsed = row.config_json as Partial<StalenessConfig>;
+      cachedStalenessConfig = {
+        behavior: parsed.behavior ?? 'reduce_risk',
+        riskMultiplier: parsed.riskMultiplier ?? 0.7,
+      };
+      cachedStalenessAt = now;
+      return cachedStalenessConfig;
+    }
+  } catch {
+    /* use defaults */
+  }
+  cachedStalenessConfig = { behavior: 'reduce_risk', riskMultiplier: 0.7 };
+  cachedStalenessAt = now;
+  return cachedStalenessConfig;
+}

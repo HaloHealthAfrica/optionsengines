@@ -599,3 +599,58 @@ export async function backendGetHistoryStats(token) {
 
   return response.json();
 }
+
+// Bias / Adaptive Feedback Tuner
+export async function backendGetBiasAdaptiveStatus(token) {
+  const response = await backendFetch('/api/bias/adaptive-status', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to fetch adaptive status');
+  return response.json();
+}
+
+export async function backendGetBiasAdaptiveHistory(token) {
+  const response = await backendFetch('/api/bias/adaptive-history', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to fetch adaptive history');
+  return response.json();
+}
+
+export async function backendGetBiasAdaptiveParams(token) {
+  const response = await backendFetch('/api/bias/adaptive-params', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to fetch adaptive params');
+  return response.json();
+}
+
+export async function backendGetBiasSummary(token) {
+  const response = await backendFetch('/api/bias/summary', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to fetch bias summary');
+  return response.json();
+}
+
+export async function backendPostBiasAdaptiveToggle(token, enabled) {
+  const response = await backendFetch('/api/bias/adaptive-toggle', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) throw new Error('Failed to update adaptive toggle');
+  return response.json();
+}
+
+export async function backendPostBiasRunAdaptive(token) {
+  const response = await backendFetch('/api/bias/run-adaptive', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    const err = await safeJson(response);
+    throw new Error(err?.error || 'Failed to run adaptive tuner');
+  }
+  return response.json();
+}

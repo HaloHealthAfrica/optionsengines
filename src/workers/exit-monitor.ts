@@ -10,6 +10,8 @@ import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
 import { config } from '../config/index.js';
 import { evaluateExitDecision } from '../lib/exitEngine/index.js';
 import { buildExitDecisionInput } from '../lib/exitEngine/position-adapter.js';
+import { evaluateExitAdjustments } from '../services/exit-intelligence/index.js';
+import { getCurrentState } from '../services/bias-state-aggregator/bias-state-aggregator.service.js';
 
 interface OpenPosition {
   position_id: string;
@@ -137,12 +139,55 @@ export class ExitMonitorWorker {
 
           const hoursInPosition =
             (now.getTime() - new Date(position.entry_timestamp).getTime()) / 3600000;
+          const timeInTradeMinutes = hoursInPosition * 60;
           const daysToExpiration =
             (new Date(position.expiration).getTime() - now.getTime()) / 86400000;
 
           let exitReason: string | null = null;
+          let exitQuantity = position.quantity;
+          let exitIntelligenceAudit: { reasonCodes: string[]; finalExitAction: string } | null = null;
 
-          if (config.enableExitDecisionEngine) {
+          // Exit Intelligence: bias-aware adjustments (runs before stop/target evaluation)
+          if (config.enableExitIntelligence && !exitReason) {
+            const marketState = await getCurrentState(position.symbol);
+            const adjustments = evaluateExitAdjustments({
+              openPosition: {
+                positionId: position.position_id,
+                symbol: position.symbol,
+                direction: position.type === 'call' ? 'long' : 'short',
+                type: position.type,
+                quantity: position.quantity,
+                entryPrice: position.entry_price,
+                entryTimestamp: new Date(position.entry_timestamp),
+                entryRegimeType: (position as { entry_regime_type?: string }).entry_regime_type,
+                entryStrategyType: (position as { entry_mode_hint?: string }).entry_mode_hint as
+                  | 'BREAKOUT'
+                  | 'PULLBACK'
+                  | 'MEAN_REVERT'
+                  | undefined,
+              },
+              marketState,
+              unrealizedPnL: unrealizedPnl,
+              unrealizedPnLPercent: pnlPercent,
+              timeInTradeMinutes,
+              strategyType: 'SWING',
+            });
+            exitIntelligenceAudit = {
+              reasonCodes: adjustments.reasonCodes,
+              finalExitAction: adjustments.audit.finalExitAction,
+            };
+            if (adjustments.forceFullExit) {
+              exitReason =
+                adjustments.reasonCodes[0]?.toLowerCase().replace(/_/g, ' ') ?? 'exit_intelligence';
+              exitQuantity = position.quantity;
+            } else if (adjustments.forcePartialExit !== undefined) {
+              exitQuantity = Math.max(1, Math.round(position.quantity * adjustments.forcePartialExit));
+              exitReason =
+                adjustments.reasonCodes[0]?.toLowerCase().replace(/_/g, ' ') ?? 'exit_intelligence_partial';
+            }
+          }
+
+          if (!exitReason && config.enableExitDecisionEngine) {
             const underlying = Number.isFinite(underlyingPrice) ? underlyingPrice : position.entry_price * 100;
             const input = buildExitDecisionInput(
               position,
@@ -155,9 +200,18 @@ export class ExitMonitorWorker {
             );
             const result = evaluateExitDecision(input);
             if (result.action === 'FULL_EXIT' || result.action === 'PARTIAL_EXIT') {
-              exitReason = result.triggeredRules.length > 0
-                ? result.triggeredRules[0].rule.toLowerCase()
-                : 'exit_engine';
+              exitReason =
+                result.triggeredRules.length > 0
+                  ? result.triggeredRules[0].rule.toLowerCase()
+                  : 'exit_engine';
+              if (result.action === 'PARTIAL_EXIT' && result.sizePercent !== undefined) {
+                exitQuantity = Math.max(
+                  1,
+                  Math.round(position.quantity * (result.sizePercent / 100))
+                );
+              } else {
+                exitQuantity = position.quantity;
+              }
             }
           }
 
@@ -189,14 +243,25 @@ export class ExitMonitorWorker {
             continue;
           }
 
-          await db.query(
-            `UPDATE refactored_positions
-             SET status = $1,
-                 exit_reason = $2,
-                 last_updated = $3
-             WHERE position_id = $4`,
-            ['closing', exitReason, now, position.position_id]
-          );
+          const isPartialExit = exitQuantity < position.quantity;
+          if (isPartialExit) {
+            await db.query(
+              `UPDATE refactored_positions
+               SET quantity = quantity - $1,
+                   last_updated = $2
+               WHERE position_id = $3 AND quantity >= $1`,
+              [exitQuantity, now, position.position_id]
+            );
+          } else {
+            await db.query(
+              `UPDATE refactored_positions
+               SET status = $1,
+                   exit_reason = $2,
+                   last_updated = $3
+               WHERE position_id = $4`,
+              ['closing', exitReason, now, position.position_id]
+            );
+          }
           await publishPositionUpdate(position.position_id);
           await publishRiskUpdate();
 
@@ -221,13 +286,23 @@ export class ExitMonitorWorker {
               position.strike,
               position.expiration,
               position.type,
-              position.quantity,
+              exitQuantity,
               position.engine ?? null,
               position.experiment_id ?? null,
               'paper',
               'pending_execution',
             ]
           );
+
+          if (exitIntelligenceAudit) {
+            logger.info('Exit intelligence applied', {
+              positionId: position.position_id,
+              reasonCodes: exitIntelligenceAudit.reasonCodes,
+              finalExitAction: exitIntelligenceAudit.finalExitAction,
+              exitQuantity,
+              isPartial: isPartialExit,
+            });
+          }
 
           exitsCreated += 1;
         } catch (error) {

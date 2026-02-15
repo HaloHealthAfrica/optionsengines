@@ -25,13 +25,46 @@ function formatDate(dateStr) {
   return new Date(dateStr).toLocaleString();
 }
 
-export default function Dashboard() {
+function AdaptiveBadge({ badge, onClick }) {
+  const v = String(badge || 'stable').toLowerCase();
+  const label =
+    v === 'disabled'
+      ? 'Adaptive Disabled'
+      : v === 'tuning_adjusted'
+        ? 'Tuning Adjusted Recently'
+        : 'Stable';
+  const color =
+    v === 'disabled'
+      ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200'
+      : v === 'tuning_adjusted'
+        ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200'
+        : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200';
+  const dot =
+    v === 'disabled'
+      ? 'bg-rose-500'
+      : v === 'tuning_adjusted'
+        ? 'bg-amber-500'
+        : 'bg-emerald-500';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition hover:opacity-90 ${color}`}
+    >
+      <span className={`h-2 w-2 rounded-full ${dot}`} />
+      {label}
+    </button>
+  );
+}
+
+export default function Dashboard({ onNavigateToTab }) {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('idle');
   const [range, setRange] = useState('6M');
   const [dataSource, setDataSource] = useState('unknown');
   const [lastUpdated, setLastUpdated] = useState(null);
   const [detailPanel, setDetailPanel] = useState(null);
+  const [biasSummary, setBiasSummary] = useState(null);
 
   const loadData = useCallback(async () => {
     setStatus('loading');
@@ -51,6 +84,13 @@ export default function Dashboard() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    fetch('/api/bias/summary', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setBiasSummary)
+      .catch(() => setBiasSummary(null));
+  }, [lastUpdated]);
 
   useAutoRefresh(loadData, 30000, true);
 
@@ -100,6 +140,16 @@ export default function Dashboard() {
 
       <DataSourceBanner source={dataSource} />
       <DataFreshnessIndicator lastUpdated={lastUpdated} />
+
+      {onNavigateToTab && (
+        <div className="flex items-center gap-2">
+          <span className="muted text-xs">Adaptive tuner:</span>
+          <AdaptiveBadge
+            badge={biasSummary?.adaptiveBadge}
+            onClick={() => onNavigateToTab('feedback-tuner')}
+          />
+        </div>
+      )}
 
       {status === 'error' && (
         <div className="card p-6 text-sm text-rose-500">

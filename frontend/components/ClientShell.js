@@ -11,6 +11,7 @@ import Monitoring from './Monitoring';
 import DecisionEnginePage from './DecisionEnginePage';
 import TestingConsole from './TestingConsole';
 import IntelConsole from './IntelConsole';
+import AdaptiveControlPanel from './AdaptiveControlPanel';
 
 const tabs = [
   { id: 'dashboard', label: 'Dashboard' },
@@ -20,6 +21,7 @@ const tabs = [
   { id: 'monitoring', label: 'Monitoring' },
   { id: 'intel-console', label: 'Intel Console' },
   { id: 'decision-engines', label: 'Decision Engines' },
+  { id: 'feedback-tuner', label: 'Feedback Tuner' },
   { id: 'testing', label: 'Testing' },
   { id: 'settings', label: 'Settings' },
 ];
@@ -59,12 +61,14 @@ export default function ClientShell() {
         return <IntelConsole />;
       case 'decision-engines':
         return <DecisionEnginePage />;
+      case 'feedback-tuner':
+        return <AdaptiveControlPanel />;
       case 'testing':
         return <TestingConsole />;
       case 'settings':
         return <Settings />;
-      default:
-        return <Dashboard />;
+        default:
+        return <Dashboard onNavigateToTab={setActiveTab} />;
     }
   }, [activeTab]);
 

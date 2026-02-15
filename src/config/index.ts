@@ -87,6 +87,7 @@ interface Config {
   timeStopDte: number;
   maxHoldDays: number;
   enableExitDecisionEngine: boolean;
+  enableExitIntelligence: boolean;
 
   // Capacity Management
   minHoldMinutesForCapacityClose: number;
@@ -112,6 +113,7 @@ interface Config {
   // MTF Bias Processing System
   enableMTFBiasPipeline: boolean;
   requireMTFBiasForEntry: boolean;
+  biasControlDebugMode: boolean;
 
   // Confluence (Flow page, trade gate, position sizing)
   confluenceMinThreshold: number;
@@ -283,6 +285,7 @@ export const config: Config = {
   timeStopDte: getEnvVarNumber('TIME_STOP_DTE', 1),
   maxHoldDays: getEnvVarNumber('MAX_HOLD_DAYS', 5),
   enableExitDecisionEngine: getEnvVarBoolean('ENABLE_EXIT_DECISION_ENGINE', true),
+  enableExitIntelligence: getEnvVarBoolean('ENABLE_EXIT_INTELLIGENCE', true),
 
   // Capacity Management
   minHoldMinutesForCapacityClose: getEnvVarNumber('MIN_HOLD_MINUTES_FOR_CAPACITY_CLOSE', 15),
@@ -311,6 +314,7 @@ export const config: Config = {
     'REQUIRE_MTF_BIAS_FOR_ENTRY',
     nodeEnv !== 'test'
   ),
+  biasControlDebugMode: getEnvVarBoolean('BIAS_CONTROL_DEBUG_MODE', false),
 
   // Confluence
   confluenceMinThreshold: getEnvVarNumber('CONFLUENCE_MIN_THRESHOLD', 50),

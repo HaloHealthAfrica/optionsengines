@@ -32,7 +32,12 @@
     "analyze:sentry": "tsx scripts/analyze-sentry-traces.ts",
     "validate:e2e": "tsx scripts/run-full-e2e-sentry-validation.ts",
     "verify:uw-schema": "tsx scripts/verify-unusual-whales-schema.ts",
-    "diagnose:uw-flow": "tsx scripts/diagnose-uw-flow.ts"
+    "diagnose:uw-flow": "tsx scripts/diagnose-uw-flow.ts",
+    "simulate:bias": "tsx scripts/run-bias-simulation.ts",
+    "simulate:advanced": "tsx scripts/run-advanced-stability.ts",
+    "simulate:exit": "tsx scripts/run-exit-intelligence-sim.ts",
+    "simulate:adaptive": "tsx scripts/run-adaptive-feedback-sim.ts",
+    "run:adaptive-tuner": "tsx scripts/run-adaptive-tuner.ts"
   },
   "keywords": [
     "options",

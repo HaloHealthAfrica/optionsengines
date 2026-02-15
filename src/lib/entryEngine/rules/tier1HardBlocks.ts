@@ -1,5 +1,6 @@
 import type { EntryDecisionInput, RuleResult } from '../types.js';
 import { ENTRY_LIQUIDITY_ALLOWED, ENTRY_MIN_CONFIDENCE, ENTRY_VOLATILITY_BANDS, PORTFOLIO_GUARDRAILS } from '../../shared/constants.js';
+import { validateEntry } from '../../../services/bias-state-aggregator/setup-validator-integration.service.js';
 
 function confidenceRule(input: EntryDecisionInput): RuleResult | null {
   const minConfidence = ENTRY_MIN_CONFIDENCE[input.setupType];
@@ -115,6 +116,41 @@ function liquiditySafetyRule(input: EntryDecisionInput): RuleResult | null {
   return null;
 }
 
+function marketStateSetupRule(input: EntryDecisionInput): RuleResult | null {
+  const ms = input.marketState;
+  if (!ms) return null;
+
+  const direction = input.direction === 'CALL' ? 'long' : 'short';
+  const entryHint = ms.riskContext?.entryModeHint ?? 'NO_TRADE';
+  const strategyType = ['BREAKOUT', 'PULLBACK', 'MEAN_REVERT'].includes(entryHint)
+    ? (entryHint as 'BREAKOUT' | 'PULLBACK' | 'MEAN_REVERT')
+    : 'SWING';
+  const result = validateEntry(
+    {
+      entryModeHint: entryHint,
+      intentType: ms.intentType,
+      trigger: ms.trigger,
+      space: ms.space,
+      liquidity: ms.liquidity,
+      regimeType: ms.regimeType,
+      strategyType,
+      direction,
+    },
+    ms
+  );
+
+  if (!result.valid && result.rejectReasons.length > 0) {
+    return {
+      tier: 1,
+      rule: 'BIAS_SETUP_VALIDATOR',
+      triggered: true,
+      message: `Setup validator: ${result.rejectReasons.join(', ')}`,
+      severity: 'HIGH',
+    };
+  }
+  return null;
+}
+
 export function evaluateTier1Rules(input: EntryDecisionInput): RuleResult[] {
   const rules = [
     confidenceRule(input),
@@ -122,6 +158,7 @@ export function evaluateTier1Rules(input: EntryDecisionInput): RuleResult[] {
     volatilityMismatchRule(input),
     portfolioGuardrailsRule(input),
     liquiditySafetyRule(input),
+    marketStateSetupRule(input),
   ];
 
   return rules.filter((rule): rule is RuleResult => Boolean(rule));

@@ -9,6 +9,7 @@ import {
   Moon,
   RadioTower,
   Settings as SettingsIcon,
+  Sliders,
   Sun,
 } from 'lucide-react';
 
@@ -20,6 +21,7 @@ const iconMap = {
   monitoring: RadioTower,
   'intel-console': RadioTower,
   'decision-engines': BarChart3,
+  'feedback-tuner': Sliders,
   testing: Activity,
   settings: SettingsIcon,
 };

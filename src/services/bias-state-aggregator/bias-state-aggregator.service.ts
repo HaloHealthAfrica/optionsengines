@@ -67,8 +67,8 @@ async function markSeen(eventIdRaw: string): Promise<void> {
   await biasRedisService.markIdempotency(eventIdHash(eventIdRaw), IDEMPOTENCY_TTL_SEC);
 }
 
-/** Compute isStale based on session */
-function computeStaleness(updatedAtMs: number, session: string): boolean {
+/** Compute isStale and stalenessMinutes based on session */
+function computeStaleness(updatedAtMs: number, session: string): { isStale: boolean; stalenessMinutes: number } {
   const now = Date.now();
   const ageMinutes = (now - updatedAtMs) / 60_000;
   const sessionEval = evaluateMarketSession({
@@ -79,7 +79,10 @@ function computeStaleness(updatedAtMs: number, session: string): boolean {
   });
   const isRth = sessionEval.sessionLabel === 'RTH' || session === 'RTH';
   const threshold = isRth ? STALENESS_RTH_MINUTES : STALENESS_DAILY_MINUTES;
-  return ageMinutes > threshold;
+  return {
+    isStale: ageMinutes > threshold,
+    stalenessMinutes: Math.round(ageMinutes * 10) / 10,
+  };
 }
 
 export type BiasAggregatorUpdateResult =
@@ -173,7 +176,7 @@ export async function update(input: unknown): Promise<BiasAggregatorUpdateResult
       transitions,
       effective,
       acceleration,
-      isStale: computeStaleness(payload.event_ts_ms, payload.session),
+      ...computeStaleness(payload.event_ts_ms, payload.session),
     } as UnifiedBiasState;
 
     const gamma = await fetchLatestGamma(symbol);
@@ -214,7 +217,12 @@ export async function update(input: unknown): Promise<BiasAggregatorUpdateResult
 export async function getCurrentState(symbol: string): Promise<UnifiedBiasState | null> {
   const sym = symbol.toUpperCase();
   const fromRedis = await biasRedisService.getCurrent(sym);
-  if (fromRedis) return fromRedis;
+  if (fromRedis) {
+    const staleness = computeStaleness(fromRedis.updatedAtMs, fromRedis.session ?? 'RTH');
+    fromRedis.isStale = staleness.isStale;
+    fromRedis.stalenessMinutes = staleness.stalenessMinutes;
+    return fromRedis;
+  }
 
   try {
     const r = await db.query(
@@ -224,7 +232,9 @@ export async function getCurrentState(symbol: string): Promise<UnifiedBiasState 
     const row = r.rows[0];
     if (!row?.state_json) return null;
     const state = row.state_json as UnifiedBiasState;
-    state.isStale = computeStaleness(row.updated_at_ms ?? state.updatedAtMs, state.session ?? 'RTH');
+    const staleness = computeStaleness(row.updated_at_ms ?? state.updatedAtMs, state.session ?? 'RTH');
+    state.isStale = staleness.isStale;
+    state.stalenessMinutes = staleness.stalenessMinutes;
     return state;
   } catch {
     return null;

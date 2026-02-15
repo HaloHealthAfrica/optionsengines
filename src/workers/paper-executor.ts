@@ -6,6 +6,8 @@ import { config } from '../config/index.js';
 import { sleep } from '../utils/sleep.js';
 import { errorTracker } from '../services/error-tracker.service.js';
 import { publishPositionUpdate, publishRiskUpdate } from '../services/realtime-updates.service.js';
+import { captureTradeOutcome } from '../services/performance-feedback/index.js';
+import { getCurrentState } from '../services/bias-state-aggregator/bias-state-aggregator.service.js';
 import * as Sentry from '@sentry/node';
 import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
 import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
@@ -178,6 +180,14 @@ export class PaperExecutorWorker {
           if (existingPosition && existingPosition.status === 'closing') {
             const realizedPnl =
               (price - existingPosition.entry_price) * existingPosition.quantity * 100;
+            const costBasis = existingPosition.entry_price * existingPosition.quantity * 100;
+            const pnlPercent = costBasis > 0 ? (realizedPnl / costBasis) * 100 : 0;
+            const pnlR = costBasis > 0 ? realizedPnl / (costBasis * 0.01) : 0;
+            const entryTs = new Date(existingPosition.entry_timestamp);
+            const durationMinutes = Math.max(
+              0,
+              (fillTimestamp.getTime() - entryTs.getTime()) / 60_000
+            );
 
             await db.query(
               `UPDATE refactored_positions
@@ -188,9 +198,40 @@ export class PaperExecutorWorker {
                WHERE position_id = $4`,
               ['closed', fillTimestamp, realizedPnl, existingPosition.position_id]
             );
+
+            captureTradeOutcome({
+              positionId: existingPosition.position_id,
+              symbol: existingPosition.symbol,
+              direction: existingPosition.type === 'call' ? 'long' : 'short',
+              entryBiasScore: existingPosition.entry_bias_score,
+              entryMacroClass: (existingPosition as { entry_macro_class?: string }).entry_macro_class,
+              entryRegime: existingPosition.entry_regime_type,
+              entryIntent: existingPosition.entry_mode_hint,
+              entryAcceleration: existingPosition.entry_acceleration_state_strength_delta,
+              pnlR,
+              pnlPercent,
+              durationMinutes: Math.round(durationMinutes),
+              exitReasonCodes: existingPosition.exit_reason
+                ? [String(existingPosition.exit_reason)]
+                : [],
+              timestamp: fillTimestamp,
+            }).catch((err) => logger.warn('Performance capture failed', { err, positionId: existingPosition.position_id }));
+
             await publishPositionUpdate(existingPosition.position_id);
             await publishRiskUpdate();
           } else {
+            let entryMacroClass: string | null = null;
+            let entryAccel: number | null = null;
+            try {
+              const biasState = await getCurrentState(order.symbol);
+              if (biasState) {
+                entryMacroClass = biasState.macroClass;
+                entryAccel = biasState.acceleration?.stateStrengthDelta ?? null;
+              }
+            } catch {
+              /* optional */
+            }
+
             const insertResult = await db.query(
               `INSERT INTO refactored_positions (
                 symbol,
@@ -204,8 +245,10 @@ export class PaperExecutorWorker {
                 experiment_id,
                 status,
                 entry_timestamp,
-                last_updated
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+                last_updated,
+                entry_macro_class,
+                entry_acceleration_state_strength_delta
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13)
               RETURNING position_id`,
               [
                 order.symbol,
@@ -219,6 +262,8 @@ export class PaperExecutorWorker {
                 order.experiment_id ?? null,
                 'open',
                 fillTimestamp,
+                entryMacroClass,
+                entryAccel,
               ]
             );
             const positionId = insertResult.rows[0]?.position_id;

@@ -204,6 +204,7 @@ export interface UnifiedBiasState {
 
   /** Staleness */
   isStale?: boolean;
+  stalenessMinutes?: number;
   lastEventId?: string;
   eventType?: string;
 }

@@ -3,6 +3,7 @@
  */
 
 import { config } from '../config/index.js';
+
 import { evaluateMarketSession } from '../utils/market-session.js';
 import { TradeRecommendation, Signal, MarketContext } from './types.js';
 import { logger } from '../utils/logger.js';
@@ -24,6 +25,16 @@ import { SatylandSubAgent } from '../agents/subagents/satyland-sub-agent.js';
 import { eventLogger } from '../services/event-logger.service.js';
 import { EnrichedSignal, MarketData, Indicators } from '../types/index.js';
 import { getMTFBiasContext } from '../services/mtf-bias/mtf-bias-state.service.js';
+import {
+  evaluateExposure,
+  loadOpenPositions,
+} from '../services/bias-state-aggregator/portfolio-guard-integration.service.js';
+import { getStalenessConfig } from '../services/bias-state-aggregator/bias-config.service.js';
+import {
+  getRiskMultiplierFromState,
+  getRiskDecisionAudit,
+  type DecisionAudit,
+} from '../services/bias-state-aggregator/risk-model-integration.service.js';
 import * as Sentry from '@sentry/node';
 
 function applyGammaSizingMultiplier(
@@ -59,7 +70,16 @@ async function buildRecommendation(
         return null;
       }
       if (mtfBias.tradeSuppressed) {
-        logger.info('Engine A/B HOLD: trade suppressed by bias gating', { symbol: signal.symbol });
+        if (config.biasControlDebugMode) {
+          logger.info('Engine A/B HOLD: trade suppressed (debug)', {
+            symbol: signal.symbol,
+            suppressionNotes: mtfBias.unifiedState?.effective?.notes,
+            effectiveConfidence: mtfBias.unifiedState?.effective?.effectiveConfidence,
+            riskMultiplier: mtfBias.unifiedState?.effective?.riskMultiplier,
+          });
+        } else {
+          logger.info('Engine A/B HOLD: trade suppressed by bias gating', { symbol: signal.symbol });
+        }
         Sentry.addBreadcrumb({
           category: 'engine',
           message: 'Trade suppressed by effective gating',
@@ -67,6 +87,56 @@ async function buildRecommendation(
           data: { symbol: signal.symbol },
         });
         return null;
+      }
+      if (mtfBias.unifiedState?.isStale) {
+        const stalenessCfg = await getStalenessConfig();
+        if (stalenessCfg.behavior === 'block') {
+          logger.info('Engine A/B HOLD: bias state stale, blocking new trades', {
+            symbol: signal.symbol,
+            stalenessMinutes: mtfBias.unifiedState.stalenessMinutes,
+          });
+          return null;
+        }
+      }
+      if (mtfBias.unifiedState) {
+        let openPositions: Awaited<ReturnType<typeof loadOpenPositions>> = [];
+        try {
+          openPositions = await loadOpenPositions();
+        } catch (err) {
+          logger.warn('Engine A/B: DB unavailable for portfolio guard, blocking', { symbol: signal.symbol, error: err });
+          return null;
+        }
+        const hint = mtfBias.unifiedState.riskContext?.entryModeHint ?? 'NO_TRADE';
+        const strategyType = ['BREAKOUT', 'PULLBACK', 'MEAN_REVERT'].includes(hint)
+          ? (hint as 'BREAKOUT' | 'PULLBACK' | 'MEAN_REVERT')
+          : 'SWING';
+        const exposureResult = await evaluateExposure({
+          openPositions,
+          newTrade: {
+            symbol: signal.symbol,
+            direction: signal.direction,
+            strategyType,
+          },
+          marketState: mtfBias.unifiedState,
+        });
+        if (exposureResult.result === 'BLOCK') {
+          logger.info('Engine A/B HOLD: portfolio guard block', {
+            symbol: signal.symbol,
+            reasons: exposureResult.reasons,
+            decisionAudit: {
+              exposureDecision: 'BLOCK',
+              exposureReasons: exposureResult.reasons,
+              setupBlockReason: null,
+            } satisfies Partial<DecisionAudit>,
+          });
+          Sentry.addBreadcrumb({
+            category: 'engine',
+            message: 'Portfolio guard blocked',
+            level: 'info',
+            data: { symbol: signal.symbol, reasons: exposureResult.reasons },
+          });
+          return null;
+        }
       }
     }
 
@@ -83,6 +153,10 @@ async function buildRecommendation(
           signal_id: signal.signal_id,
           symbol: signal.symbol,
           rationale: entryResult.rationale,
+          decisionAudit: {
+            exposureDecision: 'ALLOW',
+            setupBlockReason: entryResult.rationale?.join('; ') ?? 'BLOCK',
+          } satisfies Partial<DecisionAudit>,
         });
         Sentry.addBreadcrumb({
           category: 'engine',
@@ -123,15 +197,40 @@ async function buildRecommendation(
     });
     const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
 
-    const baseSize = Math.max(1, Math.floor(config.maxPositionSize));
+    let baseSize = Math.max(1, Math.floor(config.maxPositionSize));
     const gammaCtx = context?.enrichment?.gammaDecision
       ? {
           regime: context.enrichment.gammaDecision.regime,
           position_size_multiplier: context.enrichment.gammaDecision.position_size_multiplier,
         }
       : context?.marketIntel?.gamma;
-    const adjustedSize = applyGammaSizingMultiplier(baseSize, gammaCtx);
+    let adjustedSize = applyGammaSizingMultiplier(baseSize, gammaCtx);
+    let decisionAudit: Partial<DecisionAudit> | undefined;
+    if (mtfBias?.unifiedState) {
+      try {
+        const hint = mtfBias.unifiedState.riskContext?.entryModeHint ?? 'NO_TRADE';
+        const strategyType = ['BREAKOUT', 'PULLBACK', 'MEAN_REVERT'].includes(hint)
+          ? (hint as 'BREAKOUT' | 'PULLBACK' | 'MEAN_REVERT')
+          : 'SWING';
+        const [riskMult, audit] = await Promise.all([
+          getRiskMultiplierFromState(mtfBias.unifiedState, signal.direction, strategyType),
+          getRiskDecisionAudit(mtfBias.unifiedState, signal.direction, strategyType),
+        ]);
+        adjustedSize = Math.max(1, Math.floor(adjustedSize * riskMult));
+        decisionAudit = { ...audit, exposureDecision: 'ALLOW', setupBlockReason: null };
+      } catch {
+        /* keep adjustedSize */
+      }
+    }
     const quantity = Math.max(1, Math.floor(adjustedSize));
+
+    if (decisionAudit) {
+      logger.info('Bias decision audit', {
+        symbol: signal.symbol,
+        engine,
+        decisionAudit,
+      });
+    }
 
     return {
       experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
@@ -158,9 +257,10 @@ async function buildEngineBRecommendation(
   context?: MarketContext
 ): Promise<TradeRecommendation | null> {
   try {
+    let mtfBiasB: Awaited<ReturnType<typeof getMTFBiasContext>> = null;
     if (config.requireMTFBiasForEntry) {
-      const mtfBias = await getMTFBiasContext(signal.symbol);
-      if (!mtfBias) {
+      mtfBiasB = await getMTFBiasContext(signal.symbol);
+      if (!mtfBiasB) {
         logger.info('Engine B HOLD: no MTF bias state', { symbol: signal.symbol });
         Sentry.addBreadcrumb({
           category: 'engine',
@@ -170,7 +270,7 @@ async function buildEngineBRecommendation(
         });
         return null;
       }
-      if (mtfBias.tradeSuppressed) {
+      if (mtfBiasB.tradeSuppressed) {
         logger.info('Engine B HOLD: trade suppressed by bias gating', { symbol: signal.symbol });
         Sentry.addBreadcrumb({
           category: 'engine',
@@ -179,6 +279,41 @@ async function buildEngineBRecommendation(
           data: { symbol: signal.symbol },
         });
         return null;
+      }
+      if (mtfBiasB.unifiedState?.isStale) {
+        const stalenessCfg = await getStalenessConfig();
+        if (stalenessCfg.behavior === 'block') {
+          logger.info('Engine B HOLD: bias state stale, blocking new trades', {
+            symbol: signal.symbol,
+            stalenessMinutes: mtfBiasB.unifiedState.stalenessMinutes,
+          });
+          return null;
+        }
+      }
+      if (mtfBiasB.unifiedState) {
+        let openPositions: Awaited<ReturnType<typeof loadOpenPositions>> = [];
+        try {
+          openPositions = await loadOpenPositions();
+        } catch (err) {
+          logger.warn('Engine B: DB unavailable for portfolio guard, blocking', { symbol: signal.symbol, error: err });
+          return null;
+        }
+        const hint = mtfBiasB.unifiedState.riskContext?.entryModeHint ?? 'NO_TRADE';
+        const strategyType = ['BREAKOUT', 'PULLBACK', 'MEAN_REVERT'].includes(hint)
+          ? (hint as 'BREAKOUT' | 'PULLBACK' | 'MEAN_REVERT')
+          : 'SWING';
+        const exposureResult = await evaluateExposure({
+          openPositions,
+          newTrade: { symbol: signal.symbol, direction: signal.direction, strategyType },
+          marketState: mtfBiasB.unifiedState,
+        });
+        if (exposureResult.result === 'BLOCK') {
+          logger.info('Engine B HOLD: portfolio guard block', {
+            symbol: signal.symbol,
+            reasons: exposureResult.reasons,
+          });
+          return null;
+        }
       }
     }
 
@@ -346,15 +481,40 @@ async function buildEngineBRecommendation(
 
     const { strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction);
     const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
-    const baseSize = Math.max(1, Math.floor(config.maxPositionSize));
+    let baseSize = Math.max(1, Math.floor(config.maxPositionSize));
     const gammaCtx = context?.enrichment?.gammaDecision
       ? {
           regime: context.enrichment.gammaDecision.regime,
           position_size_multiplier: context.enrichment.gammaDecision.position_size_multiplier,
         }
       : context?.marketIntel?.gamma;
-    const adjustedSize = applyGammaSizingMultiplier(baseSize, gammaCtx);
+    let adjustedSize = applyGammaSizingMultiplier(baseSize, gammaCtx);
+    let decisionAuditB: Partial<DecisionAudit> | undefined;
+    if (mtfBiasB?.unifiedState) {
+      try {
+        const hint = mtfBiasB.unifiedState.riskContext?.entryModeHint ?? 'NO_TRADE';
+        const strategyType = ['BREAKOUT', 'PULLBACK', 'MEAN_REVERT'].includes(hint)
+          ? (hint as 'BREAKOUT' | 'PULLBACK' | 'MEAN_REVERT')
+          : 'SWING';
+        const [riskMult, audit] = await Promise.all([
+          getRiskMultiplierFromState(mtfBiasB.unifiedState, signal.direction, strategyType),
+          getRiskDecisionAudit(mtfBiasB.unifiedState, signal.direction, strategyType),
+        ]);
+        adjustedSize = Math.max(1, Math.floor(adjustedSize * riskMult));
+        decisionAuditB = { ...audit, exposureDecision: 'ALLOW', setupBlockReason: null };
+      } catch {
+        /* keep adjustedSize */
+      }
+    }
     const quantity = Math.max(1, Math.floor(adjustedSize));
+
+    if (decisionAuditB) {
+      logger.info('Bias decision audit', {
+        symbol: signal.symbol,
+        engine: 'B',
+        decisionAudit: decisionAuditB,
+      });
+    }
 
     return {
       experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
