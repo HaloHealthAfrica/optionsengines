@@ -262,12 +262,20 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
   };
   riskResult.effectiveOpenPositions = effectiveOpenPositions;
 
-  if (!rejectionReason && effectiveOpenPositions >= config.maxOpenPositions) {
+  if (!rejectionReason && !testBypass && effectiveOpenPositions >= config.maxOpenPositions) {
     rejectionReason = 'max_open_positions_exceeded';
+  } else if (testBypass && effectiveOpenPositions >= config.maxOpenPositions) {
+    logger.info('Test signal bypassing max_open_positions check', {
+      signal_id: signal.signal_id,
+      effectiveOpenPositions,
+      maxOpenPositions: config.maxOpenPositions,
+    });
+    riskResult.testBypassPositionLimit = true;
   }
 
   if (
     !rejectionReason &&
+    !testBypass &&
     riskLimit.max_positions_per_symbol &&
     openSymbolPositions >= riskLimit.max_positions_per_symbol
   ) {
