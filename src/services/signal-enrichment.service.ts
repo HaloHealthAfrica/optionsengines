@@ -116,6 +116,48 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
 
   const testBypass = isTestSignal(signal);
 
+  // Early exit for test signals: bypass ALL risk gates (market hours, position limits, etc.)
+  if (testBypass) {
+    logger.info('Test signal — bypassing all enrichment risk gates', {
+      signal_id: signal.signal_id,
+      symbol: signal.symbol,
+    });
+    riskResult.testBypass = true;
+    riskResult.testBypassReason = 'is_test_or_e2e';
+    riskResult.marketOpen = isMarketOpen;
+
+    // Still fetch market data with timeouts, but don't reject on failure
+    let currentPrice = toNumber(payload.price) ?? 0;
+    try {
+      currentPrice = await withTimeout(
+        marketData.getStockPrice(signal.symbol),
+        ENRICHMENT_CALL_TIMEOUT_MS,
+        `getStockPrice(${signal.symbol})`
+      );
+    } catch { /* use payload price as fallback */ }
+
+    const fallback = currentPrice || (toNumber(payload.price) ?? 0);
+    const indicators = {
+      ema8: [fallback],
+      ema21: [fallback],
+      atr: [0],
+      ttmSqueeze: { state: 'off', momentum: 0 },
+    };
+
+    const enrichedData = {
+      symbol: signal.symbol,
+      timeframe: signal.timeframe,
+      currentPrice: fallback,
+      indicators,
+      candlesCount: 0,
+      gex: null,
+      optionsFlow: null,
+      confluence: null,
+    };
+
+    return { enrichedData, riskResult, rejectionReason: null, queueUntil: null, queueReason: null, decisionOnly: false };
+  }
+
   if (!isMarketOpen && !testBypass) {
     const signalAgeMinutes = (Date.now() - signalTimestamp.getTime()) / 60000;
     riskResult.signalAgeMinutes = Math.round(signalAgeMinutes * 10) / 10;
