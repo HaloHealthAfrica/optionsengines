@@ -518,6 +518,114 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
   });
 });
 
+/** GET /monitoring/e2e - E2E dashboard view: last 20 webhooks, bias, risk, guard, exit, PnL, adaptive */
+router.get('/e2e', requireAuth, async (req: Request, res: Response) => {
+  const limit = Number(req.query.limit) || 20;
+  const windowHours = Number(req.query.windowHours) || 24;
+
+  try {
+    const [webhooksRows, biasRows, adaptiveRows, pnlRows, positionsRows] = await Promise.all([
+      db.query(
+        `SELECT we.event_id, we.signal_id, we.status, we.symbol, we.direction, we.timeframe,
+                we.processing_time_ms, we.created_at, we.is_test, we.error_message
+         FROM webhook_events we
+         WHERE we.created_at > NOW() - ($2::int || ' hours')::interval
+         ORDER BY we.created_at DESC
+         LIMIT $1`,
+        [limit, windowHours]
+      ),
+      db.query(
+        `SELECT symbol, state_json, event_ts_ms, created_at
+         FROM bias_state_history
+         WHERE created_at > NOW() - ($1::int || ' hours')::interval
+         ORDER BY created_at DESC
+         LIMIT 50`
+      ).catch(() => ({ rows: [] })),
+      db.query(
+        `SELECT config_json FROM bias_config WHERE config_key IN ('adaptive', 'risk')`
+      ).catch(() => ({ rows: [] })),
+      db.query(
+        `SELECT COALESCE(SUM(realized_pnl), 0) AS total_pnl,
+                COUNT(*) FILTER (WHERE realized_pnl > 0)::int AS wins,
+                COUNT(*) FILTER (WHERE realized_pnl < 0)::int AS losses,
+                COUNT(*)::int AS closed_count
+         FROM refactored_positions
+         WHERE status = 'closed' AND exit_timestamp > NOW() - ($1::int || ' hours')::interval`,
+        [windowHours]
+      ),
+      db.query(
+        `SELECT position_id, symbol, status, realized_pnl, exit_reason, exit_type, exit_timestamp
+         FROM refactored_positions
+         WHERE status = 'closed' AND exit_timestamp > NOW() - ($1::int || ' hours')::interval
+         ORDER BY exit_timestamp DESC
+         LIMIT 20`,
+        [windowHours]
+      ),
+    ]);
+
+    const adaptiveByKey: Record<string, unknown> = {};
+    for (const row of adaptiveRows.rows) {
+      const r = row as { config_key?: string; config_json?: unknown };
+      if (r.config_key) adaptiveByKey[r.config_key] = r.config_json;
+    }
+
+    const pnl = pnlRows.rows[0];
+    const totalPnl = Number(pnl?.total_pnl ?? 0);
+    const wins = Number(pnl?.wins ?? 0);
+    const losses = Number(pnl?.losses ?? 0);
+    const closedCount = Number(pnl?.closed_count ?? 0);
+
+    return res.json({
+      e2e_test_mode: config.e2eTestMode,
+      timestamp: new Date().toISOString(),
+      webhooks: webhooksRows.rows.map((r: any) => ({
+        event_id: r.event_id,
+        signal_id: r.signal_id,
+        status: r.status,
+        symbol: r.symbol,
+        direction: r.direction,
+        timeframe: r.timeframe,
+        processing_time_ms: r.processing_time_ms,
+        created_at: r.created_at,
+        is_test: r.is_test,
+        error_message: r.error_message,
+      })),
+      bias_state: biasRows.rows.slice(0, 10).map((r: any) => {
+        const state = r.state_json as Record<string, unknown> | null;
+        return {
+          symbol: r.symbol,
+          bias_score: state?.bias_score ?? state?.score ?? null,
+          regime_type: state?.regime_type ?? state?.regime ?? null,
+          updated_at: r.created_at,
+        };
+      }),
+      risk_config: adaptiveByKey.risk ?? null,
+      adaptive_status: {
+        adaptive: adaptiveByKey.adaptive ?? null,
+        enabled: (adaptiveByKey.adaptive as Record<string, unknown>)?.enabled !== false,
+      },
+      pnl: {
+        total: totalPnl,
+        wins,
+        losses,
+        closed_count: closedCount,
+        win_rate: closedCount > 0 ? Math.round((wins / closedCount) * 100) : 0,
+      },
+      recent_closed: positionsRows.rows.map((r: any) => ({
+        position_id: r.position_id,
+        symbol: r.symbol,
+        realized_pnl: r.realized_pnl,
+        exit_reason: r.exit_reason,
+        exit_type: r.exit_type,
+        exit_timestamp: r.exit_timestamp,
+      })),
+    });
+  } catch (err) {
+    logger.error('E2E monitor fetch failed', err);
+    return res.status(500).json({ error: 'Failed to fetch E2E monitor data' });
+  }
+});
+
 router.get('/details', requireAuth, async (req: Request, res: Response) => {
   const type = String(req.query.type || '').toLowerCase();
   const id = String(req.query.id || '');

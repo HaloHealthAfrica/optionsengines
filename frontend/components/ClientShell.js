@@ -12,6 +12,7 @@ import DecisionEnginePage from './DecisionEnginePage';
 import TestingConsole from './TestingConsole';
 import IntelConsole from './IntelConsole';
 import AdaptiveControlPanel from './AdaptiveControlPanel';
+import E2EMonitor from './E2EMonitor';
 
 const tabs = [
   { id: 'dashboard', label: 'Dashboard' },
@@ -19,6 +20,7 @@ const tabs = [
   { id: 'orders', label: 'Orders' },
   { id: 'history', label: 'History' },
   { id: 'monitoring', label: 'Monitoring' },
+  { id: 'e2e-monitor', label: 'E2E Monitor' },
   { id: 'intel-console', label: 'Intel Console' },
   { id: 'decision-engines', label: 'Decision Engines' },
   { id: 'feedback-tuner', label: 'Feedback Tuner' },
@@ -57,6 +59,8 @@ export default function ClientShell() {
         return <History />;
       case 'monitoring':
         return <Monitoring />;
+      case 'e2e-monitor':
+        return <E2EMonitor />;
       case 'intel-console':
         return <IntelConsole />;
       case 'decision-engines':

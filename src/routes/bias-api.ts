@@ -149,7 +149,11 @@ router.post('/run-adaptive', requireAuth, async (req: Request, res: Response) =>
     const { runAdaptiveTuning } = await import(
       '../services/performance-feedback/adaptive-tuner.service.js'
     );
-    const result = await runAdaptiveTuning({ forceRun: true });
+    const { config } = await import('../config/index.js');
+    const result = await runAdaptiveTuning({
+      forceRun: true,
+      dryRun: config.e2eTestMode,
+    });
     return res.json({
       updated: result.updated,
       changes: result.changes,

@@ -43,7 +43,7 @@ export class MarketDataService {
       .filter((value) => ['alpaca', 'polygon', 'marketdata', 'twelvedata'].includes(value));
     this.providerPriority = (normalizedProviders.length > 0
       ? normalizedProviders
-      : ['alpaca', 'twelvedata']) as Provider[];
+      : ['twelvedata', 'marketdata']) as Provider[];
 
     // Initialize circuit breakers for all providers
     this.providerPriority.forEach((provider) => {
@@ -227,10 +227,8 @@ export class MarketDataService {
           async () => {
             await rateLimiter.waitForToken(providerName === 'marketdata' ? 'twelvedata' : providerName);
             switch (providerName) {
-              case 'alpaca': {
-                const alpacaQuote = await this.alpaca.getLatestQuote(symbol);
-                return alpacaQuote.mid;
-              }
+              case 'alpaca':
+                throw new Error('Alpaca disabled - use twelvedata, marketdata, or unusualwhales');
               case 'polygon': {
                 const polygonQuote = await this.polygon.getLatestQuote(symbol);
                 return polygonQuote.mid;

@@ -98,7 +98,7 @@ async function buildRecommendation(
           return null;
         }
       }
-      if (mtfBias.unifiedState) {
+      if (mtfBias.unifiedState && config.enablePortfolioGuard) {
         let openPositions: Awaited<ReturnType<typeof loadOpenPositions>> = [];
         try {
           openPositions = await loadOpenPositions();
@@ -290,7 +290,7 @@ async function buildEngineBRecommendation(
           return null;
         }
       }
-      if (mtfBiasB.unifiedState) {
+      if (mtfBiasB.unifiedState && config.enablePortfolioGuard) {
         let openPositions: Awaited<ReturnType<typeof loadOpenPositions>> = [];
         try {
           openPositions = await loadOpenPositions();

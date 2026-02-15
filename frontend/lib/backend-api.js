@@ -379,6 +379,23 @@ export async function backendGetMonitoringStatus(token, limit = 25, testFilter =
   return response.json();
 }
 
+export async function backendGetE2EMonitor(token, limit = 20, windowHours = 24) {
+  const response = await backendFetch(
+    `/monitoring/e2e?limit=${limit}&windowHours=${windowHours}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch E2E monitor data');
+  }
+
+  return response.json();
+}
+
 export async function backendGetIntelLatest(token, symbol = 'SPY') {
   const response = await backendFetch(`/intel/latest?symbol=${encodeURIComponent(symbol)}`, {
     headers: {

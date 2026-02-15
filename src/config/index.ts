@@ -113,6 +113,7 @@ interface Config {
   // MTF Bias Processing System
   enableMTFBiasPipeline: boolean;
   requireMTFBiasForEntry: boolean;
+  enablePortfolioGuard: boolean;
   biasControlDebugMode: boolean;
 
   // Confluence (Flow page, trade gate, position sizing)
@@ -146,6 +147,9 @@ interface Config {
 
   // Logging
   logLevel: string;
+
+  // E2E Test Mode (dry run, no real execution, full audit logging)
+  e2eTestMode: boolean;
 }
 
 function getEnvVar(key: string, defaultValue?: string): string {
@@ -206,10 +210,11 @@ export const config: Config = {
   hmacSecret: getEnvVar('HMAC_SECRET', ''),
 
   // Market Data
-  marketDataProvider: getEnvVar('MARKET_DATA_PROVIDER', 'alpaca'),
+  marketDataProvider: getEnvVar('MARKET_DATA_PROVIDER', 'twelvedata'),
+  // Preferred: Unusual Whales (options/gamma/flow), TwelveData, MarketData.app. Alpaca commented out.
   marketDataProviderPriority: getEnvVar(
     'MARKET_DATA_PROVIDER_PRIORITY',
-    'alpaca,twelvedata'
+    'twelvedata,marketdata'
   )
     .split(',')
     .map((value) => value.trim())
@@ -312,7 +317,11 @@ export const config: Config = {
   enableMTFBiasPipeline: getEnvVarBoolean('ENABLE_MTF_BIAS_PIPELINE', true),
   requireMTFBiasForEntry: getEnvVarBoolean(
     'REQUIRE_MTF_BIAS_FOR_ENTRY',
-    nodeEnv !== 'test'
+    nodeEnv !== 'test' && !getEnvVarBoolean('E2E_TEST_MODE', false)
+  ),
+  enablePortfolioGuard: getEnvVarBoolean(
+    'ENABLE_PORTFOLIO_GUARD',
+    !getEnvVarBoolean('E2E_TEST_MODE', false)
   ),
   biasControlDebugMode: getEnvVarBoolean('BIAS_CONTROL_DEBUG_MODE', false),
 
@@ -365,6 +374,9 @@ export const config: Config = {
 
   // Logging
   logLevel: getEnvVar('LOG_LEVEL', 'info'),
+
+  // E2E Test Mode: no real brokerage, paper only, full logging, no adaptive changes
+  e2eTestMode: getEnvVarBoolean('E2E_TEST_MODE', false),
 };
 
 // Validate critical configuration

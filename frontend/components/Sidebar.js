@@ -19,6 +19,7 @@ const iconMap = {
   orders: Activity,
   history: Activity,
   monitoring: RadioTower,
+  'e2e-monitor': Activity,
   'intel-console': RadioTower,
   'decision-engines': BarChart3,
   'feedback-tuner': Sliders,
