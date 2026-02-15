@@ -1,4 +1,5 @@
 import type { GEXState, LiquidityState, RegimeType, SetupType } from '../shared/types.js';
+import type { UnifiedBiasState } from '../mtfBias/types-v3.js';
 
 export interface EntryDecisionInput {
   symbol: string;
@@ -29,6 +30,8 @@ export interface EntryDecisionInput {
     portfolioDelta: number;
     portfolioTheta: number;
   };
+  /** V3: Unified bias state for tier rules (intent, space, liquidity, trigger) */
+  marketState?: UnifiedBiasState;
 }
 
 export interface EntryDecisionOutput {

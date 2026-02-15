@@ -33,6 +33,10 @@ export interface MTFBiasContext {
   put_wall?: number | null;
   vol_regime_bias?: string | null;
   gamma_updated_at?: Date | null;
+  /** V3: trade suppressed by effective gating */
+  tradeSuppressed?: boolean;
+  /** V3: full unified state when from aggregator (for entry decision tier rules) */
+  unifiedState?: import('../../lib/mtfBias/types-v3.js').UnifiedBiasState;
 }
 
 export async function getSymbolMarketState(symbol: string): Promise<SymbolMarketState | null> {
@@ -89,8 +93,19 @@ function rowToSymbolMarketState(row: Record<string, unknown>): SymbolMarketState
   };
 }
 
-/** Structured input for Engine A & B. Returns null if no bias state → HOLD. Includes merged gamma context when available. */
+/** Structured input for Engine A & B. Returns null if no bias state → HOLD. Prefers V3 aggregator, falls back to legacy symbol_market_state. */
 export async function getMTFBiasContext(symbol: string): Promise<MTFBiasContext | null> {
+  const { getCurrentState } = await import('../bias-state-aggregator/bias-state-aggregator.service.js');
+  const { adaptToMTFBiasContext } = await import('../bias-state-aggregator/mtf-context-adapter.js');
+
+  const unifiedState = await getCurrentState(symbol);
+  if (unifiedState) {
+    const ctx = adaptToMTFBiasContext(unifiedState);
+    ctx.tradeSuppressed = unifiedState.effective.tradeSuppressed;
+    ctx.unifiedState = unifiedState;
+    return ctx;
+  }
+
   const state = await getSymbolMarketState(symbol);
   if (!state) return null;
 

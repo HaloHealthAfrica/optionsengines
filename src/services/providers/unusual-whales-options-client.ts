@@ -301,7 +301,7 @@ export class UnusualWhalesOptionsClient {
     const tsRaw = r.tape_time ?? r.timestamp ?? r.time ?? r.t;
     const ts = typeof tsRaw === 'string' ? new Date(tsRaw).getTime() : this.toNum(tsRaw);
     return {
-      timestamp: Number.isFinite(ts) ? ts : Date.now(),
+      timestamp: Number.isFinite(ts) && ts != null ? ts : Date.now(),
       callVolume: callVol,
       putVolume: putVol,
       callPremium: callPrem,

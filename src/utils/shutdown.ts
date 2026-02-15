@@ -12,6 +12,7 @@ type ShutdownDeps = {
   cache: { close: () => void };
   redisCache?: { disconnect: () => Promise<void> };
   webhookIngestion?: { disconnect: () => Promise<void> };
+  biasRedis?: { disconnect: () => Promise<void> };
   cacheWarmer?: { stop: () => Promise<void> };
   stopRealtimeWebSocketServer?: () => void;
   logger?: typeof defaultLogger;
@@ -59,6 +60,9 @@ export function createShutdownHandler(deps: ShutdownDeps) {
       }
       if (deps.webhookIngestion) {
         await deps.webhookIngestion.disconnect();
+      }
+      if (deps.biasRedis) {
+        await deps.biasRedis.disconnect();
       }
       if (deps.stopRealtimeWebSocketServer) {
         deps.stopRealtimeWebSocketServer();

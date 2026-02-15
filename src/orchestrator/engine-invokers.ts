@@ -45,8 +45,9 @@ async function buildRecommendation(
   context?: MarketContext
 ): Promise<TradeRecommendation | null> {
   try {
+    let mtfBias: Awaited<ReturnType<typeof getMTFBiasContext>> = null;
     if (config.requireMTFBiasForEntry) {
-      const mtfBias = await getMTFBiasContext(signal.symbol);
+      mtfBias = await getMTFBiasContext(signal.symbol);
       if (!mtfBias) {
         logger.info('Engine A/B HOLD: no MTF bias state', { symbol: signal.symbol });
         Sentry.addBreadcrumb({
@@ -57,10 +58,25 @@ async function buildRecommendation(
         });
         return null;
       }
+      if (mtfBias.tradeSuppressed) {
+        logger.info('Engine A/B HOLD: trade suppressed by bias gating', { symbol: signal.symbol });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'Trade suppressed by effective gating',
+          level: 'info',
+          data: { symbol: signal.symbol },
+        });
+        return null;
+      }
     }
 
     if (engine === 'A' && context?.enrichment) {
-      const entryInput = buildEntryDecisionInput(signal, context, context.enrichment);
+      const entryInput = buildEntryDecisionInput(
+        signal,
+        context,
+        context.enrichment,
+        mtfBias?.unifiedState
+      );
       const entryResult = evaluateEntryDecision(entryInput);
       if (entryResult.action === 'BLOCK') {
         logger.info('Engine A entry decision blocked', {
@@ -149,6 +165,16 @@ async function buildEngineBRecommendation(
         Sentry.addBreadcrumb({
           category: 'engine',
           message: 'MTF bias required but missing - HOLD',
+          level: 'info',
+          data: { symbol: signal.symbol },
+        });
+        return null;
+      }
+      if (mtfBias.tradeSuppressed) {
+        logger.info('Engine B HOLD: trade suppressed by bias gating', { symbol: signal.symbol });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'Trade suppressed by effective gating',
           level: 'info',
           data: { symbol: signal.symbol },
         });

@@ -13,6 +13,8 @@ export const MTF_BIAS_STREAMS = {
   GAMMA_CONTEXT: 'gamma_context_stream',
   SETUP_VALIDATION: 'setup_validation_stream',
   TRADE_EXECUTION: 'trade_execution_stream',
+  /** V3 Bias State Aggregator - worker persists to bias_state_current/history */
+  BIAS_STATE_PERSIST: 'bias_state_persist_stream',
 } as const;
 
 const CONSUMER_GROUP = 'mtf_bias_consumers';

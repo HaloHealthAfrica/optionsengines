@@ -8,6 +8,7 @@ import { logger } from '../utils/logger.js';
 import { mtfBiasStreamService } from '../services/mtf-bias-stream.service.js';
 import { pollAndProcessMTFBiasStream } from '../services/mtf-bias/state-aggregator.service.js';
 import { pollAndProcessMarketStateStream } from '../services/mtf-bias/conflict-resolver.service.js';
+import { pollAndPersistBiasState } from '../services/bias-state-aggregator/bias-state-persistence.service.js';
 import { pollAndProcessGammaContextStream } from '../services/mtf-bias/gamma-merge.service.js';
 import { pollAndProcessSetupValidationStream } from '../services/mtf-bias/setup-validator.service.js';
 import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
@@ -80,15 +81,22 @@ export class MTFBiasPipelineWorker {
 
     updateWorkerStatus('MTFBiasPipelineWorker', { lastRunAt: new Date() });
 
-    const [aggregated, resolved, gammaMerged, validated] = await Promise.all([
+    const [aggregated, resolved, gammaMerged, validated, biasPersisted] = await Promise.all([
       pollAndProcessMTFBiasStream(),
       pollAndProcessMarketStateStream(),
       pollAndProcessGammaContextStream(),
       pollAndProcessSetupValidationStream(),
+      pollAndPersistBiasState(),
     ]);
 
-    if (aggregated > 0 || resolved > 0 || gammaMerged > 0 || validated > 0) {
-      logger.debug('MTF bias pipeline tick', { aggregated, resolved, gammaMerged, validated });
+    if (aggregated > 0 || resolved > 0 || gammaMerged > 0 || validated > 0 || biasPersisted > 0) {
+      logger.debug('MTF bias pipeline tick', {
+        aggregated,
+        resolved,
+        gammaMerged,
+        validated,
+        biasPersisted,
+      });
     }
   }
 }

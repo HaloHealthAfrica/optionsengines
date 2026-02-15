@@ -41,11 +41,13 @@ function dealerPositionToRegime(dealerPosition: string | undefined): RegimeType 
 /**
  * Build EntryDecisionInput from orchestrator signal, context, and enrichment.
  * Uses sensible defaults when data is unavailable.
+ * Pass marketState when available for tier rules (intent, space, liquidity, trigger).
  */
 export function buildEntryDecisionInput(
   signal: Signal,
   context: MarketContext,
-  enrichment: EnrichmentLike
+  enrichment: EnrichmentLike,
+  marketState?: EntryDecisionInput['marketState']
 ): EntryDecisionInput {
   const ts = signal.timestamp instanceof Date ? signal.timestamp : new Date(signal.timestamp);
   const sessionEval = evaluateMarketSession({
@@ -98,5 +100,6 @@ export function buildEntryDecisionInput(
       portfolioDelta: 0,
       portfolioTheta: 0,
     },
+    ...(marketState && { marketState }),
   };
 }

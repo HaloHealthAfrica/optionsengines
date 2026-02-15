@@ -15,6 +15,7 @@ import { MigrationRunner } from './migrations/runner.js';
 import { logConfigSummary } from './utils/config-log.js';
 import { createTestingWebSocketServer } from './services/testing-live.service.js';
 import { webhookIngestionService } from './services/webhook-ingestion.service.js';
+import { biasRedisService } from './services/bias-state-aggregator/bias-redis.service.js';
 import { startRealtimeWebSocketServer, stopRealtimeWebSocketServer } from './services/realtime-websocket.service.js';
 
 async function bootstrap(): Promise<void> {
@@ -45,6 +46,7 @@ async function bootstrap(): Promise<void> {
     try {
       await redisCache.connect(config.redisUrl);
       await webhookIngestionService.connect();
+      await biasRedisService.connect();
     } catch (error) {
       Sentry.captureException(error, {
         tags: { stage: 'bootstrap', step: 'redis_init' },
@@ -84,6 +86,7 @@ async function bootstrap(): Promise<void> {
     cache,
     redisCache,
     webhookIngestion: webhookIngestionService,
+    biasRedis: biasRedisService,
     cacheWarmer,
     logger,
     stopRealtimeWebSocketServer,

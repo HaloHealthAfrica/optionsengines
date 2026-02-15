@@ -625,33 +625,51 @@ export async function handleWebhook(req: Request, res: Response): Promise<Respon
 
 /**
  * POST /webhook - Receive TradingView signals and MTF Bias payloads
- * MTF Bias (event_type=BIAS_SNAPSHOT) routed here when TradingView can only send to /webhook
+ * V3 (source=MTF_BIAS_ENGINE_V3) → BiasStateAggregator
+ * Legacy BIAS_SNAPSHOT → handleMTFBiasWebhook (V1 pipeline)
  */
 router.post('/', async (req: Request, res: Response) => {
   const body = req.body;
-  if (
-    body &&
-    typeof body === 'object' &&
-    body.event_type === 'BIAS_SNAPSHOT' &&
-    typeof body.event_id_raw === 'string'
-  ) {
-    const { handleMTFBiasWebhook } = await import('../services/mtf-bias-webhook-handler.service.js');
-    const result = await handleMTFBiasWebhook(body);
-    if (result.ok) {
-      return res.status(200).json({
-        success: true,
-        event_id: result.eventId,
-        symbol: result.symbol,
-        status: result.status,
-      });
+  if (body && typeof body === 'object' && typeof body.event_id_raw === 'string') {
+    const { shouldRouteToV3, update } = await import(
+      '../services/bias-state-aggregator/bias-state-aggregator.service.js'
+    );
+    if (shouldRouteToV3(body)) {
+      const result = await update(body);
+      if (result.ok) {
+        return res.status(200).json({
+          success: true,
+          event_id: result.eventId,
+          symbol: result.state?.symbol ?? (body as { symbol?: string }).symbol,
+          status: result.status,
+        });
+      }
+      if (result.status === 422) {
+        return res.status(422).json({ error: result.error, details: result.details });
+      }
+      if (result.status === 400) {
+        return res.status(400).json({ error: result.error, details: result.details });
+      }
+      return res.status(500).json({ error: result.error });
     }
-    if (result.status === 422) {
-      return res.status(422).json({
-        error: result.error,
-        details: result.details,
-      });
+    if (body.event_type === 'BIAS_SNAPSHOT') {
+      const { handleMTFBiasWebhook } = await import(
+        '../services/mtf-bias-webhook-handler.service.js'
+      );
+      const result = await handleMTFBiasWebhook(body);
+      if (result.ok) {
+        return res.status(200).json({
+          success: true,
+          event_id: result.eventId,
+          symbol: result.symbol,
+          status: result.status,
+        });
+      }
+      if (result.status === 422) {
+        return res.status(422).json({ error: result.error, details: result.details });
+      }
+      return res.status(500).json({ error: result.error });
     }
-    return res.status(500).json({ error: result.error });
   }
   return handleWebhook(req, res);
 });
