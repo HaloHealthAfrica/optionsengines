@@ -144,12 +144,33 @@ export class PaperExecutorWorker {
 
       const processOrder = async (order: PendingOrder): Promise<'filled' | 'failed'> => {
         try {
-          const price = await fetchOptionPrice(
+          let price = await fetchOptionPrice(
             order.symbol,
             order.strike,
             new Date(order.expiration),
             order.type
           );
+
+          // For test signals, use the engine's entry_price as fallback when market data is unavailable
+          if (price === null && order.signal_id) {
+            const sigRow = await db.query(
+              `SELECT s.raw_payload, dr.entry_price
+               FROM signals s
+               LEFT JOIN decision_recommendations dr ON dr.signal_id = s.signal_id AND dr.is_shadow = false
+               WHERE s.signal_id = $1`,
+              [order.signal_id]
+            );
+            const sig = sigRow.rows[0];
+            const isTestOrder = sig?.raw_payload?.is_test || config.e2eTestMode;
+            if (isTestOrder) {
+              price = Number(sig?.entry_price) || (Number(sig?.raw_payload?.price) * 0.02) || 1.0;
+              logger.info('Test signal: using fallback option price for paper fill', {
+                order_id: order.order_id,
+                signal_id: order.signal_id,
+                fallbackPrice: price,
+              });
+            }
+          }
 
           if (price === null) {
             await db.query(
