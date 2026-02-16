@@ -758,6 +758,7 @@ export default function StratCommandCenter() {
   const [apiData, setApiData] = useState(null);
   const [apiError, setApiError] = useState(null);
   const [planTab, setPlanTab] = useState('Active');
+  const [watchlistInput, setWatchlistInput] = useState('');
 
   const loadApiData = useCallback(async () => {
     try {
@@ -807,6 +808,41 @@ export default function StratCommandCenter() {
       console.error('Load plans failed:', err);
     }
   }, []);
+
+  const handleAddTicker = useCallback(async () => {
+    const sym = watchlistInput.trim().toUpperCase();
+    if (!sym) return;
+    try {
+      const res = await fetch('/api/strat-plan/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: sym }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Failed to add ticker');
+      setWatchlistInput('');
+      loadApiData();
+    } catch (err) {
+      console.error('Add ticker failed:', err);
+      setApiError(err?.message);
+    }
+  }, [watchlistInput, loadApiData]);
+
+  const handleRemoveTicker = useCallback(async (symbol) => {
+    try {
+      const res = await fetch(`/api/strat-plan/watchlist/${encodeURIComponent(symbol)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json?.error || 'Failed to remove ticker');
+      }
+      loadApiData();
+    } catch (err) {
+      console.error('Remove ticker failed:', err);
+      setApiError(err?.message);
+    }
+  }, [loadApiData]);
 
   const wsUrl = typeof window !== 'undefined' && process.env.NEXT_PUBLIC_WS_URL
     ? process.env.NEXT_PUBLIC_WS_URL
@@ -1142,6 +1178,66 @@ export default function StratCommandCenter() {
           </button>
         </div>
       </div>
+
+      {/* Tracked Tickers - symbols the system tracks for plans */}
+      {!isDemoMode && (
+        <div className="card overflow-hidden p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+              Tracked Tickers
+            </h2>
+            <span className="muted text-xs">
+              {(apiData?.watchlist?.count ?? 0)}/{(apiData?.watchlist?.max_tickers ?? 10)}
+            </span>
+          </div>
+          <p className="muted mb-3 text-xs">
+            Add up to {(apiData?.watchlist?.max_tickers ?? 10)} tickers. Plans and webhook signals are only accepted for symbols in this list.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {(apiData?.watchlist?.entries ?? []).map((e) => (
+              <span
+                key={e.symbol}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-mono font-medium dark:border-slate-700 dark:bg-slate-800"
+              >
+                {e.symbol}
+                <button
+                  type="button"
+                  onClick={() => handleRemoveTicker(e.symbol)}
+                  className="rounded p-0.5 text-slate-400 hover:bg-rose-100 hover:text-rose-600 dark:hover:bg-rose-900/30 dark:hover:text-rose-400"
+                  aria-label={`Remove ${e.symbol}`}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+            {(!apiData?.watchlist?.at_capacity) && (
+              <form
+                onSubmit={(ev) => { ev.preventDefault(); handleAddTicker(); }}
+                className="inline-flex items-center gap-1"
+              >
+                <input
+                  type="text"
+                  value={watchlistInput}
+                  onChange={(e) => setWatchlistInput(e.target.value.toUpperCase())}
+                  placeholder="Add ticker..."
+                  maxLength={10}
+                  className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-mono dark:border-slate-700 dark:bg-slate-900"
+                />
+                <button
+                  type="submit"
+                  className="flex items-center gap-1 rounded-lg bg-slate-900 px-2 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                >
+                  <Plus size={12} />
+                  Add
+                </button>
+              </form>
+            )}
+            {(apiData?.watchlist?.entries ?? []).length === 0 && (
+              <span className="muted text-xs">No tickers yet. Add symbols to start tracking.</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Stats Bar - clickable to filter */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
