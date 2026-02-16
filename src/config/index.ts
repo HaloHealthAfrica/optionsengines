@@ -161,6 +161,15 @@ interface Config {
 
   // E2E Test Mode (dry run, no real execution, full audit logging)
   e2eTestMode: boolean;
+
+  // Strat Plan Lifecycle Engine (focused execution, max 10 tickers)
+  enableStratPlanLifecycle: boolean;
+  stratPlanMaxWatchlistTickers: number;
+  stratPlanMaxConcurrentPlans: number;
+  stratPlanMaxPlansPerTicker: number;
+  stratPlanMaxInForce: number;
+  stratPlanWebhookAutoAdd: boolean;
+  stratPlanKillSwitchFailures: number;
 }
 
 function getEnvVar(key: string, defaultValue?: string): string {
@@ -399,6 +408,15 @@ export const config: Config = {
 
   // E2E Test Mode: no real brokerage, paper only, full logging, no adaptive changes
   e2eTestMode: getEnvVarBoolean('E2E_TEST_MODE', false),
+
+  // Strat Plan Lifecycle Engine
+  enableStratPlanLifecycle: getEnvVarBoolean('ENABLE_STRAT_PLAN_LIFECYCLE', false),
+  stratPlanMaxWatchlistTickers: getEnvVarNumber('STRAT_PLAN_MAX_WATCHLIST_TICKERS', 10),
+  stratPlanMaxConcurrentPlans: getEnvVarNumber('STRAT_PLAN_MAX_CONCURRENT_PLANS', 10),
+  stratPlanMaxPlansPerTicker: getEnvVarNumber('STRAT_PLAN_MAX_PLANS_PER_TICKER', 2),
+  stratPlanMaxInForce: getEnvVarNumber('STRAT_PLAN_MAX_IN_FORCE', 3),
+  stratPlanWebhookAutoAdd: getEnvVarBoolean('STRAT_PLAN_WEBHOOK_AUTO_ADD', false),
+  stratPlanKillSwitchFailures: getEnvVarNumber('STRAT_PLAN_KILL_SWITCH_FAILURES', 3),
 };
 
 // Validate critical configuration

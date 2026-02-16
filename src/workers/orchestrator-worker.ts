@@ -6,6 +6,7 @@ import { OrchestratorService } from '../orchestrator/orchestrator-service.js';
 import { logger } from '../utils/logger.js';
 import { db } from '../services/database.service.js';
 import { config } from '../config/index.js';
+import { planToSignalBridge, stratPlanLifecycleService } from '../services/strat-plan/index.js';
 import * as Sentry from '@sentry/node';
 import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
 import { setLastSignalProcessed, updateWorkerStatus } from '../services/trade-engine-health.service.js';
@@ -74,6 +75,20 @@ export class OrchestratorWorker {
       }
       const startedAt = Date.now();
       updateWorkerStatus('OrchestratorWorker', { lastRunAt: new Date() });
+
+      // Strat Plan Lifecycle: promote queued plans, then bridge eligible plans to signals
+      if (config.enableStratPlanLifecycle) {
+        try {
+          await stratPlanLifecycleService.promoteQueuedToPlanned();
+          const bridgedIds = await planToSignalBridge.bridgeEligiblePlans(3);
+          if (bridgedIds.length > 0) {
+            logger.info('Strat plan bridge created signals', { signal_ids: bridgedIds });
+          }
+        } catch (bridgeErr) {
+          logger.warn('Strat plan bridge failed', { error: bridgeErr });
+        }
+      }
+
       const results = await this.orchestrator.processSignals(
         config.orchestratorBatchSize,
         undefined,

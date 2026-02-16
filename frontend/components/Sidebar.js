@@ -5,6 +5,7 @@ import {
   Activity,
   BarChart3,
   LayoutDashboard,
+  ListChecks,
   LogOut,
   Moon,
   RadioTower,
@@ -15,6 +16,7 @@ import {
 
 const iconMap = {
   dashboard: LayoutDashboard,
+  'strat-plan': ListChecks,
   flow: BarChart3,
   orders: Activity,
   history: Activity,

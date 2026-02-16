@@ -13,9 +13,11 @@ import TestingConsole from './TestingConsole';
 import IntelConsole from './IntelConsole';
 import AdaptiveControlPanel from './AdaptiveControlPanel';
 import E2EMonitor from './E2EMonitor';
+import StratPlan from './StratPlan';
 
 const tabs = [
   { id: 'dashboard', label: 'Dashboard' },
+  { id: 'strat-plan', label: 'Strat Plan' },
   { id: 'flow', label: 'Flow' },
   { id: 'orders', label: 'Orders' },
   { id: 'history', label: 'History' },
@@ -51,6 +53,8 @@ export default function ClientShell() {
 
   const ActiveView = useMemo(() => {
     switch (activeTab) {
+      case 'strat-plan':
+        return <StratPlan />;
       case 'flow':
         return <Flow />;
       case 'orders':

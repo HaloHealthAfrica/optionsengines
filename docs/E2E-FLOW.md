@@ -127,6 +127,44 @@ POST /webhook (Express)
 
 ---
 
+## Strat Plan Lifecycle Engine (Optional)
+
+When `ENABLE_STRAT_PLAN_LIFECYCLE=true`, the system operates as a **focused tactical execution engine** rather than a broad market scanner:
+
+| Constraint | Default | Description |
+|------------|---------|-------------|
+| Max watchlist tickers | 10 | Only symbols in active watchlist are eligible |
+| Max concurrent plans | 10 | Total plans in lifecycle (PLANNED, QUEUED, IN_FORCE, TRIGGERED) |
+| Max plans per ticker | 2 | Prevents symbol overlap |
+| Max IN_FORCE simultaneous | 3 | Optional risk control |
+
+**Flow:**
+```
+Watchlist (Max 10 Tickers)
+        ↓
+Plan Ingestion (Manual + Webhook)
+        ↓
+Plan Lifecycle Manager
+        ↓
+Plan Enrichment (existing providers)
+        ↓
+Orchestrator
+        ↓
+Engine A + Engine B
+        ↓
+Strike Selector → Order Management
+```
+
+**API Endpoints:**
+- `GET/POST/DELETE /api/strat-plan/watchlist` — Watchlist control
+- `POST /api/strat-plan/plans` — Manual plan creation
+- `GET /api/strat-plan/dashboard` — Plan dashboard
+- `POST /api/strat-plan/webhook` — Plan webhook (no auth required)
+
+**States:** PLANNED → QUEUED → IN_FORCE → TRIGGERED → EXECUTED | EXPIRED | REJECTED
+
+---
+
 # 2. ARCHITECTURE DIAGRAM (TEXTUAL)
 
 ## Layer 1 — Ingestion

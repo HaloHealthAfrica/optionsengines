@@ -8,6 +8,8 @@ import { logger } from '../utils/logger.js';
 import { cache } from '../services/cache.service.js';
 import { errorTracker } from '../services/error-tracker.service.js';
 import { marketData } from '../services/market-data.js';
+import { config } from '../config/index.js';
+import { watchlistManager, stratPlanLifecycleService, getStratPlanConfig } from '../services/strat-plan/index.js';
 
 const router = Router();
 
@@ -284,7 +286,33 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
       return data;
     })().catch(err => { errors.pnl_curve = err.message; return []; }),
     
-    // 9. Daily Returns (cached, 15-min TTL)
+    // 9. Strat Plan Lifecycle (when enabled)
+    (config.enableStratPlanLifecycle
+      ? (async () => {
+          const [watchlist, lifecycle, cfg] = await Promise.all([
+            watchlistManager.getStatus(),
+            stratPlanLifecycleService.getLifecycleStatus(),
+            getStratPlanConfig(),
+          ]);
+          return {
+            watchlist: {
+              entries: watchlist.entries,
+              count: watchlist.count,
+              max_tickers: cfg.maxWatchlistTickers,
+              at_capacity: watchlist.atCapacity,
+            },
+            plans: {
+              total: lifecycle.totalPlans,
+              by_state: lifecycle.byState,
+              in_force_count: lifecycle.inForceCount,
+              plans_by_ticker: lifecycle.plansByTicker,
+              at_capacity: lifecycle.atCapacity,
+            },
+          };
+        })()
+      : Promise.resolve(null)),
+
+    // 10. Daily Returns (cached, 15-min TTL)
     (async () => {
       const days = 14;
       const cacheKey = redisCache.buildKey('analytics', { type: 'returns', days: days.toString() });
@@ -317,7 +345,8 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
   const sourcePerformance = results[5].status === 'fulfilled' ? results[5].value : [];
   const gex = results[6].status === 'fulfilled' ? results[6].value : null;
   const pnlCurve = results[7].status === 'fulfilled' ? results[7].value : [];
-  const dailyReturns = results[8].status === 'fulfilled' ? results[8].value : [];
+  const stratPlanLifecycle = results[8].status === 'fulfilled' ? results[8].value : null;
+  const dailyReturns = results[9].status === 'fulfilled' ? results[9].value : [];
 
   logger.info('Dashboard aggregated request', {
     responseTimeMs: responseTime,
@@ -335,6 +364,7 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
     source_performance: sourcePerformance,
     gex,
     pnl_curve: pnlCurve,
+    strat_plan_lifecycle: stratPlanLifecycle,
     daily_returns: dailyReturns,
     metadata: {
       response_time_ms: responseTime,

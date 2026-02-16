@@ -29,6 +29,7 @@ import biasApiRoutes from './routes/bias-api.js';
 import cronRoutes from './routes/cron.js';
 import gammaRoutes from './routes/gamma.js';
 import monitoringApiRoutes from './routes/monitoring-api.js';
+import stratPlanRoutes from './routes/strat-plan.js';
 
 const app: Express = express();
 
@@ -82,6 +83,7 @@ app.use('/api/webhooks', marketWebhookRoutes);
 app.use('/api/webhooks', mtfBiasWebhookRoutes);
 app.use('/api/bias', biasApiRoutes);
 app.use('/api/cron', cronRoutes);
+app.use('/api/strat-plan', stratPlanRoutes);
 
 // Sentry error handler (must be before other error middleware)
 Sentry.setupExpressErrorHandler(app);
