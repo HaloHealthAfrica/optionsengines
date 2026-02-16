@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useState } from 'react';
 import Sidebar from './Sidebar';
 import Dashboard from './Dashboard';
@@ -13,7 +14,8 @@ import TestingConsole from './TestingConsole';
 import IntelConsole from './IntelConsole';
 import AdaptiveControlPanel from './AdaptiveControlPanel';
 import E2EMonitor from './E2EMonitor';
-import StratCommandCenter from './StratCommandCenter';
+
+const StratCommandCenter = dynamic(() => import('./StratCommandCenter'), { ssr: false });
 
 const tabs = [
   { id: 'dashboard', label: 'Dashboard' },

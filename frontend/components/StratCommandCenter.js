@@ -1071,10 +1071,10 @@ export default function StratCommandCenter() {
   }, [plans]);
 
   const plansByTab = useMemo(() => {
-    const s = (p) => p.status || 'armed';
-    if (planTab === 'Active') return plans.filter((p) => !['filled', 'expired', 'cancelled', 'rejected'].includes(s(p)));
-    if (planTab === 'Triggered') return plans.filter((p) => ['triggered', 'executing'].includes(s(p)));
-    if (planTab === 'History') return plans.filter((p) => ['filled', 'expired', 'cancelled', 'rejected'].includes(s(p)));
+    const getStatus = (p) => p.status || 'armed';
+    if (planTab === 'Active') return plans.filter((p) => !['filled', 'expired', 'cancelled', 'rejected'].includes(getStatus(p)));
+    if (planTab === 'Triggered') return plans.filter((p) => ['triggered', 'executing'].includes(getStatus(p)));
+    if (planTab === 'History') return plans.filter((p) => ['filled', 'expired', 'cancelled', 'rejected'].includes(getStatus(p)));
     return plans;
   }, [plans, planTab]);
 
