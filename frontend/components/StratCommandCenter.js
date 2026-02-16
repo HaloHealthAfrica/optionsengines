@@ -588,6 +588,7 @@ export default function StratCommandCenter() {
   const [showManualModal, setShowManualModal] = useState(false);
   const [apiData, setApiData] = useState(null);
   const [apiError, setApiError] = useState(null);
+  const [planTab, setPlanTab] = useState('Active');
 
   // TODO: Replace with WebSocket connection for real-time alerts (MarketScanner In-Force style)
   // useEffect(() => { const ws = new WebSocket(...); return () => ws.close(); }, []);
@@ -652,6 +653,7 @@ export default function StratCommandCenter() {
         rr: alertWithNotes.rr,
         notes: alertWithNotes.notes,
         active: true,
+        status: 'armed',
       };
       setPlans((p) => [...p, plan]);
       setCreateFromAlert(null);
@@ -690,6 +692,7 @@ export default function StratCommandCenter() {
         rr: alertWithNotes.rr,
         notes: alertWithNotes.notes,
         active: true,
+        status: 'armed',
       };
       setPlans((p) => [...p, plan]);
     } catch (err) {
@@ -712,6 +715,7 @@ export default function StratCommandCenter() {
         options: form.options,
         notes: form.notes,
         active: true,
+        status: 'armed',
       };
       setPlans((p) => [...p, plan]);
       setShowManualModal(false);
@@ -747,6 +751,7 @@ export default function StratCommandCenter() {
         options: form.options,
         notes: form.notes,
         active: true,
+        status: 'armed',
       };
       setPlans((p) => [...p, plan]);
     } catch (err) {
@@ -769,6 +774,14 @@ export default function StratCommandCenter() {
       rrs.length > 0 ? rrs.reduce((a, b) => a + b, 0) / rrs.length : null;
     return { longs, shorts, avgRr };
   }, [plans]);
+
+  const plansByTab = useMemo(() => {
+    const s = (p) => p.status || 'armed';
+    if (planTab === 'Active') return plans.filter((p) => !['filled', 'expired', 'cancelled', 'rejected'].includes(s(p)));
+    if (planTab === 'Triggered') return plans.filter((p) => ['triggered', 'executing'].includes(s(p)));
+    if (planTab === 'History') return plans.filter((p) => ['filled', 'expired', 'cancelled', 'rejected'].includes(s(p)));
+    return plans;
+  }, [plans, planTab]);
 
   const maxPlans = 10;
 
@@ -811,6 +824,12 @@ export default function StratCommandCenter() {
           <p className="muted text-sm">Setups · Plans · Execution</p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="muted flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm dark:border-slate-700">
+            <span>Plan capacity</span>
+            <span className="font-mono font-semibold text-slate-700 dark:text-slate-200">
+              {plans.length}/10
+            </span>
+          </div>
           <div className="flex items-center gap-2">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
@@ -930,7 +949,7 @@ export default function StratCommandCenter() {
         {/* Active Plans Panel */}
         <div className="card overflow-hidden p-4">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Active Plans</h2>
+            <h2 className="text-lg font-semibold">Plans</h2>
             <button
               type="button"
               onClick={() => setShowManualModal(true)}
@@ -939,6 +958,22 @@ export default function StratCommandCenter() {
               <Plus size={14} />
               Manual
             </button>
+          </div>
+          <div className="mb-3 flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800/50">
+            {['Active', 'Triggered', 'History'].map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setPlanTab(tab)}
+                className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition ${
+                  planTab === tab
+                    ? 'bg-white text-slate-900 shadow dark:bg-slate-700 dark:text-white'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
           </div>
           <div className="mb-4">
             <div className="flex justify-between text-xs">
@@ -955,10 +990,14 @@ export default function StratCommandCenter() {
             </div>
           </div>
           <div className="space-y-2">
-            {plans.length === 0 ? (
-              <p className="muted py-4 text-center text-sm">No active plans.</p>
+            {plansByTab.length === 0 ? (
+              <p className="muted py-4 text-center text-sm">
+                {planTab === 'Active' && 'No active plans.'}
+                {planTab === 'Triggered' && 'No triggered plans.'}
+                {planTab === 'History' && 'No history yet.'}
+              </p>
             ) : (
-              plans.map((plan) => (
+              plansByTab.map((plan) => (
                 <div
                   key={plan.id}
                   className="group relative rounded-lg border border-slate-200 p-3 transition hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600"

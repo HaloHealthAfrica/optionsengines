@@ -13,6 +13,7 @@ import { MarketWebhookPipelineWorker } from './market-webhook-pipeline.js';
 import { MTFBiasPipelineWorker } from './mtf-bias-pipeline.worker.js';
 import { UwFlowPollerWorker } from './uw-flow-poller.worker.js';
 import { GammaMetricsWorker } from './gamma-metrics.worker.js';
+import { PlanTriggerWorker } from './plan-trigger-worker.js';
 import { startTradeEngineHeartbeat, stopTradeEngineHeartbeat } from '../services/trade-engine-health.service.js';
 
 const signalProcessor = new SignalProcessorWorker();
@@ -31,6 +32,7 @@ const marketWebhookPipeline = new MarketWebhookPipelineWorker();
 const mtfBiasPipeline = new MTFBiasPipelineWorker();
 const uwFlowPoller = new UwFlowPollerWorker();
 const gammaMetricsWorker = new GammaMetricsWorker();
+const planTriggerWorker = new PlanTriggerWorker(30_000);
 
 let workersStarted = false;
 
@@ -65,6 +67,9 @@ export function startWorkers(): void {
   if (config.enableGammaMetricsService) {
     gammaMetricsWorker.start();
   }
+  if (config.enableStratPlanLifecycle) {
+    planTriggerWorker.start();
+  }
   paperExecutor.start(config.paperExecutorInterval);
   positionRefresher.start(config.positionRefresherInterval);
   exitMonitor.start(config.exitMonitorInterval);
@@ -95,6 +100,9 @@ export async function stopWorkers(timeoutMs: number = 30000): Promise<void> {
       : Promise.resolve(),
     config.enableGammaMetricsService
       ? gammaMetricsWorker.stop()
+      : Promise.resolve(),
+    config.enableStratPlanLifecycle
+      ? (planTriggerWorker.stop(), Promise.resolve())
       : Promise.resolve(),
     paperExecutor.stopAndDrain(timeoutMs),
     positionRefresher.stopAndDrain(timeoutMs),
