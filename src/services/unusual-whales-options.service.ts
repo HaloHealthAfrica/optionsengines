@@ -285,6 +285,7 @@ export class UnusualWhalesOptionsService {
   /**
    * Get option chain as MarketDataOptionRow[] for GEX/max-pain fallback.
    * UW does not provide gamma; those rows will have gamma undefined (GEX will be 0).
+   * Passes iv when available for better Greeks in strike selection.
    */
   async getChainAsMarketDataRows(ticker: string): Promise<MarketDataOptionRow[]> {
     if (!this.isConfigured) {
@@ -293,7 +294,7 @@ export class UnusualWhalesOptionsService {
 
     const contracts = await this.getCachedChain(ticker);
     return contracts.map((c) => ({
-      optionSymbol: `${c.ticker ?? ticker} ${c.expiration} ${c.strike} ${c.type}`,
+      optionSymbol: c.id || `${c.ticker ?? ticker} ${c.expiration} ${c.strike} ${c.type}`,
       strike: c.strike,
       expiration: c.expiration,
       optionType: c.type,
@@ -301,6 +302,7 @@ export class UnusualWhalesOptionsService {
       gamma: undefined,
       volume: c.volume,
       premium: c.premium ?? c.mid ?? c.last,
+      iv: c.iv,
       timestamp: new Date().toISOString(),
     }));
   }

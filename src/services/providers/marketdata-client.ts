@@ -32,6 +32,8 @@ export interface MarketDataOptionRow {
   volume?: number;
   premium?: number;
   timestamp?: string;
+  /** Implied volatility (0.0–3.0). When provided, used for Greeks instead of estimating from price. */
+  iv?: number;
 }
 
 import type { IMarketDataProvider, ProviderHealthStatus } from './market-data-provider.interface.js';

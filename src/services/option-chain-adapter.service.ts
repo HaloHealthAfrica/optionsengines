@@ -118,8 +118,11 @@ export function adaptOptionChain(
     const mid = Number(row.premium) || 0;
     if (mid <= 0) continue;
 
-    // Estimate IV from the mid price
-    const iv = estimateIV(spotPrice, row.strike, dteYears, mid, direction);
+    // Use IV from provider (e.g. UnusualWhales) when available; otherwise estimate from price
+    const iv =
+      row.iv != null && Number.isFinite(row.iv) && row.iv > 0 && row.iv < 5
+        ? row.iv
+        : estimateIV(spotPrice, row.strike, dteYears, mid, direction);
 
     // Approximate Greeks
     const greeks = approximateGreeks(spotPrice, row.strike, dteYears, iv, direction);

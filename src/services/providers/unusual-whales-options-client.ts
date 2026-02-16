@@ -22,6 +22,8 @@ export interface UnusualWhalesOptionContract {
   volume?: number;
   openInterest?: number;
   open_interest?: number;
+  /** Implied volatility from API (0.0–3.0). Used for Greeks when available. */
+  iv?: number;
   [key: string]: unknown;
 }
 
@@ -38,6 +40,32 @@ export interface UnusualWhalesIntradayTick {
 }
 
 type RawContract = Record<string, unknown>;
+
+/**
+ * Parse OCC option symbol (e.g. SPY260213P00680000) to extract strike, expiration, type.
+ * Format: [ROOT][YYMMDD][C|P][STRIKE8] — strike is 8 digits, value = strike/1000.
+ */
+function parseOccOptionSymbol(
+  optionSymbol: string
+): { strike: number; expiration: string; type: 'call' | 'put' } | null {
+  if (!optionSymbol || optionSymbol.length < 15) return null;
+  const s = String(optionSymbol).toUpperCase();
+  const typeChar = s.charAt(s.length - 9);
+  const type: 'call' | 'put' = typeChar === 'P' ? 'put' : 'call';
+  const strikeStr = s.slice(-8);
+  const dateStr = s.slice(-15, -9);
+  const strikeNum = parseInt(strikeStr, 10);
+  if (!Number.isFinite(strikeNum)) return null;
+  const strike = strikeNum / 1000;
+  const yy = parseInt(dateStr.slice(0, 2), 10);
+  const mm = parseInt(dateStr.slice(2, 4), 10);
+  const dd = parseInt(dateStr.slice(4, 6), 10);
+  const year = yy >= 0 && yy <= 99 ? 2000 + yy : yy;
+  if (!Number.isFinite(year) || !Number.isFinite(mm) || !Number.isFinite(dd)) return null;
+  const exp = new Date(year, mm - 1, dd);
+  const expiration = exp.toISOString().slice(0, 10);
+  return { strike, expiration, type };
+}
 
 export class UnusualWhalesOptionsClient {
   private readonly apiKey = config.unusualWhalesApiKey;
@@ -103,8 +131,12 @@ export class UnusualWhalesOptionsClient {
     }
   }
 
-  private extractContractsArray(payload: Record<string, unknown>): RawContract[] {
-    const data = payload?.data ?? payload?.result ?? payload?.contracts ?? payload;
+  private extractContractsArray(payload: Record<string, unknown> | unknown): RawContract[] {
+    if (Array.isArray(payload)) {
+      return payload as RawContract[];
+    }
+    const obj = payload as Record<string, unknown>;
+    const data = obj?.data ?? obj?.result ?? obj?.contracts ?? obj?.options ?? obj;
     if (Array.isArray(data)) {
       return data as RawContract[];
     }
@@ -118,29 +150,46 @@ export class UnusualWhalesOptionsClient {
   }
 
   private normalizeContract(row: RawContract, ticker: string): UnusualWhalesOptionContract {
-    const typeRaw = row.option_type ?? row.type ?? row.side ?? row.call_put ?? row.cp ?? '';
-    const type: 'call' | 'put' =
-      String(typeRaw).toLowerCase() === 'call' || typeRaw === 'C' ? 'call' : 'put';
+    const optionSymbol = String(row.option_symbol ?? row.optionSymbol ?? row.symbol ?? '');
+    const parsed = optionSymbol ? parseOccOptionSymbol(optionSymbol) : null;
 
-    const bid = this.toNum(row.bid ?? row.bp);
-    const ask = this.toNum(row.ask ?? row.ap);
-    const last = this.toNum(row.last ?? row.close ?? row.premium ?? row.c);
-    const mid = bid != null && ask != null ? (bid + ask) / 2 : last;
+    const typeRaw = row.option_type ?? row.type ?? row.side ?? row.call_put ?? row.cp ?? '';
+    const type: 'call' | 'put' = parsed
+      ? parsed.type
+      : String(typeRaw).toLowerCase() === 'call' || typeRaw === 'C'
+        ? 'call'
+        : 'put';
+
+    const bid = this.toNum(row.nbbo_bid ?? row.bid ?? row.bp);
+    const ask = this.toNum(row.nbbo_ask ?? row.ask ?? row.ap);
+    const last = this.toNum(row.last_price ?? row.last ?? row.close ?? row.premium ?? row.c);
+    const avgPrice = this.toNum(row.avg_price ?? row.avgPrice);
+    const mid = bid != null && ask != null ? (bid + ask) / 2 : last ?? avgPrice;
+
+    const ivRaw = this.toNum(row.implied_volatility ?? row.impliedVolatility ?? row.iv);
+    const iv =
+      ivRaw != null && ivRaw > 0 && ivRaw < 5 ? ivRaw : undefined;
+
+    const strike = parsed ? parsed.strike : Number(row.strike ?? row.k ?? row.strike_price ?? 0);
+    const expiration = parsed
+      ? parsed.expiration
+      : this.normalizeExpiry(row.expiration ?? row.expiry ?? row.exp ?? row.expiration_date);
 
     return {
-      id: String(row.id ?? row.contract_id ?? row.option_contract_id ?? ''),
-      symbol: String(row.symbol ?? row.option_symbol ?? ticker),
+      id: String((row.id ?? row.contract_id ?? row.option_contract_id ?? optionSymbol) || ''),
+      symbol: String((row.symbol ?? optionSymbol) || ticker),
       ticker: String(row.ticker ?? row.underlying ?? ticker),
-      strike: Number(row.strike ?? row.k ?? row.strike_price ?? 0),
-      expiration: this.normalizeExpiry(row.expiration ?? row.expiry ?? row.exp ?? row.expiration_date),
+      strike,
+      expiration,
       type,
       bid: bid ?? undefined,
       ask: ask ?? undefined,
       last: last ?? undefined,
       mid: mid ?? undefined,
-      premium: (this.toNum(row.premium ?? row.notional) ?? last ?? null) ?? undefined,
+      premium: (this.toNum(row.avg_price ?? row.avgPrice ?? row.premium ?? row.last_price ?? row.last ?? row.notional) ?? mid ?? last ?? avgPrice ?? null) ?? undefined,
       volume: this.toNum(row.volume ?? row.vol) ?? undefined,
       openInterest: this.toNum(row.open_interest ?? row.oi ?? row.openInterest) ?? undefined,
+      iv,
     };
   }
 
