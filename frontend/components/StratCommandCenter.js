@@ -759,25 +759,6 @@ export default function StratCommandCenter() {
   const [apiError, setApiError] = useState(null);
   const [planTab, setPlanTab] = useState('Active');
 
-  const wsUrl = typeof window !== 'undefined' && process.env.NEXT_PUBLIC_WS_URL
-    ? process.env.NEXT_PUBLIC_WS_URL
-    : 'ws://localhost:8080/v1/realtime';
-  useEffect(() => {
-    if (apiError && !apiData) return;
-    if (!apiData) return;
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'strat_plan_update' || msg.type === 'strat_alert_new') {
-          loadAlerts();
-          loadPlans();
-        }
-      } catch (_) {}
-    };
-    return () => ws.close();
-  }, [apiData, apiError, loadAlerts, loadPlans, wsUrl]);
-
   const loadApiData = useCallback(async () => {
     try {
       const res = await fetch('/api/strat-plan/dashboard');
@@ -826,6 +807,25 @@ export default function StratCommandCenter() {
       console.error('Load plans failed:', err);
     }
   }, []);
+
+  const wsUrl = typeof window !== 'undefined' && process.env.NEXT_PUBLIC_WS_URL
+    ? process.env.NEXT_PUBLIC_WS_URL
+    : 'ws://localhost:8080/v1/realtime';
+  useEffect(() => {
+    if (apiError && !apiData) return;
+    if (!apiData) return;
+    const ws = new WebSocket(wsUrl);
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'strat_plan_update' || msg.type === 'strat_alert_new') {
+          loadAlerts();
+          loadPlans();
+        }
+      } catch (_) {}
+    };
+    return () => ws.close();
+  }, [apiData, apiError, loadAlerts, loadPlans, wsUrl]);
 
   useEffect(() => {
     loadApiData();
