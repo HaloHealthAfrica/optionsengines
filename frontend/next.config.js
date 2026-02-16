@@ -7,8 +7,9 @@ const nextConfig = {
   images: {
     formats: ['image/avif', 'image/webp'],
   },
+  transpilePackages: ['lucide-react'],
   experimental: {
-    optimizePackageImports: ['lucide-react', 'recharts'],
+    optimizePackageImports: ['recharts'],
   },
 };
 
