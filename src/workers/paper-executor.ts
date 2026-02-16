@@ -101,6 +101,25 @@ export class PaperExecutorWorker {
     updateWorkerStatus('PaperExecutorWorker', { lastRunAt: new Date() });
 
     try {
+      // --- Expire stale orders before processing ---
+      if (config.orderExpirationMinutes > 0) {
+        const expired = await db.query(
+          `UPDATE orders SET status = 'failed'
+           WHERE status = 'pending_execution'
+             AND order_type = 'paper'
+             AND created_at < NOW() - ($1 || ' minutes')::interval
+           RETURNING order_id, symbol, strike, type`,
+          [String(config.orderExpirationMinutes)]
+        );
+        if (expired.rowCount && expired.rowCount > 0) {
+          logger.warn('Expired stale orders', {
+            count: expired.rowCount,
+            expirationMinutes: config.orderExpirationMinutes,
+            orders: expired.rows.map(r => ({ order_id: r.order_id, symbol: r.symbol, strike: r.strike, type: r.type })),
+          });
+        }
+      }
+
       const orders = await db.query<PendingOrder>(
         `SELECT * FROM orders WHERE status = $1 AND order_type = $2 ORDER BY created_at ASC LIMIT 100`,
         ['pending_execution', 'paper']

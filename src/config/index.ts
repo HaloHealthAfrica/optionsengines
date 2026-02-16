@@ -73,6 +73,7 @@ interface Config {
   marketCloseGraceMinutes: number;
   signalMaxAgeMinutes: number;
   maxDailyTrades: number;
+  orderExpirationMinutes: number;
   positionReplacementEnabled: boolean;
   minConfidenceForReplacement: number;
   autoCloseNearTarget: boolean;
@@ -270,6 +271,7 @@ export const config: Config = {
   marketCloseGraceMinutes: getEnvVarNumber('MARKET_CLOSE_GRACE_MINUTES', 10),
   signalMaxAgeMinutes: getEnvVarNumber('SIGNAL_MAX_AGE_MINUTES', 30),
   maxDailyTrades: getEnvVarNumber('MAX_DAILY_TRADES', nodeEnv === 'test' ? 500 : 0),
+  orderExpirationMinutes: getEnvVarNumber('ORDER_EXPIRATION_MINUTES', 30),
   positionReplacementEnabled: getEnvVarBoolean(
     'POSITION_REPLACEMENT_ENABLED',
     nodeEnv === 'test'
