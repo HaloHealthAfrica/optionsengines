@@ -89,6 +89,8 @@ interface Config {
   maxHoldDays: number;
   enableExitDecisionEngine: boolean;
   enableExitIntelligence: boolean;
+  trailingStopPercent: number;
+  trailingStopActivationPercent: number;
 
   // Capacity Management
   minHoldMinutesForCapacityClose: number;
@@ -293,6 +295,8 @@ export const config: Config = {
   maxHoldDays: getEnvVarNumber('MAX_HOLD_DAYS', 5),
   enableExitDecisionEngine: getEnvVarBoolean('ENABLE_EXIT_DECISION_ENGINE', true),
   enableExitIntelligence: getEnvVarBoolean('ENABLE_EXIT_INTELLIGENCE', true),
+  trailingStopPercent: getEnvVarNumber('TRAILING_STOP_PERCENT', 15),
+  trailingStopActivationPercent: getEnvVarNumber('TRAILING_STOP_ACTIVATION_PERCENT', 20),
 
   // Capacity Management
   minHoldMinutesForCapacityClose: getEnvVarNumber('MIN_HOLD_MINUTES_FOR_CAPACITY_CLOSE', 15),

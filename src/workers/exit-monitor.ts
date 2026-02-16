@@ -26,6 +26,8 @@ interface OpenPosition {
   status: 'open' | 'closing' | 'closed';
   engine?: 'A' | 'B' | null;
   experiment_id?: string | null;
+  high_water_mark?: number | null;
+  trailing_stop_price?: number | null;
 }
 
 interface ExitRule {
@@ -33,6 +35,8 @@ interface ExitRule {
   stop_loss_percent?: number;
   max_hold_time_hours?: number;
   min_dte_exit?: number;
+  trailing_stop_percent?: number;
+  trailing_stop_activation_percent?: number;
 }
 
 export class ExitMonitorWorker {
@@ -187,6 +191,20 @@ export class ExitMonitorWorker {
             }
           }
 
+          // Trailing stop check: if trailing stop is active and price breached it
+          if (!exitReason && position.trailing_stop_price && currentPrice <= position.trailing_stop_price) {
+            exitReason = 'trailing_stop';
+            exitQuantity = position.quantity;
+            logger.info('Trailing stop triggered', {
+              positionId: position.position_id,
+              symbol: position.symbol,
+              currentPrice,
+              trailingStopPrice: position.trailing_stop_price,
+              highWaterMark: position.high_water_mark,
+              entryPrice: position.entry_price,
+            });
+          }
+
           if (!exitReason && config.enableExitDecisionEngine) {
             const underlying = Number.isFinite(underlyingPrice) ? underlyingPrice : position.entry_price * 100;
             const input = buildExitDecisionInput(
@@ -211,6 +229,22 @@ export class ExitMonitorWorker {
                 );
               } else {
                 exitQuantity = position.quantity;
+              }
+            } else if (result.action === 'TIGHTEN_STOP' && result.newStopLevel) {
+              // Tighten the trailing stop to the level suggested by the exit engine
+              const currentStop = Number(position.trailing_stop_price) || 0;
+              if (result.newStopLevel > currentStop) {
+                await db.query(
+                  `UPDATE refactored_positions SET trailing_stop_price = $1, last_updated = $2 WHERE position_id = $3`,
+                  [result.newStopLevel, now, position.position_id]
+                );
+                logger.info('Exit engine tightened trailing stop', {
+                  positionId: position.position_id,
+                  symbol: position.symbol,
+                  previousStop: currentStop,
+                  newStop: result.newStopLevel,
+                  trigger: result.triggeredRules[0]?.rule,
+                });
               }
             }
           }

@@ -1,6 +1,7 @@
 // Position Refresher Worker - Updates open positions with current prices and P&L
 import { db } from '../services/database.service.js';
 import { marketData } from '../services/market-data.js';
+import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { sleep } from '../utils/sleep.js';
 import { errorTracker } from '../services/error-tracker.service.js';
@@ -18,6 +19,8 @@ interface OpenPosition {
   type: 'call' | 'put';
   quantity: number;
   entry_price: number;
+  high_water_mark: number | null;
+  trailing_stop_price: number | null;
 }
 
 export class PositionRefresherWorker {
@@ -105,14 +108,36 @@ export class PositionRefresherWorker {
           const costBasis = position.entry_price * position.quantity * 100;
           const positionPnlPercent = costBasis > 0 ? (unrealizedPnl / costBasis) * 100 : 0;
 
+          // Update high water mark and trailing stop price
+          const prevHwm = Number(position.high_water_mark) || position.entry_price;
+          const newHwm = Math.max(prevHwm, currentPrice);
+          const gainPercent = position.entry_price > 0
+            ? ((newHwm - position.entry_price) / position.entry_price) * 100
+            : 0;
+
+          // Trailing stop activates once gain exceeds activation threshold
+          // Then trails at trailing_stop_percent below the high water mark
+          let trailingStopPrice = position.trailing_stop_price;
+          const activationPct = config.trailingStopActivationPercent;
+          const trailPct = config.trailingStopPercent;
+          if (activationPct > 0 && trailPct > 0 && gainPercent >= activationPct) {
+            const newTrailingStop = newHwm * (1 - trailPct / 100);
+            // Only move trailing stop up, never down
+            if (trailingStopPrice === null || newTrailingStop > trailingStopPrice) {
+              trailingStopPrice = newTrailingStop;
+            }
+          }
+
           await db.query(
             `UPDATE refactored_positions
              SET current_price = $1,
                  unrealized_pnl = $2,
                  position_pnl_percent = $3,
-                 last_updated = $4
-             WHERE position_id = $5`,
-            [currentPrice, unrealizedPnl, positionPnlPercent, new Date(), position.position_id]
+                 high_water_mark = $4,
+                 trailing_stop_price = $5,
+                 last_updated = $6
+             WHERE position_id = $7`,
+            [currentPrice, unrealizedPnl, positionPnlPercent, newHwm, trailingStopPrice, new Date(), position.position_id]
           );
 
           await publishPositionUpdate(position.position_id);
