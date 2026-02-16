@@ -6,6 +6,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { authService } from '../services/auth.service.js';
+import { db } from '../services/database.service.js';
 import {
   watchlistManager,
   stratPlanLifecycleService,
@@ -123,9 +124,18 @@ const createPlanSchema = z.object({
   direction: z.enum(['long', 'short']),
   timeframe: z.string().min(1).max(20),
   raw_payload: z.record(z.any()).optional(),
+  entry: z.number().positive().optional(),
+  target: z.number().positive().optional(),
+  stop: z.number().positive().optional(),
+  reversalLevel: z.number().positive().optional(),
+  setup: z.string().max(50).optional(),
+  sourceAlertId: z.string().uuid().optional(),
+  executionMode: z.enum(['manual', 'auto_on_trigger']).optional(),
+  triggerCondition: z.string().max(500).optional(),
+  fromAlert: z.boolean().optional(),
 });
 
-/** POST /strat-plan/plans - Create plan manually */
+/** POST /strat-plan/plans - Create plan manually or from alert */
 router.post(
   '/plans',
   requireAuth,
@@ -135,9 +145,26 @@ router.post(
     if (!parse.success) {
       return res.status(400).json({ error: 'Invalid payload', details: parse.error.errors });
     }
+    const d = parse.data;
+    const rawPayload = d.raw_payload ?? {};
+    if (d.entry != null) rawPayload.entry = d.entry;
+    if (d.target != null) rawPayload.target = d.target;
+    if (d.stop != null) rawPayload.stop = d.stop;
     const result = await stratPlanLifecycleService.createPlan({
-      ...parse.data,
+      symbol: d.symbol,
+      direction: d.direction,
+      timeframe: d.timeframe,
       source: 'manual',
+      rawPayload: Object.keys(rawPayload).length ? rawPayload : undefined,
+      entry: d.entry,
+      target: d.target,
+      stop: d.stop,
+      reversalLevel: d.reversalLevel,
+      setup: d.setup,
+      sourceAlertId: d.sourceAlertId,
+      executionMode: d.executionMode,
+      triggerCondition: d.triggerCondition,
+      fromAlert: d.fromAlert,
     });
     if (!result.ok && !result.plan) {
       return res.status(400).json({ error: result.reason, state: result.state, ok: false });
@@ -153,17 +180,74 @@ router.post(
 
 // --- Plan Dashboard ---
 
-/** GET /strat-plan/plans - List plans (optionally by symbol) */
+/** GET /strat-plan/plans - List plans (by symbol, tab, or lifecycle status) */
 router.get(
   '/plans',
   requireAuth,
   requireStratPlanEnabled,
   async (req: Request, res: Response) => {
     const symbol = req.query.symbol as string | undefined;
-    if (symbol) {
+    const tab = (req.query.tab as string) || '';
+
+    if (symbol && !tab) {
       const plans = await stratPlanLifecycleService.getPlansBySymbol(symbol);
       return res.json({ plans });
     }
+
+    if (['active', 'triggered', 'history'].includes(tab)) {
+      try {
+        const statusFilter =
+          tab === 'active'
+            ? ['draft', 'armed']
+            : tab === 'triggered'
+              ? ['triggered', 'executing']
+              : ['filled', 'expired', 'cancelled', 'rejected'];
+        const result = await db.query(
+        `SELECT plan_id, symbol, direction, timeframe,
+                COALESCE(setup, raw_payload->>'setupType') AS setup,
+                source_alert_id, entry_price, target_price, stop_price, reversal_level,
+                COALESCE(execution_mode, 'manual') AS execution_mode,
+                trigger_condition,
+                COALESCE(plan_status, 'draft') AS plan_status,
+                signal_id, position_id, created_at, triggered_at, filled_at, raw_payload
+         FROM strat_plans
+         WHERE COALESCE(plan_status, 'draft') = ANY($1::text[])
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [statusFilter]
+      );
+      const plans = result.rows.map((row) => ({
+        id: row.plan_id,
+        plan_id: row.plan_id,
+        symbol: row.symbol,
+        direction: row.direction,
+        timeframe: row.timeframe,
+        setup: row.setup,
+        entry: row.entry_price != null ? Number(row.entry_price) : null,
+        target: row.target_price != null ? Number(row.target_price) : null,
+        stop: row.stop_price != null ? Number(row.stop_price) : null,
+        reversalLevel: row.reversal_level != null ? Number(row.reversal_level) : null,
+        executionMode: row.execution_mode || 'manual',
+        triggerCondition: row.trigger_condition,
+        status: row.plan_status || 'draft',
+        signalId: row.signal_id,
+        positionId: row.position_id,
+        createdAt: row.created_at,
+        triggeredAt: row.triggered_at,
+        filledAt: row.filled_at,
+        rawPayload: row.raw_payload,
+        rr: row.raw_payload?.rr ?? null,
+        options: row.raw_payload?.options ?? row.raw_payload?.optionsPlay ?? null,
+        notes: row.raw_payload?.notes ?? null,
+      }));
+        return res.json({ plans });
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === '42P01' || code === '42703') return res.json({ plans: [] });
+        throw err;
+      }
+    }
+
     const status = await stratPlanLifecycleService.getLifecycleStatus();
     return res.json({ lifecycle: status });
   }
@@ -178,6 +262,38 @@ router.get(
     const plan = await stratPlanLifecycleService.getPlanById(req.params.planId);
     if (!plan) return res.status(404).json({ error: 'Plan not found' });
     return res.json({ plan });
+  }
+);
+
+/** PATCH /strat-plan/plans/:planId - Update plan (e.g. cancel) */
+router.patch(
+  '/plans/:planId',
+  requireAuth,
+  requireStratPlanEnabled,
+  async (req: Request, res: Response) => {
+    const planId = req.params.planId?.trim();
+    if (!planId) return res.status(400).json({ error: 'Plan ID required' });
+    const body = req.body as { status?: string };
+    if (body?.status === 'cancelled') {
+      const ok = await stratPlanLifecycleService.markCancelled(planId);
+      if (!ok) return res.status(404).json({ error: 'Plan not found or cannot be cancelled' });
+      return res.json({ ok: true, status: 'cancelled' });
+    }
+    return res.status(400).json({ error: 'Unsupported update' });
+  }
+);
+
+/** DELETE /strat-plan/plans/:planId - Cancel/remove plan */
+router.delete(
+  '/plans/:planId',
+  requireAuth,
+  requireStratPlanEnabled,
+  async (req: Request, res: Response) => {
+    const planId = req.params.planId?.trim();
+    if (!planId) return res.status(400).json({ error: 'Plan ID required' });
+    const ok = await stratPlanLifecycleService.markCancelled(planId);
+    if (!ok) return res.status(404).json({ error: 'Plan not found or cannot be removed' });
+    return res.json({ ok: true });
   }
 );
 

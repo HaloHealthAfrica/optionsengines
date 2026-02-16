@@ -89,6 +89,36 @@ export async function PUT(request, { params }) {
   }
 }
 
+export async function PATCH(request, { params }) {
+  const auth = await requireAuth(request);
+  if (!auth.ok) return auth.response;
+
+  const path = params.path?.join('/') || '';
+  const url = `/api/strat-plan/${path}`;
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+
+  try {
+    const response = await backendFetch(url, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${auth.token}` },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    return Response.json(data, { status: response.status });
+  } catch (error) {
+    console.error('[Strat Plan API] PATCH failed:', error);
+    return Response.json(
+      { error: error?.message || 'Strat Plan API failed' },
+      { status: 502 }
+    );
+  }
+}
+
 export async function DELETE(request, { params }) {
   const auth = await requireAuth(request);
   if (!auth.ok) return auth.response;

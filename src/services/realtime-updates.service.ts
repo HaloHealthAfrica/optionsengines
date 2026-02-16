@@ -119,3 +119,18 @@ export async function publishIntelUpdate(symbol: string): Promise<void> {
   const snapshot = await marketIntelSnapshotService.getLatest(symbol);
   broadcastRealtime('intel_update', snapshot, symbol);
 }
+
+/** Emit strat plan lifecycle event (triggered, executing, filled, rejected, closed, cancelled) */
+export function publishStratPlanUpdate(payload: {
+  event: string;
+  plan_id?: string;
+  position_id?: string;
+  realized_pnl?: number;
+}): void {
+  broadcastRealtime('strat_plan_update', payload);
+}
+
+/** Emit when a new strat alert is created (webhook, manual) */
+export function publishStratAlertNew(alert: Record<string, unknown>): void {
+  broadcastRealtime('strat_alert_new', alert);
+}

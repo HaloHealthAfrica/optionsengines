@@ -350,7 +350,14 @@ export interface RateLimiterConfig {
 // ─── WebSocket Message Types (Gap 20 fix) ───────────────────────────────
 
 /** Discriminated union of all WebSocket messages shared between server and frontend */
-export type WSMessageType = 'position_update' | 'risk_update' | 'intel_update' | 'heartbeat' | 'error';
+export type WSMessageType =
+  | 'position_update'
+  | 'risk_update'
+  | 'intel_update'
+  | 'heartbeat'
+  | 'error'
+  | 'strat_plan_update'
+  | 'strat_alert_new';
 
 export interface WSPositionUpdate {
   type: 'position_update';
@@ -405,4 +412,21 @@ export interface WSError {
   data: { message: string; code?: string };
 }
 
-export type WSMessage = WSPositionUpdate | WSRiskUpdate | WSIntelUpdate | WSHeartbeat | WSError;
+export interface WSStratPlanUpdate {
+  type: 'strat_plan_update';
+  data: { event: string; plan_id?: string; position_id?: string; realized_pnl?: number };
+}
+
+export interface WSStratAlertNew {
+  type: 'strat_alert_new';
+  data: Record<string, unknown>;
+}
+
+export type WSMessage =
+  | WSPositionUpdate
+  | WSRiskUpdate
+  | WSIntelUpdate
+  | WSHeartbeat
+  | WSError
+  | WSStratPlanUpdate
+  | WSStratAlertNew;

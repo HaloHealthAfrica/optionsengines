@@ -8,6 +8,7 @@ import { errorTracker } from '../services/error-tracker.service.js';
 import { publishPositionUpdate, publishRiskUpdate } from '../services/realtime-updates.service.js';
 import { captureTradeOutcome } from '../services/performance-feedback/index.js';
 import { getCurrentState } from '../services/bias-state-aggregator/bias-state-aggregator.service.js';
+import { stratPlanLifecycleService } from '../services/strat-plan/index.js';
 import * as Sentry from '@sentry/node';
 import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
 import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
@@ -205,7 +206,13 @@ export class PaperExecutorWorker {
           // --- Begin atomic fill transaction ---
           let positionId: string | null = null;
           let closedPositionId: string | null = null;
-          let pnlForCapture: { pnlR: number; pnlPercent: number; durationMinutes: number; existingPosition: any } | null = null;
+          let pnlForCapture: {
+            pnlR: number;
+            pnlPercent: number;
+            durationMinutes: number;
+            realizedPnl: number;
+            existingPosition: any;
+          } | null = null;
 
           // Fetch bias state BEFORE the transaction (non-critical, can fail gracefully)
           let entryBiasScore: number | null = null;
@@ -266,7 +273,7 @@ export class PaperExecutorWorker {
               );
 
               closedPositionId = existingPosition.position_id;
-              pnlForCapture = { pnlR, pnlPercent, durationMinutes: Math.round(durationMinutes), existingPosition };
+              pnlForCapture = { pnlR, pnlPercent, durationMinutes: Math.round(durationMinutes), realizedPnl, existingPosition };
             } else {
               // New position
               const insertResult = await txClient.query(
@@ -295,8 +302,31 @@ export class PaperExecutorWorker {
           // Post-transaction side effects (WebSocket, performance capture)
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated inside transaction callback
           if (closedPositionId && pnlForCapture) {
-            const cap = pnlForCapture as { pnlR: number; pnlPercent: number; durationMinutes: number; existingPosition: any };
+            const cap = pnlForCapture as {
+              pnlR: number;
+              pnlPercent: number;
+              durationMinutes: number;
+              realizedPnl: number;
+              existingPosition: { position_id: string; symbol: string; type: string; entry_bias_score?: number; entry_macro_class?: string; entry_regime_type?: string; entry_mode_hint?: string; entry_acceleration_state_strength_delta?: number; exit_reason?: string };
+            };
             const existingPosition = cap.existingPosition;
+            let stratPlanId: string | null = null;
+            let setupType: string | null = null;
+            if (config.enableStratPlanLifecycle) {
+              stratPlanLifecycleService
+                .markClosedByPosition(closedPositionId, cap.realizedPnl)
+                .catch((err) => logger.warn('Strat plan close PnL failed', { positionId: closedPositionId, error: err }));
+              const planRow = await db
+                .query(
+                  `SELECT plan_id, setup FROM strat_plans WHERE position_id = $1 AND plan_status = 'filled' LIMIT 1`,
+                  [closedPositionId]
+                )
+                .then((r) => r.rows[0]);
+              if (planRow) {
+                stratPlanId = planRow.plan_id;
+                setupType = planRow.setup ?? null;
+              }
+            }
             captureTradeOutcome({
               positionId: existingPosition.position_id,
               symbol: existingPosition.symbol,
@@ -313,11 +343,18 @@ export class PaperExecutorWorker {
                 ? [String(existingPosition.exit_reason)]
                 : [],
               timestamp: fillTimestamp,
+              stratPlanId: stratPlanId ?? undefined,
+              setupType: setupType ?? undefined,
             }).catch((err) => logger.warn('Performance capture failed', { err, positionId: closedPositionId }));
 
             await publishPositionUpdate(closedPositionId);
             await publishRiskUpdate();
           } else if (positionId) {
+            if (config.enableStratPlanLifecycle && order.signal_id) {
+              stratPlanLifecycleService.markFilledBySignal(order.signal_id, positionId).catch((err) =>
+                logger.warn('Strat plan fill link failed', { signalId: order.signal_id, positionId, error: err })
+              );
+            }
             await publishPositionUpdate(positionId);
             await publishRiskUpdate();
           }

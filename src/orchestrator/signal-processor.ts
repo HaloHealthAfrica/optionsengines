@@ -17,6 +17,7 @@ import { config } from '../config/index.js';
 import { marketData } from '../services/market-data.js';
 import { indicators as indicatorService } from '../services/indicators.js';
 import { marketIntelService } from '../services/market-intel/market-intel.service.js';
+import { stratPlanLifecycleService } from '../services/strat-plan/index.js';
 
 export class SignalProcessor {
   private pool: pg.Pool;
@@ -313,6 +314,11 @@ export class SignalProcessor {
          WHERE signal_id = $2`,
         [status, signal_id, rejectionReason ?? null]
       );
+      if (status === 'rejected' && config.enableStratPlanLifecycle) {
+        stratPlanLifecycleService
+          .markRejectedBySignal(signal_id, rejectionReason ?? 'rejected')
+          .catch((err) => logger.warn('Strat plan rejection sync failed', { signal_id, error: err }));
+      }
     } finally {
       client.release();
     }

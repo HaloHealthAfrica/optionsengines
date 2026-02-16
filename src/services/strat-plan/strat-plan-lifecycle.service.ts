@@ -6,6 +6,7 @@
 
 import { db } from '../database.service.js';
 import { logger } from '../../utils/logger.js';
+import { publishStratPlanUpdate } from '../realtime-updates.service.js';
 import { watchlistManager } from './watchlist-manager.service.js';
 import { getStratPlanConfig } from './strat-plan-config.service.js';
 import type {
@@ -31,6 +32,16 @@ export interface CreatePlanInput {
   timeframe: string;
   source: PlanSource;
   rawPayload?: Record<string, unknown>;
+  /** Strat Command: entry/target/stop for trigger monitoring */
+  entry?: number;
+  target?: number;
+  stop?: number;
+  reversalLevel?: number;
+  setup?: string;
+  sourceAlertId?: string;
+  executionMode?: 'manual' | 'auto_on_trigger';
+  triggerCondition?: string;
+  fromAlert?: boolean;
 }
 
 export interface CreatePlanResult {
@@ -81,8 +92,12 @@ export class StratPlanLifecycleService {
     const symbol = input.symbol.toUpperCase().trim();
     const cfg = await getStratPlanConfig();
 
-    // 1. Watchlist gate
-    const inWatchlist = await watchlistManager.isInWatchlist(symbol);
+    // 1. Watchlist gate (auto-add when fromAlert if capacity allows)
+    let inWatchlist = await watchlistManager.isInWatchlist(symbol);
+    if (!inWatchlist && input.fromAlert) {
+      const addResult = await watchlistManager.add(symbol, 'manual', 0);
+      inWatchlist = addResult.ok;
+    }
     if (!inWatchlist) {
       return {
         ok: false,
@@ -142,9 +157,21 @@ export class StratPlanLifecycleService {
     state: StratPlanState
   ): Promise<StratPlan> {
     const symbol = input.symbol.toUpperCase().trim();
+    const rawPayload = {
+      ...(input.rawPayload ?? {}),
+      ...(input.entry != null && { entry: input.entry }),
+      ...(input.target != null && { target: input.target }),
+      ...(input.stop != null && { stop: input.stop }),
+    };
+    const execMode = input.executionMode ?? 'manual';
+    const planStatus = execMode === 'auto_on_trigger' ? 'armed' : 'armed';
+
     const result = await db.query(
-      `INSERT INTO strat_plans (symbol, direction, timeframe, source, state, raw_payload)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO strat_plans (
+         symbol, direction, timeframe, source, state, raw_payload,
+         entry_price, target_price, stop_price, reversal_level, setup, source_alert_id,
+         execution_mode, trigger_condition, plan_status
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING plan_id, symbol, direction, timeframe, source, state, signal_id,
                  raw_payload, risk_reward, atr_percent, expected_move_alignment,
                  gamma_bias, liquidity_score, engine_confidence, priority_score,
@@ -155,7 +182,16 @@ export class StratPlanLifecycleService {
         input.timeframe,
         input.source,
         state,
-        input.rawPayload ? JSON.stringify(input.rawPayload) : null,
+        JSON.stringify(rawPayload),
+        input.entry ?? null,
+        input.target ?? null,
+        input.stop ?? null,
+        input.reversalLevel ?? null,
+        input.setup ?? null,
+        input.sourceAlertId ?? null,
+        execMode,
+        input.triggerCondition ?? null,
+        planStatus,
       ]
     );
 
@@ -232,14 +268,17 @@ export class StratPlanLifecycleService {
   async markTriggered(planId: string, signalId: string): Promise<boolean> {
     const result = await db.query(
       `UPDATE strat_plans
-       SET state = 'TRIGGERED', signal_id = $2, updated_at = NOW()
-       WHERE plan_id = $1 AND state IN ('PLANNED', 'QUEUED', 'IN_FORCE')
+       SET state = 'TRIGGERED', signal_id = $2, updated_at = NOW(),
+           plan_status = 'triggered', triggered_at = NOW()
+       WHERE plan_id = $1
+         AND (state IN ('PLANNED', 'QUEUED', 'IN_FORCE') OR plan_status = 'armed')
        RETURNING plan_id`,
       [planId, signalId]
     );
 
     if (result.rows.length > 0) {
       logger.info('Plan triggered', { plan_id: planId, signal_id: signalId });
+      publishStratPlanUpdate({ event: 'triggered', plan_id: planId });
       return true;
     }
     return false;
@@ -273,11 +312,105 @@ export class StratPlanLifecycleService {
   async markRejected(planId: string, reason: string): Promise<boolean> {
     const result = await db.query(
       `UPDATE strat_plans
-       SET state = 'REJECTED', rejection_reason = $2, updated_at = NOW()
+       SET state = 'REJECTED', rejection_reason = $2, updated_at = NOW(),
+           plan_status = 'rejected'
        WHERE plan_id = $1 RETURNING plan_id`,
       [planId, reason]
     );
     return result.rows.length > 0;
+  }
+
+  /**
+   * Mark plan as EXECUTING when order is created (by signal_id)
+   */
+  async markExecutingBySignal(signalId: string): Promise<boolean> {
+    const result = await db.query(
+      `UPDATE strat_plans
+       SET plan_status = 'executing', updated_at = NOW()
+       WHERE signal_id = $1 AND plan_status = 'triggered'
+       RETURNING plan_id`,
+      [signalId]
+    );
+    if (result.rows.length > 0) {
+      publishStratPlanUpdate({ event: 'executing', plan_id: result.rows[0].plan_id });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Mark plan as FILLED when position is opened (by signal_id)
+   */
+  async markFilledBySignal(signalId: string, positionId: string): Promise<boolean> {
+    const result = await db.query(
+      `UPDATE strat_plans
+       SET plan_status = 'filled', position_id = $2, filled_at = NOW(), updated_at = NOW()
+       WHERE signal_id = $1 AND plan_status IN ('triggered', 'executing')
+       RETURNING plan_id`,
+      [signalId, positionId]
+    );
+    if (result.rows.length > 0) {
+      logger.info('Strat plan filled', { signal_id: signalId, position_id: positionId });
+      publishStratPlanUpdate({ event: 'filled', plan_id: result.rows[0].plan_id, position_id: positionId });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Cancel plan (armed/draft only)
+   */
+  async markCancelled(planId: string): Promise<boolean> {
+    const result = await db.query(
+      `UPDATE strat_plans
+       SET plan_status = 'cancelled', state = 'EXPIRED', updated_at = NOW()
+       WHERE plan_id = $1 AND plan_status IN ('draft', 'armed')
+       RETURNING plan_id`,
+      [planId]
+    );
+    if (result.rows.length > 0) {
+      logger.info('Strat plan cancelled', { plan_id: planId });
+      publishStratPlanUpdate({ event: 'cancelled', plan_id: planId });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Record realized PnL when linked position is closed (by position_id)
+   */
+  async markClosedByPosition(positionId: string, realizedPnl: number): Promise<boolean> {
+    const result = await db.query(
+      `UPDATE strat_plans
+       SET realized_pnl = $2, closed_at = NOW(), updated_at = NOW()
+       WHERE position_id = $1 AND plan_status = 'filled'
+       RETURNING plan_id`,
+      [positionId, realizedPnl]
+    );
+    if (result.rows.length > 0) {
+      logger.info('Strat plan closed with PnL', { position_id: positionId, realized_pnl: realizedPnl });
+      publishStratPlanUpdate({ event: 'closed', plan_id: result.rows[0].plan_id, position_id: positionId, realized_pnl: realizedPnl });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Mark plan as REJECTED when signal is rejected (by signal_id)
+   */
+  async markRejectedBySignal(signalId: string, reason: string): Promise<boolean> {
+    const result = await db.query(
+      `UPDATE strat_plans
+       SET plan_status = 'rejected', state = 'REJECTED', rejection_reason = $2, updated_at = NOW()
+       WHERE signal_id = $1 AND plan_status IN ('triggered', 'executing')
+       RETURNING plan_id`,
+      [signalId, reason]
+    );
+    if (result.rows.length > 0) {
+      publishStratPlanUpdate({ event: 'rejected', plan_id: result.rows[0].plan_id });
+      return true;
+    }
+    return false;
   }
 
   /**

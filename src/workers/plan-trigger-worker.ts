@@ -2,17 +2,14 @@
  * PlanTriggerWorker - Monitors ARMED plans and creates signals when trigger conditions are met
  *
  * Full lifecycle: ARMED → TRIGGERED → signal created → Decision Engine → Order Creator
- *
- * TODO Phase 3: Implement full trigger evaluation
- * - Poll ARMED plans from strat_plans
- * - Fetch live price via market data provider
- * - Evaluate trigger_condition (e.g. "price >= reversal_level")
- * - On trigger: create signal, mark plan TRIGGERED, send to orchestrator
  */
 
 import { logger } from '../utils/logger.js';
 import { db } from '../services/database.service.js';
 import { config } from '../config/index.js';
+import { marketData } from '../services/market-data.js';
+import { planToSignalBridge } from '../services/strat-plan/plan-to-signal-bridge.service.js';
+import type { StratPlan } from '../services/strat-plan/types.js';
 
 export class PlanTriggerWorker {
   private timer: NodeJS.Timeout | null = null;
@@ -44,29 +41,110 @@ export class PlanTriggerWorker {
     }
   }
 
+  private evaluateTrigger(
+    triggerCondition: string | null,
+    reversalLevel: number | null,
+    direction: string,
+    currentPrice: number
+  ): boolean {
+    if (!Number.isFinite(currentPrice) || currentPrice <= 0) return false;
+
+    const level =
+      reversalLevel ??
+      parseFloat(String(triggerCondition || '').replace(/[^0-9.-]/g, '').trim() || '');
+    if (!Number.isFinite(level)) return false;
+
+    const tc = (triggerCondition || '').toLowerCase();
+    const isLong = (direction || '').toLowerCase() === 'long';
+    if (tc.includes('>=') || (isLong && !tc.includes('<='))) {
+      return currentPrice >= level;
+    }
+    if (tc.includes('<=') || (!isLong && !tc.includes('>='))) {
+      return currentPrice <= level;
+    }
+    return false;
+  }
+
+  private rowToPlan(row: Record<string, unknown>): StratPlan {
+    return {
+      plan_id: row.plan_id as string,
+      symbol: row.symbol as string,
+      direction: row.direction as 'long' | 'short',
+      timeframe: (row.timeframe as string) || '1d',
+      source: 'manual',
+      state: 'IN_FORCE',
+      signal_id: null,
+      raw_payload: {
+        ...((row.raw_payload as Record<string, unknown>) ?? {}),
+        entry: row.entry_price ?? (row.raw_payload as Record<string, unknown>)?.entry,
+        target: row.target_price ?? (row.raw_payload as Record<string, unknown>)?.target,
+        stop: row.stop_price ?? (row.raw_payload as Record<string, unknown>)?.stop,
+      } as Record<string, unknown>,
+      risk_reward: null,
+      atr_percent: null,
+      expected_move_alignment: null,
+      gamma_bias: null,
+      liquidity_score: null,
+      engine_confidence: null,
+      priority_score: null,
+      in_force_at: null,
+      expires_at: row.expires_at ? new Date(row.expires_at as string) : null,
+      rejection_reason: null,
+      created_at: new Date(row.created_at as string),
+      updated_at: new Date(),
+    };
+  }
+
   async run(): Promise<void> {
     if (this.isRunning) return;
     this.isRunning = true;
 
     try {
-      // TODO: Query strat_plans WHERE plan_status = 'armed'
-      // TODO: For each plan, fetch current price
-      // TODO: Evaluate trigger_condition
-      // TODO: If met: create signal, update plan to triggered
       const result = await db.query(
-        `SELECT plan_id, symbol, entry_price, target_price, stop_price, reversal_level, trigger_condition
+        `SELECT plan_id, symbol, direction, timeframe, entry_price, target_price, stop_price,
+                reversal_level, trigger_condition, raw_payload, created_at, expires_at
          FROM strat_plans
          WHERE plan_status = 'armed'
+           AND COALESCE(execution_mode, 'manual') = 'auto_on_trigger'
            AND (expires_at IS NULL OR expires_at > NOW())
          LIMIT 10`
       );
 
-      if (result.rows.length > 0) {
-        logger.debug('PlanTriggerWorker: armed plans to monitor', {
-          count: result.rows.length,
-          plan_ids: result.rows.map((r) => r.plan_id),
-        });
-        // TODO: Implement trigger evaluation + signal creation
+      if (result.rows.length === 0) return;
+
+      const symbols = [...new Set(result.rows.map((r) => r.symbol))];
+      const prices: Record<string, number> = {};
+      for (const sym of symbols) {
+        try {
+          const p = await marketData.getStockPrice(sym);
+          if (Number.isFinite(p) && p > 0) prices[sym] = p;
+        } catch (err) {
+          logger.warn('PlanTriggerWorker: price fetch failed', { symbol: sym, error: err });
+        }
+      }
+
+      for (const row of result.rows) {
+        const price = prices[row.symbol];
+        if (!Number.isFinite(price)) continue;
+
+        const met = this.evaluateTrigger(
+          row.trigger_condition,
+          row.reversal_level != null ? Number(row.reversal_level) : null,
+          row.direction,
+          price
+        );
+        if (!met) continue;
+
+        const plan = this.rowToPlan(row);
+        const bridgeResult = await planToSignalBridge.planToSignal(plan);
+        if (bridgeResult.ok) {
+          logger.info('PlanTriggerWorker: plan triggered', {
+            plan_id: plan.plan_id,
+            signal_id: bridgeResult.signalId,
+            symbol: plan.symbol,
+            price,
+          });
+        }
       }
     } finally {
       this.isRunning = false;

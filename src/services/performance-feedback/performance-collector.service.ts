@@ -26,6 +26,10 @@ export interface TradeOutcomeCapture {
   timestamp: Date;
   /** 'live' | 'simulation' for cleanup */
   source?: 'live' | 'simulation';
+  /** Strat plan ID when position was opened from strat plan */
+  stratPlanId?: string | null;
+  /** Setup type from strat plan (e.g. 2-1-2 Rev) */
+  setupType?: string | null;
 }
 
 /**
@@ -57,8 +61,10 @@ export async function captureTradeOutcome(capture: TradeOutcomeCapture): Promise
         entry_acceleration,
         exit_reason_codes,
         source,
+        strat_plan_id,
+        setup_type,
         created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
       [
         capture.positionId,
         capture.symbol,
@@ -73,6 +79,8 @@ export async function captureTradeOutcome(capture: TradeOutcomeCapture): Promise
         entryAcceleration,
         capture.exitReasonCodes,
         capture.source ?? 'live',
+        capture.stratPlanId ?? null,
+        capture.setupType ?? null,
         capture.timestamp,
       ]
     );

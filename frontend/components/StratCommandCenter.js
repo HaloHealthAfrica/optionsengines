@@ -14,7 +14,6 @@ import {
   X,
 } from 'lucide-react';
 
-// TODO: Replace with API call to strat scanning/alerting backend
 const MOCK_ALERTS = [
   {
     id: 'a1',
@@ -316,6 +315,7 @@ function AlertCard({
 
 function CreatePlanFromAlertModal({ alert, onConfirm, onCancel }) {
   const [notes, setNotes] = useState('');
+  const [executionMode, setExecutionMode] = useState('auto_on_trigger');
   if (!alert) return null;
 
   const dirLabel = alert.direction === 'long' ? '▲ LONG' : '▼ SHORT';
@@ -395,7 +395,36 @@ function CreatePlanFromAlertModal({ alert, onConfirm, onCancel }) {
               </p>
             </div>
           </div>
-          <div className="mt-4">
+          {alert.reversalLevel != null && (
+            <div className="col-span-2">
+              <p className="mb-1 text-[10px] uppercase tracking-widest text-slate-500">
+                Execution
+              </p>
+              <div className="flex gap-3">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="radio"
+                    name="execMode"
+                    checked={executionMode === 'auto_on_trigger'}
+                    onChange={() => setExecutionMode('auto_on_trigger')}
+                    className="rounded border-slate-300"
+                  />
+                  <span className="text-sm">Auto on trigger (price {alert.direction === 'long' ? '≥' : '≤'} ${alert.reversalLevel?.toFixed(2)})</span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="radio"
+                    name="execMode"
+                    checked={executionMode === 'manual'}
+                    onChange={() => setExecutionMode('manual')}
+                    className="rounded border-slate-300"
+                  />
+                  <span className="text-sm">Manual</span>
+                </label>
+              </div>
+            </div>
+          )}
+          <div className="col-span-2 mt-2">
             <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">
               Notes
             </label>
@@ -411,7 +440,7 @@ function CreatePlanFromAlertModal({ alert, onConfirm, onCancel }) {
         <div className="flex gap-2 border-t border-slate-200 p-4 dark:border-slate-700">
           <button
             type="button"
-            onClick={() => onConfirm({ ...alert, notes })}
+            onClick={() => onConfirm({ ...alert, notes, executionMode })}
             className="gradient-button flex-1 rounded-lg px-4 py-2 text-sm font-semibold transition active:scale-[0.98]"
           >
             Confirm Plan
@@ -424,6 +453,117 @@ function CreatePlanFromAlertModal({ alert, onConfirm, onCancel }) {
             Cancel
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AddAlertModal({ onConfirm, onCancel }) {
+  const [form, setForm] = useState({
+    symbol: '',
+    direction: 'long',
+    timeframe: 'D',
+    setup: '2-1-2 Rev',
+    entry: '',
+    target: '',
+    stop: '',
+    reversalLevel: '',
+    score: 75,
+    conditionText: '',
+    optionsSuggestion: '',
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const entry = parseFloat(form.entry);
+    const target = parseFloat(form.target);
+    const stop = parseFloat(form.stop);
+    const reversalLevel = form.reversalLevel ? parseFloat(form.reversalLevel) : undefined;
+    if (!Number.isFinite(entry) || !Number.isFinite(target) || !Number.isFinite(stop)) return;
+    onConfirm({
+      symbol: form.symbol,
+      direction: form.direction,
+      timeframe: form.timeframe,
+      setup: form.setup,
+      entry,
+      target,
+      stop,
+      reversalLevel,
+      score: Number(form.score) || 75,
+      conditionText: form.conditionText || undefined,
+      optionsSuggestion: form.optionsSuggestion || undefined,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
+      <div className="card max-h-[90vh] w-full max-w-lg overflow-hidden">
+        <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-700">
+          <h2 className="text-lg font-semibold">Add Alert (Manual)</h2>
+          <button type="button" onClick={onCancel} className="rounded p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+            <X size={18} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Symbol</label>
+              <input type="text" value={form.symbol} onChange={(e) => setForm((p) => ({ ...p, symbol: e.target.value.toUpperCase() }))} placeholder="SPY" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900" required />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Direction</label>
+              <select value={form.direction} onChange={(e) => setForm((p) => ({ ...p, direction: e.target.value }))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900">
+                <option value="long">Long</option>
+                <option value="short">Short</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Timeframe</label>
+              <select value={form.timeframe} onChange={(e) => setForm((p) => ({ ...p, timeframe: e.target.value }))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900">
+                <option value="4H">4H</option>
+                <option value="D">D</option>
+                <option value="W">W</option>
+                <option value="M">M</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Setup</label>
+              <input type="text" value={form.setup} onChange={(e) => setForm((p) => ({ ...p, setup: e.target.value }))} placeholder="2-1-2 Rev" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900" />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Entry</label>
+              <input type="text" value={form.entry} onChange={(e) => setForm((p) => ({ ...p, entry: e.target.value }))} placeholder="138.50" className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm dark:border-slate-700 dark:bg-slate-900" required />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Target</label>
+              <input type="text" value={form.target} onChange={(e) => setForm((p) => ({ ...p, target: e.target.value }))} placeholder="145.00" className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm dark:border-slate-700 dark:bg-slate-900" required />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Stop</label>
+              <input type="text" value={form.stop} onChange={(e) => setForm((p) => ({ ...p, stop: e.target.value }))} placeholder="134.20" className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm dark:border-slate-700 dark:bg-slate-900" required />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Reversal Level</label>
+              <input type="text" value={form.reversalLevel} onChange={(e) => setForm((p) => ({ ...p, reversalLevel: e.target.value }))} placeholder="139.10" className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm dark:border-slate-700 dark:bg-slate-900" />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Score</label>
+              <input type="number" min={0} max={100} value={form.score} onChange={(e) => setForm((p) => ({ ...p, score: parseInt(e.target.value, 10) || 75 }))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900" />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Condition</label>
+              <input type="text" value={form.conditionText} onChange={(e) => setForm((p) => ({ ...p, conditionText: e.target.value }))} placeholder="Break above X confirms" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900" />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Options Suggestion</label>
+              <input type="text" value={form.optionsSuggestion} onChange={(e) => setForm((p) => ({ ...p, optionsSuggestion: e.target.value }))} placeholder="139c & 145c 2/21 Exp" className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm dark:border-slate-700 dark:bg-slate-900" />
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <button type="submit" className="gradient-button flex-1 rounded-lg px-4 py-2 text-sm font-semibold transition active:scale-[0.98]">Add Alert</button>
+            <button type="button" onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800">Cancel</button>
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -576,6 +716,34 @@ function CreatePlanManualModal({ onConfirm, onCancel }) {
   );
 }
 
+function mapApiAlertToUI(row) {
+  const entry = Number(row.entry) || 0;
+  const target = Number(row.target) || 0;
+  const stop = Number(row.stop) || 0;
+  const rr = entry > 0 && stop !== target ? Math.abs((target - entry) / (entry - stop)) : null;
+  const rev = row.reversalLevel ?? row.reversal_level;
+  return {
+    id: row.id,
+    symbol: row.symbol,
+    direction: row.direction,
+    timeframe: row.timeframe,
+    setupType: row.setup || row.setupType,
+    score: Number(row.score) || 0,
+    status: row.status || 'watching',
+    timestamp: (row.triggeredAt || row.triggered_at || row.createdAt || row.created_at || new Date()).toISOString?.() ?? String(row.triggeredAt || row.createdAt || new Date()),
+    entry,
+    target,
+    stop,
+    rr,
+    reversalLevel: rev != null ? Number(rev) : null,
+    condition: row.conditionText || row.condition_text || row.condition,
+    optionsPlay: row.optionsSuggestion || row.options_suggestion || row.optionsPlay,
+    c1Shape: row.c1Shape || row.c1_shape || row.c1Shape,
+    rvol: typeof row.rvol === 'number' ? row.rvol : parseFloat(String(row.rvol || '0')) || 0,
+    atr: row.atr != null ? Number(row.atr) : null,
+  };
+}
+
 export default function StratCommandCenter() {
   const [alerts, setAlerts] = useState(MOCK_ALERTS);
   const [plans, setPlans] = useState([]);
@@ -586,12 +754,29 @@ export default function StratCommandCenter() {
   const [symbolSearch, setSymbolSearch] = useState('');
   const [createFromAlert, setCreateFromAlert] = useState(null);
   const [showManualModal, setShowManualModal] = useState(false);
+  const [showAddAlertModal, setShowAddAlertModal] = useState(false);
   const [apiData, setApiData] = useState(null);
   const [apiError, setApiError] = useState(null);
   const [planTab, setPlanTab] = useState('Active');
 
-  // TODO: Replace with WebSocket connection for real-time alerts (MarketScanner In-Force style)
-  // useEffect(() => { const ws = new WebSocket(...); return () => ws.close(); }, []);
+  const wsUrl = typeof window !== 'undefined' && process.env.NEXT_PUBLIC_WS_URL
+    ? process.env.NEXT_PUBLIC_WS_URL
+    : 'ws://localhost:8080/v1/realtime';
+  useEffect(() => {
+    if (apiError && !apiData) return;
+    if (!apiData) return;
+    const ws = new WebSocket(wsUrl);
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'strat_plan_update' || msg.type === 'strat_alert_new') {
+          loadAlerts();
+          loadPlans();
+        }
+      } catch (_) {}
+    };
+    return () => ws.close();
+  }, [apiData, apiError, loadAlerts, loadPlans, wsUrl]);
 
   const loadApiData = useCallback(async () => {
     try {
@@ -611,9 +796,47 @@ export default function StratCommandCenter() {
     }
   }, []);
 
+  const loadAlerts = useCallback(async () => {
+    try {
+      const r = await fetch('/api/strat/alerts?limit=50');
+      if (r.status === 503) return;
+      const json = await r.json();
+      const list = json.alerts || [];
+      if (list.length > 0) {
+        setAlerts(list.map(mapApiAlertToUI));
+      }
+    } catch (err) {
+      console.error('Load alerts failed:', err);
+    }
+  }, []);
+
+  const loadPlans = useCallback(async () => {
+    try {
+      const tabs = ['active', 'triggered', 'history'];
+      const results = await Promise.all(
+        tabs.map(async (tab) => {
+          const r = await fetch(`/api/strat-plan/plans?tab=${tab}`);
+          if (r.status === 503) return { plans: [] };
+          return r.json();
+        })
+      );
+      const allPlans = results.flatMap((r) => r.plans || []).filter(Boolean);
+      setPlans(allPlans);
+    } catch (err) {
+      console.error('Load plans failed:', err);
+    }
+  }, []);
+
   useEffect(() => {
     loadApiData();
   }, [loadApiData]);
+
+  useEffect(() => {
+    if (apiData && !apiError) {
+      loadAlerts();
+      loadPlans();
+    }
+  }, [apiData, apiError, loadAlerts, loadPlans]);
 
   const filteredAlerts = useMemo(() => {
     return alerts.filter((a) => {
@@ -630,7 +853,9 @@ export default function StratCommandCenter() {
     const triggered = alerts.filter((a) => a.status === 'triggered').length;
     const pending = alerts.filter((a) => a.status === 'pending').length;
     const watching = alerts.filter((a) => a.status === 'watching').length;
-    const activePlans = plans.length;
+    const activePlans = plans.filter(
+      (p) => !['filled', 'expired', 'cancelled', 'rejected', 'triggered', 'executing'].includes(p.status || '')
+    ).length;
     return {
       total: alerts.length,
       triggered,
@@ -639,6 +864,8 @@ export default function StratCommandCenter() {
       activePlans,
     };
   }, [alerts, plans]);
+
+  const maxPlans = 10;
 
   const handleConfirmPlanFromAlert = async (alertWithNotes) => {
     if (isDemoMode) {
@@ -659,10 +886,26 @@ export default function StratCommandCenter() {
       setCreateFromAlert(null);
       return;
     }
+    const rev = alertWithNotes.reversalLevel;
+    const execMode = alertWithNotes.executionMode ?? (rev != null ? 'auto_on_trigger' : 'manual');
+    const triggerCond =
+      rev != null && execMode === 'auto_on_trigger'
+        ? alertWithNotes.direction === 'long'
+          ? `price >= ${rev}`
+          : `price <= ${rev}`
+        : undefined;
     const planPayload = {
       symbol: alertWithNotes.symbol,
       direction: alertWithNotes.direction,
       timeframe: alertWithNotes.timeframe === 'D' ? '1d' : alertWithNotes.timeframe === 'W' ? '1w' : '4h',
+      entry: alertWithNotes.entry,
+      target: alertWithNotes.target,
+      stop: alertWithNotes.stop,
+      reversalLevel: rev ?? undefined,
+      setup: alertWithNotes.setupType,
+      executionMode: execMode,
+      triggerCondition: triggerCond,
+      fromAlert: true,
       raw_payload: {
         entry: alertWithNotes.entry,
         target: alertWithNotes.target,
@@ -695,6 +938,7 @@ export default function StratCommandCenter() {
         status: 'armed',
       };
       setPlans((p) => [...p, plan]);
+      loadPlans();
     } catch (err) {
       console.error('Create plan failed:', err);
       setApiError(err?.message);
@@ -721,10 +965,17 @@ export default function StratCommandCenter() {
       setShowManualModal(false);
       return;
     }
+    const entryNum = parseFloat(form.entry);
+    const targetNum = parseFloat(form.target);
+    const stopNum = parseFloat(form.stop);
     const planPayload = {
       symbol: form.symbol,
       direction: form.direction,
       timeframe: '1d',
+      entry: Number.isFinite(entryNum) ? entryNum : undefined,
+      target: Number.isFinite(targetNum) ? targetNum : undefined,
+      stop: Number.isFinite(stopNum) ? stopNum : undefined,
+      executionMode: 'manual',
       raw_payload: {
         entry: form.entry,
         target: form.target,
@@ -754,6 +1005,7 @@ export default function StratCommandCenter() {
         status: 'armed',
       };
       setPlans((p) => [...p, plan]);
+      loadPlans();
     } catch (err) {
       console.error('Create plan failed:', err);
       setApiError(err?.message);
@@ -762,8 +1014,51 @@ export default function StratCommandCenter() {
     loadApiData();
   };
 
-  const handleRemovePlan = (id) => {
-    setPlans((p) => p.filter((x) => x.id !== id));
+  const handleRemovePlan = async (id) => {
+    if (isDemoMode) {
+      setPlans((p) => p.filter((x) => x.id !== id));
+      return;
+    }
+    try {
+      const res = await fetch(`/api/strat-plan/plans/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json())?.error || 'Failed to remove plan');
+      setPlans((p) => p.filter((x) => x.id !== id));
+      loadPlans();
+    } catch (err) {
+      console.error('Remove plan failed:', err);
+      setApiError(err?.message);
+    }
+  };
+
+  const handleConfirmAddAlert = async (form) => {
+    try {
+      const res = await fetch('/api/strat/alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: form.symbol,
+          direction: form.direction,
+          timeframe: form.timeframe,
+          setup: form.setup,
+          entry: form.entry,
+          target: form.target,
+          stop: form.stop,
+          reversalLevel: form.reversalLevel,
+          score: form.score,
+          conditionText: form.conditionText,
+          optionsSuggestion: form.optionsSuggestion,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err?.error || 'Failed to add alert');
+      }
+      setShowAddAlertModal(false);
+      loadAlerts();
+    } catch (err) {
+      console.error('Add alert failed:', err);
+      setApiError(err?.message);
+    }
   };
 
   const planSummary = useMemo(() => {
@@ -784,7 +1079,6 @@ export default function StratCommandCenter() {
   }, [plans, planTab]);
 
   const maxPlans = 10;
-
   const isDemoMode = apiError && !apiData;
 
   return (
@@ -827,7 +1121,7 @@ export default function StratCommandCenter() {
           <div className="muted flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm dark:border-slate-700">
             <span>Plan capacity</span>
             <span className="font-mono font-semibold text-slate-700 dark:text-slate-200">
-              {plans.length}/10
+              {stats.activePlans}/{maxPlans}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -841,7 +1135,7 @@ export default function StratCommandCenter() {
           </div>
           <button
             type="button"
-            onClick={loadApiData}
+            onClick={() => { loadApiData(); loadAlerts(); loadPlans(); }}
             className="gradient-button flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition active:scale-[0.98]"
           >
             <RefreshCcw size={16} />
@@ -882,13 +1176,25 @@ export default function StratCommandCenter() {
         <div className="card overflow-hidden p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold">Strat Alerts</h2>
-            <input
+            <div className="flex items-center gap-2">
+              {!isDemoMode && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddAlertModal(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+                >
+                  <Plus size={14} />
+                  Add Alert
+                </button>
+              )}
+              <input
               type="text"
               value={symbolSearch}
               onChange={(e) => setSymbolSearch(e.target.value)}
               placeholder="Search symbol..."
               className="w-36 rounded-lg border border-slate-200 px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
             />
+            </div>
           </div>
           <div className="mb-4 flex flex-wrap gap-2">
             {['all', 'triggered', 'pending', 'watching'].map((s) => (
@@ -979,13 +1285,13 @@ export default function StratCommandCenter() {
             <div className="flex justify-between text-xs">
               <span className="muted">Capacity</span>
               <span>
-                {plans.length}/{maxPlans}
+                {stats.activePlans}/{maxPlans}
               </span>
             </div>
             <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
               <div
                 className="h-full rounded-full bg-indigo-500 transition-all"
-                style={{ width: `${(plans.length / maxPlans) * 100}%` }}
+                style={{ width: `${(stats.activePlans / maxPlans) * 100}%` }}
               />
             </div>
           </div>
@@ -1028,14 +1334,37 @@ export default function StratCommandCenter() {
                         E:{plan.entry} T:{plan.target} S:{plan.stop} R:R:{plan.rr || '—'}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemovePlan(plan.id)}
-                      className="rounded p-1.5 text-slate-400 opacity-0 transition hover:bg-rose-100 hover:text-rose-600 group-hover:opacity-100 dark:hover:bg-rose-900/30"
-                      aria-label="Remove plan"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {planTab === 'Active' && ['armed', 'draft'].includes(plan.status || '') && !isDemoMode && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const res = await fetch(`/api/strat-plan/plans/${plan.id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ status: 'cancelled' }),
+                              });
+                              if (!res.ok) throw new Error((await res.json())?.error || 'Failed to cancel');
+                              loadPlans();
+                            } catch (err) {
+                              setApiError(err?.message);
+                            }
+                          }}
+                          className="rounded px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-900/30"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePlan(plan.id)}
+                        className="rounded p-1.5 text-slate-400 opacity-0 transition hover:bg-rose-100 hover:text-rose-600 group-hover:opacity-100 dark:hover:bg-rose-900/30"
+                        aria-label="Remove plan"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))
@@ -1070,6 +1399,13 @@ export default function StratCommandCenter() {
           onConfirm={handleConfirmPlanManual}
           onCancel={() => setShowManualModal(false)}
         />
+      )}
+      {showAddAlertModal && (
+        <AddAlertModal
+          onConfirm={handleConfirmAddAlert}
+          onCancel={() => setShowAddAlertModal(false)}
+        />
+      )}
       )}
     </section>
   );

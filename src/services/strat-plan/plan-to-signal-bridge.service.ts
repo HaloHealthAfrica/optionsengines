@@ -46,10 +46,17 @@ export class PlanToSignalBridge {
       timestamp
     );
 
+    const payload = plan.raw_payload ?? {};
+    const entry = typeof payload.entry === 'number' ? payload.entry : parseFloat(String(payload.entry || ''));
+    const target = typeof payload.target === 'number' ? payload.target : parseFloat(String(payload.target || ''));
+    const stop = typeof payload.stop === 'number' ? payload.stop : parseFloat(String(payload.stop || ''));
     const rawPayload = {
-      ...(plan.raw_payload ?? {}),
+      ...payload,
       strat_plan_id: plan.plan_id,
       source: 'strat_plan',
+      ...(Number.isFinite(entry) && { entry_price: entry }),
+      ...(Number.isFinite(target) && { target }),
+      ...(Number.isFinite(stop) && { stop_loss: stop }),
     };
 
     try {

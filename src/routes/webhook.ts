@@ -6,8 +6,112 @@ import { db } from '../services/database.service.js';
 import { authService } from '../services/auth.service.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import { publishStratAlertNew } from '../services/realtime-updates.service.js';
 
 const router = Router();
+
+/** Check if webhook payload is strat-relevant and optionally create strat_alert */
+async function maybeCreateStratAlertFromWebhook(
+  payload: Record<string, unknown>,
+  symbol: string,
+  direction: string,
+  timeframe: string
+): Promise<void> {
+  if (!config.enableStratPlanLifecycle) return;
+  const components = payload.components as string[] | undefined;
+  const journal = payload.journal as Record<string, unknown> | undefined;
+  const engine = journal?.engine as string | undefined;
+  const isStrat =
+    Array.isArray(components) &&
+    (components.includes('STRAT_SETUP') ||
+      components.includes('HTF_IGNITION') ||
+      components.includes('BIAS_SHIFT'));
+  const isStratJournal = engine === 'STRAT_V6_FULL' || engine === 'STRAT';
+  const hasStratLevels =
+    typeof payload.entry === 'number' &&
+    typeof payload.target === 'number' &&
+    typeof payload.stop === 'number';
+  if (!isStrat && !isStratJournal && !hasStratLevels) return;
+
+  try {
+    const entry = Number(payload.entry) || 0;
+    const target = Number(payload.target) || 0;
+    const stop = Number(payload.stop) || 0;
+    if (entry <= 0 || target <= 0 || stop <= 0) return;
+    const tfMap: Record<string, string> = {
+      '1m': '4H',
+      '5m': '4H',
+      '15m': '4H',
+      '1h': '4H',
+      '4h': '4H',
+      '4H': '4H',
+      '1d': 'D',
+      'D': 'D',
+      '1w': 'W',
+      'W': 'W',
+      '1M': 'M',
+      'M': 'M',
+    };
+    const tf = tfMap[timeframe] || 'D';
+    const setup =
+      (payload.setup as string) ||
+      (payload.setupType as string) ||
+      (payload.setup_type as string) ||
+      (Array.isArray(components) && components.includes('STRAT_SETUP') ? '2-1-2 Rev' : 'Strat Setup');
+    const score = Math.min(100, Math.max(0, Number(payload.score) || Number(payload.ai_score) || 75));
+    const reversalLevel =
+      typeof payload.reversal_level === 'number'
+        ? payload.reversal_level
+        : typeof payload.reversalLevel === 'number'
+          ? payload.reversalLevel
+          : null;
+    const insertResult = await db.query(
+      `INSERT INTO strat_alerts (
+        symbol, direction, timeframe, setup, entry, target, stop,
+        reversal_level, score, status, source, options_suggestion, condition_text, raw_payload
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      RETURNING alert_id, symbol, direction, timeframe, setup, entry, target, stop, score, status, source, created_at`,
+      [
+        symbol.toUpperCase(),
+        direction.toLowerCase(),
+        tf,
+        setup,
+        entry,
+        target,
+        stop,
+        reversalLevel,
+        Math.round(score),
+        'pending',
+        'webhook',
+        (payload.options_suggestion as string) || (payload.optionsPlay as string) || null,
+        (payload.condition_text as string) || (payload.condition as string) || null,
+        JSON.stringify(payload),
+      ]
+    );
+    const row = insertResult.rows[0];
+    logger.info('Strat alert created from webhook', { symbol, setup, score });
+    if (row) {
+      publishStratAlertNew({
+        alert_id: row.alert_id,
+        symbol: row.symbol,
+        direction: row.direction,
+        timeframe: row.timeframe,
+        setup: row.setup,
+        entry: Number(row.entry),
+        target: Number(row.target),
+        stop: Number(row.stop),
+        score: row.score,
+        status: row.status,
+        source: row.source,
+        created_at: row.created_at,
+      });
+    }
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === '42P01') return;
+    logger.warn('Strat alert from webhook failed', { symbol, error: err });
+  }
+}
 
 const MAX_PAYLOAD_BYTES = 128 * 1024; // 128KB
 const MAX_RAW_PAYLOAD_BYTES = 32 * 1024; // 32KB for DB storage
@@ -579,6 +683,14 @@ export async function processWebhookPayload(input: {
       ticker: symbol,
       direction: normalizedDirection,
     });
+
+    // Optionally create strat_alert from strat-relevant webhook payloads
+    maybeCreateStratAlertFromWebhook(
+      payloadForStorage as Record<string, unknown>,
+      symbol,
+      normalizedDirection,
+      timeframe
+    ).catch(() => {});
 
     // Return success response
     await logWebhookEvent({ status: 'accepted' });

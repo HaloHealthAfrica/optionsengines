@@ -5,6 +5,7 @@ import { logger } from '../utils/logger.js';
 import { config } from '../config/index.js';
 import { sleep } from '../utils/sleep.js';
 import { errorTracker } from '../services/error-tracker.service.js';
+import { stratPlanLifecycleService } from '../services/strat-plan/index.js';
 import * as Sentry from '@sentry/node';
 import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
 import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
@@ -198,6 +199,11 @@ export class OrderCreatorWorker {
             ]
           );
 
+          if (config.enableStratPlanLifecycle) {
+            stratPlanLifecycleService.markExecutingBySignal(signal.signal_id).catch((err) =>
+              logger.warn('Strat plan executing sync failed', { signalId: signal.signal_id, error: err })
+            );
+          }
           created += 1;
         } catch (error) {
           logger.error('Order creation failed', error, { signalId: signal.signal_id });
