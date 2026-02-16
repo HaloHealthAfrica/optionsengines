@@ -112,6 +112,7 @@ export class OrchestratorService {
     'market_closed',
     'max_open_positions_exceeded',
     'max_positions_per_symbol_exceeded',
+    'daily_loss_cap_exceeded',
     'confluence_below_threshold',
   ]);
 

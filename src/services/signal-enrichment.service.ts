@@ -209,6 +209,35 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
   riskResult.maxOpenPositions = config.maxOpenPositions;
   riskResult.maxPositionsPerSymbol = riskLimit.max_positions_per_symbol || 0;
 
+  // --- Daily loss cap enforcement ---
+  let dailyPnL = 0;
+  if (config.maxDailyLoss > 0) {
+    try {
+      const dailyPnLResult = await db.query(
+        `SELECT
+          COALESCE((SELECT SUM(realized_pnl) FROM refactored_positions WHERE exit_timestamp >= CURRENT_DATE AND status = 'closed'), 0)
+          +
+          COALESCE((SELECT SUM(unrealized_pnl) FROM refactored_positions WHERE status IN ('open', 'closing')), 0)
+          AS total_daily_pnl`
+      );
+      dailyPnL = Number(dailyPnLResult.rows[0]?.total_daily_pnl) || 0;
+    } catch (err) {
+      logger.warn('Failed to query daily PnL for loss cap', { error: err });
+    }
+    riskResult.dailyPnL = dailyPnL;
+    riskResult.maxDailyLoss = config.maxDailyLoss;
+
+    if (!rejectionReason && !testBypass && dailyPnL <= -config.maxDailyLoss) {
+      rejectionReason = 'daily_loss_cap_exceeded';
+      logger.warn('Daily loss cap exceeded — rejecting signal', {
+        signal_id: signal.signal_id,
+        symbol: signal.symbol,
+        dailyPnL,
+        maxDailyLoss: config.maxDailyLoss,
+      });
+    }
+  }
+
   let freedSlots = 0;
   if (
     !rejectionReason &&

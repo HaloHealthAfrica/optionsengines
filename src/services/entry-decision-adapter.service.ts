@@ -95,7 +95,7 @@ export function buildEntryDecisionInput(
       liquidityState: 'NORMAL',
     },
     riskContext: {
-      dailyPnL: 0,
+      dailyPnL: Number(risk?.dailyPnL ?? 0),
       openTradesCount: openTrades,
       portfolioDelta: 0,
       portfolioTheta: 0,
