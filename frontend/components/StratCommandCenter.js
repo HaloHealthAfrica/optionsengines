@@ -1143,30 +1143,46 @@ export default function StratCommandCenter() {
         </div>
       </div>
 
-      {/* Stats Bar */}
+      {/* Stats Bar - clickable to filter */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="card overflow-hidden p-4">
+        <button
+          type="button"
+          onClick={() => setStatusFilter('all')}
+          className={`card overflow-hidden p-4 text-left transition hover:ring-2 hover:ring-slate-300 dark:hover:ring-slate-600 ${statusFilter === 'all' ? 'ring-2 ring-slate-400 dark:ring-slate-500' : ''}`}
+        >
           <p className="muted text-xs uppercase tracking-wider">Alerts</p>
           <p className="text-2xl font-bold">{stats.total}</p>
-        </div>
-        <div className="card overflow-hidden border-l-4 border-emerald-500/50 p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => { setStatusFilter('triggered'); setPlanTab('Triggered'); }}
+          className={`card overflow-hidden border-l-4 border-emerald-500/50 p-4 text-left transition hover:ring-2 hover:ring-emerald-300 dark:hover:ring-emerald-600 ${statusFilter === 'triggered' ? 'ring-2 ring-emerald-400 dark:ring-emerald-500' : ''}`}
+        >
           <p className="muted text-xs uppercase tracking-wider">Triggered</p>
           <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
             {stats.triggered}
           </p>
-        </div>
-        <div className="card overflow-hidden border-l-4 border-amber-500/50 p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => { setStatusFilter('pending'); setPlanTab('Active'); }}
+          className={`card overflow-hidden border-l-4 border-amber-500/50 p-4 text-left transition hover:ring-2 hover:ring-amber-300 dark:hover:ring-amber-600 ${statusFilter === 'pending' ? 'ring-2 ring-amber-400 dark:ring-amber-500' : ''}`}
+        >
           <p className="muted text-xs uppercase tracking-wider">Pending</p>
           <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">
             {stats.pending}
           </p>
-        </div>
-        <div className="card overflow-hidden border-l-4 border-indigo-500/50 p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => setPlanTab('Active')}
+          className={`card overflow-hidden border-l-4 border-indigo-500/50 p-4 text-left transition hover:ring-2 hover:ring-indigo-300 dark:hover:ring-indigo-600 ${planTab === 'Active' ? 'ring-2 ring-indigo-400 dark:ring-indigo-500' : ''}`}
+        >
           <p className="muted text-xs uppercase tracking-wider">Active Plans</p>
           <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
             {stats.activePlans}
           </p>
-        </div>
+        </button>
       </div>
 
       {/* Main layout: Alerts (2/3) + Plans (1/3) */}
