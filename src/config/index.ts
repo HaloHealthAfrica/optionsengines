@@ -243,6 +243,7 @@ export const config: Config = {
     getEnvVar('MARKET_DATA_API_KEY', '') || getEnvVar('MARKETDATA_API_KEY', ''),
   unusualWhalesApiKey: getEnvVar('UNUSUAL_WHALES_API_KEY', ''),
   unusualWhalesGammaUrl: getEnvVar('UNUSUAL_WHALES_GAMMA_URL', ''),
+  /** When true: UW is primary for option chain, option price, and flow. MarketData.app fallback. Matches 120/min, 15K/day subscription. */
   unusualWhalesOptionsEnabled: getEnvVarBoolean('UNUSUAL_WHALES_OPTIONS_ENABLED', true),
 
   // Performance

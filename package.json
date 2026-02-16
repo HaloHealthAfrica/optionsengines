@@ -33,6 +33,7 @@
     "validate:e2e": "tsx scripts/run-full-e2e-sentry-validation.ts",
     "verify:uw-schema": "tsx scripts/verify-unusual-whales-schema.ts",
     "diagnose:uw-flow": "tsx scripts/diagnose-uw-flow.ts",
+    "diagnose:uw-contract": "tsx scripts/diagnose-uw-option-contract.ts",
     "e2e:replay": "tsx scripts/run-e2e-replay.ts",
     "e2e:full-pipeline": "tsx scripts/run-e2e-full-pipeline.ts",
     "e2e:validate": "tsx scripts/run-e2e-full-pipeline.ts --send",

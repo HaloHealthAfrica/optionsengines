@@ -540,8 +540,8 @@ export class MarketDataService {
   }
 
   /**
-   * Get options chain from MarketData.app, with Unusual Whales fallback.
-   * Used for GEX and max pain calculations. UW rows have no gamma (GEX will be 0).
+   * Get options chain. When UnusualWhales options is enabled, UW is primary (options data + flow).
+   * Fallback: MarketData.app. UW rows have no gamma (GEX will be 0 when using UW chain).
    */
   async getOptionsChain(symbol: string): Promise<MarketDataOptionRow[]> {
     const cacheKey = `options-chain:${symbol}`;
@@ -550,6 +550,23 @@ export class MarketDataService {
       return cached;
     }
 
+    // Primary: Unusual Whales when options subscription is enabled (flow + options data)
+    if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey && this.checkCircuitBreaker('unusualwhales')) {
+      try {
+        const rows = await unusualWhalesOptionsService.getChainAsMarketDataRows(symbol);
+        if (rows.length > 0) {
+          this.recordSuccess('unusualwhales');
+          cache.set(cacheKey, rows, 60);
+          logger.info('Options chain: Unusual Whales (primary)', { symbol, count: rows.length });
+          return rows;
+        }
+      } catch (error) {
+        this.recordFailure('unusualwhales');
+        logger.warn('Unusual Whales options chain failed, trying MarketData.app fallback', { symbol, error });
+      }
+    }
+
+    // Fallback: MarketData.app
     if (this.checkCircuitBreaker('marketdata')) {
       try {
         const rows = await retry(
@@ -567,25 +584,11 @@ export class MarketDataService {
 
         this.recordSuccess('marketdata');
         cache.set(cacheKey, rows, 60);
+        logger.info('Options chain: MarketData.app (fallback)', { symbol, count: rows.length });
         return rows;
       } catch (error) {
         this.recordFailure('marketdata');
-        logger.warn('MarketData.app options chain failed, trying Unusual Whales fallback', { symbol, error });
-      }
-    }
-
-    if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey && this.checkCircuitBreaker('unusualwhales')) {
-      try {
-        const rows = await unusualWhalesOptionsService.getChainAsMarketDataRows(symbol);
-        if (rows.length > 0) {
-          this.recordSuccess('unusualwhales');
-          cache.set(cacheKey, rows, 60);
-          logger.info('Options chain fallback: Unusual Whales', { symbol, count: rows.length });
-          return rows;
-        }
-      } catch (error) {
-        this.recordFailure('unusualwhales');
-        logger.warn('Unusual Whales options chain fallback failed', { symbol, error });
+        logger.warn('MarketData.app options chain failed', { symbol, error });
       }
     }
 
