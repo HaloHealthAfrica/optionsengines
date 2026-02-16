@@ -2,6 +2,7 @@
 import { AlpacaClient } from './providers/alpaca-client.js';
 import { TwelveDataClient } from './providers/twelvedata-client.js';
 import { MarketDataClient, MarketDataOptionRow } from './providers/marketdata-client.js';
+import type { ProviderHealthStatus } from './providers/market-data-provider.interface.js';
 import { PolygonClient } from './providers/polygon-client.js';
 import { cache } from './cache.service.js';
 import { rateLimiter } from './rate-limiter.service.js';
@@ -812,6 +813,40 @@ export class MarketDataService {
     });
 
     return status;
+  }
+
+  /**
+   * Phase 3c: Run health checks on all configured providers concurrently.
+   * Returns per-provider health status with latency and circuit breaker state.
+   */
+  async healthCheckAll(): Promise<ProviderHealthStatus[]> {
+    const providers: Array<{ name: Provider; client: { healthCheck(): Promise<ProviderHealthStatus> } }> = [];
+
+    for (const p of this.providerPriority) {
+      const client = p === 'alpaca' ? this.alpaca
+        : p === 'polygon' ? this.polygon
+        : p === 'marketdata' ? this.marketData
+        : p === 'twelvedata' ? this.twelveData
+        : null;
+      if (client) providers.push({ name: p, client: client as any });
+    }
+
+    const results = await Promise.allSettled(
+      providers.map(async ({ name, client }) => {
+        const result = await client.healthCheck();
+        const breaker = this.circuitBreakers.get(name);
+        if (breaker) {
+          result.circuitBreakerState = breaker.getStatus().state;
+        }
+        return result;
+      })
+    );
+
+    return results.map((r, i) =>
+      r.status === 'fulfilled'
+        ? r.value
+        : { provider: providers[i].name, healthy: false, latencyMs: 0, lastError: String((r as PromiseRejectedResult).reason) }
+    );
   }
 }
 

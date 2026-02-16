@@ -195,7 +195,7 @@ export class OrchestratorService {
           });
           const enrichment = await buildSignalEnrichment(signal);
 
-          // Persist enrichment for audit and replay (Gap 8 fix)
+          // Persist enrichment for audit and replay (Gap 8 fix, Phase 2b: unique index now exists)
           try {
             await db.query(
               `INSERT INTO refactored_signals (signal_id, enriched_data, risk_check_result, rejection_reason, processed_at)
@@ -213,7 +213,21 @@ export class OrchestratorService {
               ]
             );
           } catch (persistErr) {
-            logger.warn('Failed to persist enrichment to refactored_signals', { error: persistErr, signal_id: signal.signal_id });
+            // Fallback: try plain INSERT if ON CONFLICT fails (e.g. old schema without unique index)
+            try {
+              await db.query(
+                `INSERT INTO refactored_signals (signal_id, enriched_data, risk_check_result, rejection_reason, processed_at)
+                 VALUES ($1, $2, $3, $4, NOW())`,
+                [
+                  signal.signal_id,
+                  JSON.stringify(enrichment.enrichedData ?? {}),
+                  JSON.stringify(enrichment.riskResult ?? {}),
+                  enrichment.rejectionReason,
+                ]
+              );
+            } catch (fallbackErr) {
+              logger.warn('Failed to persist enrichment to refactored_signals', { error: fallbackErr, signal_id: signal.signal_id });
+            }
           }
 
           Sentry.addBreadcrumb({
@@ -852,6 +866,10 @@ export class OrchestratorService {
     };
     if (dealerDecision) {
       rationale.meta_gamma = dealerDecision;
+    }
+    // Phase 2b: Capture entry metadata for audit trail
+    if (recommendation.entry_metadata) {
+      rationale.entry_metadata = recommendation.entry_metadata;
     }
 
     await db.query(

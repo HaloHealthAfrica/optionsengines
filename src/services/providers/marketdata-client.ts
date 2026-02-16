@@ -34,7 +34,10 @@ export interface MarketDataOptionRow {
   timestamp?: string;
 }
 
-export class MarketDataClient {
+import type { IMarketDataProvider, ProviderHealthStatus } from './market-data-provider.interface.js';
+
+export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'healthCheck'> {
+  readonly name = 'marketdata' as const;
   private readonly apiKey: string;
   private readonly baseUrl: string = 'https://api.marketdata.app';
 
@@ -351,5 +354,15 @@ export class MarketDataClient {
   }> {
     const isOpen = await this.isMarketOpen();
     return { isOpen };
+  }
+
+  async healthCheck(): Promise<ProviderHealthStatus> {
+    const start = Date.now();
+    try {
+      await this.getLatestQuote('SPY');
+      return { provider: this.name, healthy: true, latencyMs: Date.now() - start };
+    } catch (e: any) {
+      return { provider: this.name, healthy: false, latencyMs: Date.now() - start, lastError: e.message };
+    }
   }
 }

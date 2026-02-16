@@ -14,7 +14,7 @@ export const portfolioGuardService = {
   async check(symbol: string, _state: SymbolMarketState): Promise<GuardResult> {
     try {
       const openPositions = await db.query(
-        `SELECT COUNT(*) as cnt FROM refactored_positions WHERE status = 'open'`
+        `SELECT COUNT(*) as cnt FROM refactored_positions WHERE status = 'open' AND COALESCE(is_test, false) = false`
       );
       const count = Number(openPositions.rows[0]?.cnt ?? 0);
 
@@ -24,7 +24,7 @@ export const portfolioGuardService = {
       }
 
       const symbolPositions = await db.query(
-        `SELECT COUNT(*) as cnt FROM refactored_positions WHERE status = 'open' AND symbol = $1`,
+        `SELECT COUNT(*) as cnt FROM refactored_positions WHERE status = 'open' AND symbol = $1 AND COALESCE(is_test, false) = false`,
         [symbol]
       );
       const symbolCount = Number(symbolPositions.rows[0]?.cnt ?? 0);

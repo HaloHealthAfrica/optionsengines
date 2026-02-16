@@ -30,7 +30,10 @@ export interface AlpacaOptionQuote {
   c?: string;
 }
 
-export class AlpacaClient {
+import type { IMarketDataProvider, ProviderHealthStatus } from './market-data-provider.interface.js';
+
+export class AlpacaClient implements Pick<IMarketDataProvider, 'name' | 'healthCheck'> {
+  readonly name = 'alpaca' as const;
   private readonly apiKey: string;
   private readonly secretKey: string;
   private readonly dataUrl: string;
@@ -373,6 +376,16 @@ export class AlpacaClient {
     } catch (error) {
       logger.error('Failed to get market hours', error);
       return { isOpen: false };
+    }
+  }
+
+  async healthCheck(): Promise<ProviderHealthStatus> {
+    const start = Date.now();
+    try {
+      await this.isMarketOpen();
+      return { provider: this.name, healthy: true, latencyMs: Date.now() - start };
+    } catch (e: any) {
+      return { provider: this.name, healthy: false, latencyMs: Date.now() - start, lastError: e.message };
     }
   }
 }

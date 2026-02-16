@@ -193,13 +193,13 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
   const riskLimit = riskLimits.rows[0] || {};
 
   const openPositionsResult = await db.query(
-    `SELECT COUNT(*)::int AS count FROM refactored_positions WHERE status IN ('open', 'closing')`
+    `SELECT COUNT(*)::int AS count FROM refactored_positions WHERE status IN ('open', 'closing') AND COALESCE(is_test, false) = false`
   );
   const openPositions = openPositionsResult.rows[0]?.count || 0;
 
   const openSymbolPositionsResult = await db.query(
     `SELECT COUNT(*)::int AS count FROM refactored_positions 
-     WHERE status IN ('open', 'closing') AND symbol = $1`,
+     WHERE status IN ('open', 'closing') AND symbol = $1 AND COALESCE(is_test, false) = false`,
     [signal.symbol]
   );
   const openSymbolPositions = openSymbolPositionsResult.rows[0]?.count || 0;
@@ -215,9 +215,9 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     try {
       const dailyPnLResult = await db.query(
         `SELECT
-          COALESCE((SELECT SUM(realized_pnl) FROM refactored_positions WHERE exit_timestamp >= CURRENT_DATE AND status = 'closed'), 0)
+          COALESCE((SELECT SUM(realized_pnl) FROM refactored_positions WHERE exit_timestamp >= CURRENT_DATE AND status = 'closed' AND COALESCE(is_test, false) = false), 0)
           +
-          COALESCE((SELECT SUM(unrealized_pnl) FROM refactored_positions WHERE status IN ('open', 'closing')), 0)
+          COALESCE((SELECT SUM(unrealized_pnl) FROM refactored_positions WHERE status IN ('open', 'closing') AND COALESCE(is_test, false) = false), 0)
           AS total_daily_pnl`
       );
       dailyPnL = Number(dailyPnLResult.rows[0]?.total_daily_pnl) || 0;

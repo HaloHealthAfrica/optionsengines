@@ -198,6 +198,8 @@ async function buildRecommendation(
     let optionType: 'call' | 'put' = 'call';
     let entryPrice = 0;
     let advancedStrikeUsed = false;
+    let advStrikeScore: number | undefined;
+    let advStrikeRationale: string[] | undefined;
 
     // Phase 2a: Try advanced strike selection when enabled
     if (config.enableAdvancedStrikeSelection && !isTest) {
@@ -221,6 +223,8 @@ async function buildRecommendation(
         optionType = advResult.optionType;
         entryPrice = advResult.entryPrice;
         advancedStrikeUsed = true;
+        advStrikeScore = advResult.scores?.overall;
+        advStrikeRationale = advResult.rationale;
         logger.info('Advanced strike selection used', {
           signal_id: signal.signal_id,
           symbol: signal.symbol,
@@ -229,14 +233,14 @@ async function buildRecommendation(
           expiration,
           optionType,
           entryPrice,
-          score: advResult.scores?.overall,
-          rationale: advResult.rationale,
+          score: advStrikeScore,
+          rationale: advStrikeRationale,
         });
         Sentry.addBreadcrumb({
           category: 'engine',
           message: `Engine ${engine} advanced strike selected`,
           level: 'info',
-          data: { strike, expiration, optionType, score: advResult.scores?.overall },
+          data: { strike, expiration, optionType, score: advStrikeScore },
         });
       }
     }
@@ -328,6 +332,15 @@ async function buildRecommendation(
       });
     }
 
+    // Phase 2b: Capture entry metadata for audit trail
+    const entryMetadata: TradeRecommendation['entry_metadata'] = {
+      advancedStrikeUsed,
+      strikeSelectionScore: advStrikeScore,
+      strikeSelectionRationale: advStrikeRationale,
+      biasConfidence: mtfBias?.unifiedState?.confidence,
+      biasRegime: mtfBias?.unifiedState?.regimeType,
+    };
+
     return {
       experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
       engine,
@@ -338,6 +351,7 @@ async function buildRecommendation(
       quantity,
       entry_price: entryPrice,
       is_shadow: false,
+      entry_metadata: entryMetadata,
     };
   } catch (error) {
     logger.error('Engine recommendation failed', error, { engine, signal_id: signal.signal_id });
@@ -682,6 +696,11 @@ async function buildEngineBRecommendation(
       quantity,
       entry_price: entryPrice,
       is_shadow: false,
+      entry_metadata: {
+        advancedStrikeUsed: advancedStrikeUsedB,
+        biasConfidence: mtfBiasB?.unifiedState?.confidence,
+        biasRegime: mtfBiasB?.unifiedState?.regimeType,
+      },
     };
   } catch (error) {
     logger.error('Engine B pipeline failed', error, { signal_id: signal.signal_id });

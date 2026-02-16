@@ -21,7 +21,10 @@ export interface TwelveDataQuote {
   timestamp: number;
 }
 
-export class TwelveDataClient {
+import type { IMarketDataProvider, ProviderHealthStatus } from './market-data-provider.interface.js';
+
+export class TwelveDataClient implements Pick<IMarketDataProvider, 'name' | 'healthCheck'> {
+  readonly name = 'twelvedata' as const;
   private readonly apiKey: string;
   private readonly baseUrl: string = 'https://api.twelvedata.com';
 
@@ -223,5 +226,15 @@ export class TwelveDataClient {
     
     // Simplified - doesn't calculate exact next open/close
     return { isOpen };
+  }
+
+  async healthCheck(): Promise<ProviderHealthStatus> {
+    const start = Date.now();
+    try {
+      await this.getLatestQuote('SPY');
+      return { provider: this.name, healthy: true, latencyMs: Date.now() - start };
+    } catch (e: any) {
+      return { provider: this.name, healthy: false, latencyMs: Date.now() - start, lastError: e.message };
+    }
   }
 }

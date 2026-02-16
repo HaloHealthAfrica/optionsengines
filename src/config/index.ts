@@ -1,5 +1,6 @@
 // Configuration management for the dual-engine options trading platform
 import dotenv from 'dotenv';
+import os from 'os';
 
 dotenv.config();
 
@@ -153,6 +154,10 @@ interface Config {
 
   // Logging
   logLevel: string;
+
+  // Instance isolation (Phase 3b)
+  instanceId: string;
+  lockStalenessMinutes: number;
 
   // E2E Test Mode (dry run, no real execution, full audit logging)
   e2eTestMode: boolean;
@@ -386,6 +391,10 @@ export const config: Config = {
 
   // Logging
   logLevel: getEnvVar('LOG_LEVEL', 'info'),
+
+  // Instance isolation (Phase 3b): unique ID per deployment, auto-detects Fly.io alloc ID
+  instanceId: getEnvVar('INSTANCE_ID', process.env.FLY_ALLOC_ID ?? `local-${os.hostname()}`),
+  lockStalenessMinutes: getEnvVarNumber('LOCK_STALENESS_MINUTES', 5),
 
   // E2E Test Mode: no real brokerage, paper only, full logging, no adaptive changes
   e2eTestMode: getEnvVarBoolean('E2E_TEST_MODE', false),

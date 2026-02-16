@@ -56,7 +56,10 @@ export interface PolygonSnapshot {
   };
 }
 
-export class PolygonClient {
+import type { IMarketDataProvider, ProviderHealthStatus } from './market-data-provider.interface.js';
+
+export class PolygonClient implements Pick<IMarketDataProvider, 'name' | 'healthCheck'> {
+  readonly name = 'polygon' as const;
   private readonly apiKey: string;
   private readonly baseUrl: string;
 
@@ -328,5 +331,15 @@ export class PolygonClient {
   }> {
     const isOpen = await this.isMarketOpen();
     return { isOpen };
+  }
+
+  async healthCheck(): Promise<ProviderHealthStatus> {
+    const start = Date.now();
+    try {
+      await this.getLatestQuote('SPY');
+      return { provider: this.name, healthy: true, latencyMs: Date.now() - start };
+    } catch (e: any) {
+      return { provider: this.name, healthy: false, latencyMs: Date.now() - start, lastError: e.message };
+    }
   }
 }

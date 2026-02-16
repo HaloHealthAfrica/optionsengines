@@ -114,6 +114,17 @@ export interface TradeRecommendation {
   stop_loss?: number;
   take_profit?: number;
   is_shadow: boolean;
+  /** Phase 2b: Optional entry metadata for audit trail */
+  entry_metadata?: {
+    advancedStrikeUsed?: boolean;
+    strikeSelectionScore?: number;
+    strikeSelectionRationale?: string[];
+    setupType?: string;
+    biasConfidence?: number;
+    biasRegime?: string;
+    gexState?: string;
+    ivPercentile?: number;
+  };
 }
 
 /**

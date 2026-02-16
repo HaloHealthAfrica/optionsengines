@@ -106,9 +106,10 @@ export class OrderCreatorWorker {
     updateWorkerStatus('OrderCreatorWorker', { lastRunAt: new Date() });
 
     try {
-      const signals = await db.query<ApprovedSignal & { enriched_data?: string }>(
+      const signals = await db.query<ApprovedSignal & { enriched_data?: string; is_test?: boolean }>(
         `SELECT s.signal_id, s.symbol, s.direction, s.timeframe, s.timestamp,
-                s.experiment_id, e.variant AS engine, rs.enriched_data
+                s.experiment_id, e.variant AS engine, rs.enriched_data,
+                COALESCE(s.is_test, false) AS is_test
          FROM signals s
          LEFT JOIN experiments e ON e.signal_id = s.signal_id
          LEFT JOIN refactored_signals rs ON rs.signal_id = s.signal_id
@@ -131,7 +132,7 @@ export class OrderCreatorWorker {
       const riskLimit = riskLimitsResult.rows[0] || {};
       const maxPositionSize = riskLimit.max_position_size || config.maxPositionSize || 1;
       const openPositionsResult = await db.query(
-        `SELECT COUNT(*)::int AS count FROM refactored_positions WHERE status IN ('open', 'closing')`
+        `SELECT COUNT(*)::int AS count FROM refactored_positions WHERE status IN ('open', 'closing') AND COALESCE(is_test, false) = false`
       );
       const openPositions = openPositionsResult.rows[0]?.count || 0;
       const capacityRatio =
@@ -178,8 +179,9 @@ export class OrderCreatorWorker {
               engine,
               experiment_id,
               order_type,
-              status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+              status,
+              is_test
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
             [
               signal.signal_id,
               signal.symbol,
@@ -192,6 +194,7 @@ export class OrderCreatorWorker {
               experimentId,
               'paper',
               'pending_execution',
+              signal.is_test ?? false,
             ]
           );
 

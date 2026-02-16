@@ -85,12 +85,13 @@ async function getRiskSnapshot() {
     db.query(
       `SELECT COUNT(*)::int AS open_positions
        FROM refactored_positions
-       WHERE status IN ('open', 'closing')`
+       WHERE status IN ('open', 'closing') AND COALESCE(is_test, false) = false`
     ),
     db.query(
       `SELECT COALESCE(SUM(unrealized_pnl), 0) AS unrealized_pnl,
               COALESCE(SUM(realized_pnl), 0) AS realized_pnl
-       FROM refactored_positions`
+       FROM refactored_positions
+       WHERE COALESCE(is_test, false) = false`
     ),
   ]);
 

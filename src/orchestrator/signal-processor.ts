@@ -13,6 +13,7 @@ import { Signal, MarketContext } from './types.js';
 import { Candle } from '../types/index.js';
 import { SignalSchema, MarketContextSchema } from './schemas.js';
 import { logger } from '../utils/logger.js';
+import { config } from '../config/index.js';
 import { marketData } from '../services/market-data.js';
 import { indicators as indicatorService } from '../services/indicators.js';
 import { marketIntelService } from '../services/market-intel/market-intel.service.js';
@@ -33,15 +34,36 @@ export class SignalProcessor {
     
     try {
       await client.query('BEGIN');
-      const params: Array<number | string[]> = [limit];
+
+      // Phase 3b: Recover stale locks from crashed instances
+      if (config.lockStalenessMinutes > 0) {
+        const recovered = await client.query(
+          `UPDATE signals
+           SET processing_lock = FALSE, locked_by = NULL, locked_at = NULL
+           WHERE processing_lock = TRUE
+             AND processed = FALSE
+             AND locked_at < NOW() - ($1 || ' minutes')::interval
+           RETURNING signal_id`,
+          [String(config.lockStalenessMinutes)]
+        );
+        if (recovered.rowCount && recovered.rowCount > 0) {
+          logger.warn('Recovered stale signal locks', {
+            count: recovered.rowCount,
+            instanceId: config.instanceId,
+            stalenessMinutes: config.lockStalenessMinutes,
+          });
+        }
+      }
+
+      const params: Array<number | string | string[]> = [limit, config.instanceId];
       const signalFilter =
-        signalIds && signalIds.length > 0 ? 'AND signal_id = ANY($2::uuid[])' : '';
+        signalIds && signalIds.length > 0 ? 'AND signal_id = ANY($3::uuid[])' : '';
       if (signalIds && signalIds.length > 0) {
         params.push(signalIds);
       }
       const result = await client.query(
         `UPDATE signals
-         SET processing_lock = TRUE
+         SET processing_lock = TRUE, locked_by = $2, locked_at = NOW()
          WHERE signal_id IN (
            SELECT signal_id
            FROM signals
@@ -241,6 +263,8 @@ export class SignalProcessor {
          SET processed = TRUE,
              experiment_id = $1,
              processing_lock = FALSE,
+             locked_by = NULL,
+             locked_at = NULL,
              next_retry_at = NULL,
              processing_attempts = 0
          WHERE signal_id = $2`,
@@ -263,7 +287,7 @@ export class SignalProcessor {
     const client = await this.pool.connect();
     try {
       await client.query(
-        `UPDATE signals SET processing_lock = FALSE WHERE signal_id = $1`,
+        `UPDATE signals SET processing_lock = FALSE, locked_by = NULL, locked_at = NULL WHERE signal_id = $1`,
         [signal_id]
       );
     } finally {
@@ -283,6 +307,8 @@ export class SignalProcessor {
          SET status = $1,
              rejection_reason = $3,
              processing_lock = FALSE,
+             locked_by = NULL,
+             locked_at = NULL,
              next_retry_at = NULL
          WHERE signal_id = $2`,
         [status, signal_id, rejectionReason ?? null]
@@ -300,7 +326,9 @@ export class SignalProcessor {
          SET queued_until = $1,
              queued_at = NOW(),
              queue_reason = $2,
-             processing_lock = FALSE
+             processing_lock = FALSE,
+             locked_by = NULL,
+             locked_at = NULL
          WHERE signal_id = $3`,
         [queuedUntil, reason, signal_id]
       );
@@ -322,7 +350,9 @@ export class SignalProcessor {
          SET processing_attempts = $1,
              next_retry_at = $2,
              rejection_reason = $3,
-             processing_lock = FALSE
+             processing_lock = FALSE,
+             locked_by = NULL,
+             locked_at = NULL
          WHERE signal_id = $4`,
         [attempts, nextRetryAt, reason, signal_id]
       );

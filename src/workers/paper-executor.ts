@@ -23,6 +23,7 @@ interface PendingOrder {
   quantity: number;
   engine?: 'A' | 'B' | null;
   experiment_id?: string | null;
+  is_test?: boolean;
 }
 
 /** Simulated slippage as a fraction of bid-ask spread (0 = no slippage, 0.5 = half spread) */
@@ -223,12 +224,13 @@ export class PaperExecutorWorker {
             }
           } catch { /* optional — bias state not critical for position creation */ }
 
+          const orderIsTest = order.is_test ?? false;
           await db.transaction(async (txClient) => {
             // 1. Insert trade
             await txClient.query(
-              `INSERT INTO trades (order_id, fill_price, fill_quantity, fill_timestamp, commission, engine, experiment_id)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-              [order.order_id, price, order.quantity, fillTimestamp, 0, order.engine ?? null, order.experiment_id ?? null]
+              `INSERT INTO trades (order_id, fill_price, fill_quantity, fill_timestamp, commission, engine, experiment_id, is_test)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+              [order.order_id, price, order.quantity, fillTimestamp, 0, order.engine ?? null, order.experiment_id ?? null, orderIsTest]
             );
 
             // 2. Update order status
@@ -272,8 +274,9 @@ export class PaperExecutorWorker {
                   symbol, option_symbol, strike, expiration, type, quantity,
                   entry_price, engine, experiment_id, status, entry_timestamp, last_updated,
                   entry_bias_score, entry_regime_type, entry_mode_hint,
-                  entry_macro_class, entry_acceleration_state_strength_delta
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16)
+                  entry_macro_class, entry_acceleration_state_strength_delta,
+                  is_test
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16, $17)
                 RETURNING position_id`,
                 [
                   order.symbol, order.option_symbol, order.strike, order.expiration,
@@ -281,6 +284,7 @@ export class PaperExecutorWorker {
                   order.experiment_id ?? null, 'open', fillTimestamp,
                   entryBiasScore, entryRegimeType, entryModeHint,
                   entryMacroClass, entryAccel,
+                  orderIsTest,
                 ]
               );
               positionId = insertResult.rows[0]?.position_id ?? null;
