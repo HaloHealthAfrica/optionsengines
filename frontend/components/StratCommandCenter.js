@@ -745,7 +745,7 @@ function mapApiAlertToUI(row) {
 }
 
 export default function StratCommandCenter() {
-  const [alerts, setAlerts] = useState(MOCK_ALERTS);
+  const [alerts, setAlerts] = useState([]);
   const [plans, setPlans] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
   const [statusFilter, setStatusFilter] = useState('all');
@@ -759,6 +759,24 @@ export default function StratCommandCenter() {
   const [apiError, setApiError] = useState(null);
   const [planTab, setPlanTab] = useState('Active');
   const [watchlistInput, setWatchlistInput] = useState('');
+  const [scanning, setScanning] = useState(false);
+
+  const isDemoMode = apiError && !apiData;
+
+  const runStratScan = useCallback(async (opts = {}) => {
+    setScanning(true);
+    try {
+      await fetch('/api/strat/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(opts),
+      });
+    } catch (err) {
+      console.error('Strat scan failed:', err);
+    } finally {
+      setScanning(false);
+    }
+  }, []);
 
   const loadApiData = useCallback(async () => {
     try {
@@ -784,9 +802,7 @@ export default function StratCommandCenter() {
       if (r.status === 503) return;
       const json = await r.json();
       const list = json.alerts || [];
-      if (list.length > 0) {
-        setAlerts(list.map(mapApiAlertToUI));
-      }
+      setAlerts(list.map(mapApiAlertToUI));
     } catch (err) {
       console.error('Load alerts failed:', err);
     }
@@ -822,11 +838,15 @@ export default function StratCommandCenter() {
       if (!res.ok) throw new Error(json?.error || 'Failed to add ticker');
       setWatchlistInput('');
       loadApiData();
+      if (!isDemoMode) {
+        await runStratScan({ symbols: [sym] });
+        loadAlerts();
+      }
     } catch (err) {
       console.error('Add ticker failed:', err);
       setApiError(err?.message);
     }
-  }, [watchlistInput, loadApiData]);
+  }, [watchlistInput, loadApiData, runStratScan, loadAlerts, isDemoMode]);
 
   const handleRemoveTicker = useCallback(async (symbol) => {
     try {
@@ -854,7 +874,13 @@ export default function StratCommandCenter() {
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
-        if (msg.type === 'strat_plan_update' || msg.type === 'strat_alert_new') {
+        if (
+          msg.type === 'strat_plan_update' ||
+          msg.type === 'strat_alert_new' ||
+          msg.type === 'strat_scan_complete' ||
+          msg.type === 'strat_alert_triggered' ||
+          msg.type === 'strat_alert_invalidated'
+        ) {
           loadAlerts();
           loadPlans();
         }
@@ -875,7 +901,8 @@ export default function StratCommandCenter() {
   }, [apiData, apiError, loadAlerts, loadPlans]);
 
   const filteredAlerts = useMemo(() => {
-    return alerts.filter((a) => {
+    const source = isDemoMode ? MOCK_ALERTS : alerts;
+    return source.filter((a) => {
       if (statusFilter !== 'all' && a.status !== statusFilter) return false;
       if (tfFilter !== 'all' && a.timeframe !== tfFilter) return false;
       if (dirFilter !== 'all' && a.direction !== dirFilter) return false;
@@ -883,23 +910,24 @@ export default function StratCommandCenter() {
         return false;
       return true;
     });
-  }, [alerts, statusFilter, tfFilter, dirFilter, symbolSearch]);
+  }, [alerts, statusFilter, tfFilter, dirFilter, symbolSearch, isDemoMode]);
 
   const stats = useMemo(() => {
-    const triggered = alerts.filter((a) => a.status === 'triggered').length;
-    const pending = alerts.filter((a) => a.status === 'pending').length;
-    const watching = alerts.filter((a) => a.status === 'watching').length;
+    const source = isDemoMode ? MOCK_ALERTS : alerts;
+    const triggered = source.filter((a) => a.status === 'triggered').length;
+    const pending = source.filter((a) => a.status === 'pending').length;
+    const watching = source.filter((a) => a.status === 'watching').length;
     const activePlans = plans.filter(
       (p) => !['filled', 'expired', 'cancelled', 'rejected', 'triggered', 'executing'].includes(p.status || '')
     ).length;
     return {
-      total: alerts.length,
+      total: source.length,
       triggered,
       pending,
       watching,
       activePlans,
     };
-  }, [alerts, plans]);
+  }, [alerts, plans, isDemoMode]);
 
   const maxPlans = 10;
 
@@ -1114,8 +1142,6 @@ export default function StratCommandCenter() {
     return plans;
   }, [plans, planTab]);
 
-  const isDemoMode = apiError && !apiData;
-
   return (
     <section className="flex flex-col gap-6">
       {apiError && !isDemoMode && (
@@ -1170,11 +1196,21 @@ export default function StratCommandCenter() {
           </div>
           <button
             type="button"
-            onClick={() => { loadApiData(); loadAlerts(); loadPlans(); }}
-            className="gradient-button flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition active:scale-[0.98]"
+            onClick={async () => {
+              loadApiData();
+              if (!isDemoMode) {
+                await runStratScan();
+                loadAlerts();
+              } else {
+                loadAlerts();
+              }
+              loadPlans();
+            }}
+            disabled={scanning}
+            className="gradient-button flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition active:scale-[0.98] disabled:opacity-70"
           >
-            <RefreshCcw size={16} />
-            Refresh
+            <RefreshCcw size={16} className={scanning ? 'animate-spin' : ''} />
+            {scanning ? 'Scanning...' : 'Refresh'}
           </button>
         </div>
       </div>

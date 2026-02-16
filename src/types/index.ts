@@ -357,7 +357,10 @@ export type WSMessageType =
   | 'heartbeat'
   | 'error'
   | 'strat_plan_update'
-  | 'strat_alert_new';
+  | 'strat_alert_new'
+  | 'strat_scan_complete'
+  | 'strat_alert_triggered'
+  | 'strat_alert_invalidated';
 
 export interface WSPositionUpdate {
   type: 'position_update';

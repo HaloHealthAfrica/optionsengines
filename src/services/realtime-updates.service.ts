@@ -130,7 +130,22 @@ export function publishStratPlanUpdate(payload: {
   broadcastRealtime('strat_plan_update', payload);
 }
 
-/** Emit when a new strat alert is created (webhook, manual) */
+/** Emit when a new strat alert is created (webhook, manual, scanner) */
 export function publishStratAlertNew(alert: Record<string, unknown>): void {
   broadcastRealtime('strat_alert_new', alert);
+}
+
+/** Emit when strat scanner completes a run */
+export function publishStratScanComplete(payload: { count: number; scannedAt: string }): void {
+  broadcastRealtime('strat_scan_complete', payload);
+}
+
+/** Emit when a pending strat alert is triggered */
+export function publishStratAlertTriggered(alert: Record<string, unknown>): void {
+  broadcastRealtime('strat_alert_triggered', alert);
+}
+
+/** Emit when a pending strat alert is invalidated */
+export function publishStratAlertInvalidated(alert: Record<string, unknown>): void {
+  broadcastRealtime('strat_alert_invalidated', alert);
 }

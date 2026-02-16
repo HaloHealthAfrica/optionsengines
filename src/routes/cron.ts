@@ -15,6 +15,7 @@ import { OrderCreatorWorker } from '../workers/order-creator.js';
 import { PaperExecutorWorker } from '../workers/paper-executor.js';
 import { PositionRefresherWorker } from '../workers/position-refresher.js';
 import { ExitMonitorWorker } from '../workers/exit-monitor.js';
+import { stratScannerService } from '../services/strat-scanner/index.js';
 
 const router = Router();
 
@@ -152,6 +153,43 @@ router.post('/process-queue', requireCronSecret, async (_req: Request, res: Resp
     const durationMs = Date.now() - startTime;
     logger.error('Cron process-queue failed', err);
     res.status(500).json({
+      ok: false,
+      durationMs,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * POST /api/cron/strat-scan
+ *
+ * Runs the Strat scanner across watchlist tickers. Call every 4 hours for 4H,
+ * at market close for Daily, Friday close for Weekly, month-end for Monthly.
+ * Or on-demand when user adds ticker / clicks Refresh.
+ */
+router.post('/strat-scan', requireCronSecret, async (_req: Request, res: Response) => {
+  if (!config.enableStratPlanLifecycle) {
+    return res.status(200).json({
+      ok: true,
+      skip: true,
+      reason: 'Strat Plan Lifecycle disabled',
+    });
+  }
+
+  const startTime = Date.now();
+  try {
+    const alerts = await stratScannerService.run();
+    const durationMs = Date.now() - startTime;
+    return res.json({
+      ok: true,
+      durationMs,
+      alertsCount: alerts.length,
+      scannedAt: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    const durationMs = Date.now() - startTime;
+    logger.error('Cron strat-scan failed', err);
+    return res.status(500).json({
       ok: false,
       durationMs,
       error: err instanceof Error ? err.message : String(err),

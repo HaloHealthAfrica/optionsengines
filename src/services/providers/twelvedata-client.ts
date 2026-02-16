@@ -185,6 +185,8 @@ export class TwelveDataClient implements Pick<IMarketDataProvider, 'name' | 'hea
       '1h': '1h',
       '4h': '4h',
       '1d': '1day',
+      '1week': '1week',
+      '1month': '1month',
     };
 
     return mapping[timeframe] || '5min';

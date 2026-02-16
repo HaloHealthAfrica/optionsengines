@@ -10,9 +10,13 @@ import { z } from 'zod';
 import { authService } from '../services/auth.service.js';
 import { db } from '../services/database.service.js';
 import { watchlistManager, getStratPlanConfig } from '../services/strat-plan/index.js';
+import { stratScannerService } from '../services/strat-scanner/index.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
-import { publishStratAlertNew } from '../services/realtime-updates.service.js';
+import {
+  publishStratAlertNew,
+  publishStratScanComplete,
+} from '../services/realtime-updates.service.js';
 
 const router = Router();
 
@@ -262,6 +266,31 @@ router.get(
       ...status,
       max_tickers: cfg.maxWatchlistTickers,
     });
+  }
+);
+
+const scanBodySchema = z.object({
+  symbols: z.array(z.string()).optional(),
+  timeframes: z.array(z.enum(['4H', 'D', 'W', 'M'])).optional(),
+});
+
+/** POST /strat/scan - Run strat scanner (on-demand) */
+router.post(
+  '/scan',
+  requireAuth,
+  requireStratEnabled,
+  async (req: Request, res: Response) => {
+    try {
+      const parse = scanBodySchema.safeParse(req.body ?? {});
+      const options = parse.success ? parse.data : {};
+      const alerts = await stratScannerService.run(options);
+      const scannedAt = new Date().toISOString();
+      publishStratScanComplete({ count: alerts.length, scannedAt });
+      return res.json({ alerts, scannedAt });
+    } catch (err) {
+      logger.error('Strat scan failed', { error: err });
+      return res.status(500).json({ error: 'Scan failed' });
+    }
   }
 );
 
