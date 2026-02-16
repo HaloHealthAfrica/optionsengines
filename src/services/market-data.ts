@@ -823,7 +823,7 @@ export class MarketDataService {
    * Returns per-provider health status with latency and circuit breaker state.
    */
   async healthCheckAll(): Promise<ProviderHealthStatus[]> {
-    const providers: Array<{ name: Provider; client: { healthCheck(): Promise<ProviderHealthStatus> } }> = [];
+    const providers: Array<{ name: Provider; client: { healthCheck(symbol?: string): Promise<ProviderHealthStatus> } }> = [];
 
     for (const p of this.providerPriority) {
       const client = p === 'alpaca' ? this.alpaca
@@ -834,9 +834,19 @@ export class MarketDataService {
       if (client) providers.push({ name: p, client: client as any });
     }
 
+    // Include Unusual Whales when configured (options data provider)
+    if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey) {
+      providers.push({
+        name: 'unusualwhales',
+        client: unusualWhalesOptionsService as any,
+      });
+    }
+
     const results = await Promise.allSettled(
       providers.map(async ({ name, client }) => {
-        const result = await client.healthCheck();
+        const result = name === 'unusualwhales'
+          ? await (client as any).healthCheck('SPY')
+          : await client.healthCheck();
         const breaker = this.circuitBreakers.get(name);
         if (breaker) {
           result.circuitBreakerState = breaker.getStatus().state;

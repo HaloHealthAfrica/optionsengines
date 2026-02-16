@@ -28,6 +28,7 @@ import mtfBiasWebhookRoutes from './routes/mtf-bias-webhook.js';
 import biasApiRoutes from './routes/bias-api.js';
 import cronRoutes from './routes/cron.js';
 import gammaRoutes from './routes/gamma.js';
+import monitoringApiRoutes from './routes/monitoring-api.js';
 
 const app: Express = express();
 
@@ -75,6 +76,7 @@ app.use('/api', optionsEnginesRoutes);
 app.use('/api/options', optionsRoutes);
 app.use('/', engine2Routes);
 app.use('/api/v1/testing', testingRoutes);
+app.use('/api/v1/monitoring', monitoringApiRoutes);
 app.use('/api/v1/webhooks', webhookSchemaRoutes);
 app.use('/api/webhooks', marketWebhookRoutes);
 app.use('/api/webhooks', mtfBiasWebhookRoutes);

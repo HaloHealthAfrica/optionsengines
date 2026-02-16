@@ -70,55 +70,81 @@ async function checkProviderHealth(): Promise<Record<string, any>> {
 }
 
 // ============================================================
-// PHASE 2: Direct Provider Data Validation
+// PHASE 2: Provider Health + Unusual Whales Data Validation
 // ============================================================
 async function validateProviderData(): Promise<{
+  providerHealth: boolean;
+  unusualWhales: boolean;
   optionChain: boolean;
-  optionPrice: boolean;
   optionsFlow: boolean;
-  gex: boolean;
-  stockPrice: boolean;
-  indicators: boolean;
 }> {
-  header('PHASE 2: Provider Data Validation (via internal API)');
+  header('PHASE 2: Provider Health + Unusual Whales Data Validation');
 
   const results = {
+    providerHealth: false,
+    unusualWhales: false,
     optionChain: false,
-    optionPrice: false,
     optionsFlow: false,
-    gex: false,
-    stockPrice: false,
-    indicators: false,
   };
 
-  // Check via the monitoring endpoint if available, otherwise via DB enrichment
+  // 2a: Provider health (includes UW when configured)
+  subheader('Provider Health (all providers including UW)');
   try {
-    const res = await fetch(`${WEBHOOK_URL}/v1/monitoring/market-data-status?symbol=${TEST_SYMBOL}`);
+    const res = await fetch(`${WEBHOOK_URL}/api/v1/monitoring/provider-health`);
     if (res.ok) {
       const data = await res.json() as Record<string, any>;
-      log(`Market data status endpoint available`);
-      log(`  Data: ${JSON.stringify(data).slice(0, 200)}`);
-    }
-  } catch {
-    log(`Market data status endpoint not available (non-critical)`);
-  }
-
-  // Test stock price via a lightweight probe
-  subheader('Stock Price');
-  try {
-    const res = await fetch(`${WEBHOOK_URL}/v1/monitoring/providers`);
-    if (res.ok) {
-      const data = await res.json() as Record<string, any>;
-      log(`Provider monitoring: ${JSON.stringify(data).slice(0, 300)}`);
+      results.providerHealth = true;
+      const providers = data.providers ?? [];
+      for (const p of providers) {
+        const icon = p.healthy ? '+' : 'X';
+        const cb = p.circuitBreakerState ? ` [${p.circuitBreakerState}]` : '';
+        log(`  ${icon} ${p.provider}: healthy=${p.healthy} latency=${p.latencyMs}ms${cb}${p.lastError ? ` err=${p.lastError.slice(0, 50)}` : ''}`);
+      }
+      const uw = providers.find((p: any) => p.provider === 'unusualwhales');
+      if (uw) {
+        log(`  Unusual Whales: ${uw.healthy ? 'OK' : 'FAIL'} (latency ${uw.latencyMs}ms)`);
+      } else {
+        log(`  Unusual Whales: not in provider list (check UNUSUAL_WHALES_OPTIONS_ENABLED=true)`);
+      }
     } else {
-      log(`Provider monitoring: ${res.status} ${res.statusText}`);
+      log(`  Provider health: ${res.status} ${res.statusText}`);
     }
-  } catch {
-    log(`Provider endpoint not available`);
+  } catch (e: any) {
+    log(`  Provider health FAIL: ${e.message}`);
   }
 
-  // We'll validate the rest through the enriched signal after the E2E test
-  log(`Detailed provider data will be validated via enriched signal after E2E test`);
+  // 2b: Provider probe — option chain + flow (validates UW data fetch)
+  subheader('Provider Probe (option chain + flow)');
+  try {
+    const res = await fetch(`${WEBHOOK_URL}/api/v1/monitoring/provider-probe?symbol=${TEST_SYMBOL}`);
+    if (res.ok) {
+      const data = await res.json() as Record<string, any>;
+      const chain = data.optionChain ?? {};
+      const flow = data.optionsFlow ?? {};
+      log(`  Option chain: ${chain.rowCount ?? 0} rows`);
+      log(`  Options flow: ${flow.entryCount ?? 0} entries, source: ${flow.flowDebug ?? 'unknown'}`);
+
+      if ((chain.rowCount ?? 0) > 0) results.optionChain = true;
+      results.optionsFlow = (flow.entryCount ?? 0) > 0 || (flow.flowDebug === 'unusualwhales');
+
+      if (flow.flowDebug === 'unusualwhales') {
+        results.unusualWhales = true;
+        log(`  + Unusual Whales: ACTIVE (flow source)`);
+      } else if (flow.flowDebug === 'unusualwhales_not_configured') {
+        log(`  X Unusual Whales: NOT CONFIGURED (set UNUSUAL_WHALES_OPTIONS_ENABLED=true and API key)`);
+      } else if (flow.flowDebug?.startsWith?.('unusualwhales_failed')) {
+        log(`  X Unusual Whales: FAILED (${flow.flowDebug})`);
+      } else if (flow.flowDebug === 'marketdata_fallback' || flow.flowDebug?.includes?.('marketdata')) {
+        log(`  ~ Unusual Whales: fallback to MarketData.app used`);
+      } else {
+        log(`  ~ Flow source: ${flow.flowDebug}`);
+      }
+    } else {
+      log(`  Provider probe: ${res.status} ${res.statusText}`);
+    }
+  } catch (e: any) {
+    log(`  Provider probe FAIL: ${e.message}`);
+  }
 
   return results;
 }
@@ -497,8 +523,8 @@ async function main() {
     process.exit(1);
   }
 
-  // Phase 2: Provider data overview
-  await validateProviderData();
+  // Phase 2: Provider health + UW data validation
+  const providerResults = await validateProviderData();
 
   // Phase 3: UW config
   await checkUWConfiguration();
@@ -543,6 +569,14 @@ async function main() {
     }
   }
 
+  // Provider validation summary
+  console.log(`\n  Provider Validation:`);
+  console.log('  ' + '-'.repeat(66));
+  console.log(`  Provider health: ${providerResults.providerHealth ? 'PASS' : 'FAIL'}`);
+  console.log(`  Unusual Whales: ${providerResults.unusualWhales ? 'PASS (active)' : providerResults.optionChain || providerResults.optionsFlow ? 'PASS (fallback)' : 'FAIL'}`);
+  console.log(`  Option chain: ${providerResults.optionChain ? 'PASS' : 'FAIL'}`);
+  console.log(`  Options flow: ${providerResults.optionsFlow ? 'PASS' : 'FAIL'}`);
+
   // Summary
   const passCount = layers.filter(l => l.status === 'PASS').length;
   const failCount = layers.filter(l => l.status === 'FAIL').length;
@@ -553,8 +587,11 @@ async function main() {
   console.log(`\n  Summary: ${passCount} PASS, ${failCount} FAIL, ${skipCount} SKIP, ${timeoutCount} TIMEOUT`);
   console.log(`  Enrichment: ${Object.keys(enrichmentFields).length - enrichedMissing} present, ${enrichedMissing} missing`);
 
-  if (failCount === 0 && enrichedMissing === 0) {
+  const providersOk = providerResults.providerHealth && (providerResults.optionChain || providerResults.optionsFlow);
+  if (failCount === 0 && enrichedMissing === 0 && providersOk) {
     console.log(`\n  *** ALL VALIDATIONS PASSED — READY FOR LIVE TESTING ***`);
+  } else if (failCount === 0 && !providersOk) {
+    console.log(`\n  *** PIPELINE OK — Provider data missing (check UNUSUAL_WHALES_OPTIONS_ENABLED, API keys, market hours) ***`);
   } else if (failCount === 0 && enrichedMissing > 0) {
     console.log(`\n  *** PIPELINE OK — Some enrichment data missing (check provider config/market hours) ***`);
   } else {

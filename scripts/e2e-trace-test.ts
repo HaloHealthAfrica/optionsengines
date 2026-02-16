@@ -25,6 +25,7 @@ import crypto from 'crypto';
 dotenv.config();
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL || 'http://localhost:3000/webhook';
+const BASE_URL = WEBHOOK_URL.replace(/\/webhook\/?$/, '') || 'http://localhost:3000';
 const DATABASE_URL = process.env.DATABASE_URL!;
 const HMAC_SECRET = process.env.HMAC_SECRET || '';
 const MAX_WAIT_SECONDS = 120;
@@ -64,6 +65,40 @@ async function createPool(): Promise<pg.Pool> {
   });
   await pool.query('SELECT 1');
   return pool;
+}
+
+// ─────────────────────────────────────────────
+// LAYER 0: Provider Health (incl. Unusual Whales)
+// ─────────────────────────────────────────────
+async function testLayer0_ProviderHealth(): Promise<LayerResult> {
+  const start = Date.now();
+  const gaps: string[] = [];
+
+  try {
+    const healthRes = await fetch(`${BASE_URL}/api/v1/monitoring/provider-health`);
+    if (!healthRes.ok) {
+      gaps.push(`Provider health endpoint: ${healthRes.status} (may not be deployed)`);
+      return { layer: 'Layer 0: Provider Health', status: 'SKIP', data: {}, duration_ms: Date.now() - start, gap_notes: gaps };
+    }
+    const healthData = await healthRes.json() as Record<string, unknown>;
+    const providers = (healthData.providers ?? []) as Array<{ provider: string; healthy: boolean; latencyMs: number }>;
+    const uw = providers.find((p: any) => p.provider === 'unusualwhales');
+    log(`Provider health: ${providers.length} providers checked`);
+    if (uw) log(`  Unusual Whales: ${uw.healthy ? 'OK' : 'FAIL'} (${uw.latencyMs}ms)`);
+
+    const probeRes = await fetch(`${BASE_URL}/api/v1/monitoring/provider-probe?symbol=SPY`);
+    if (probeRes.ok) {
+      const probe = await probeRes.json() as Record<string, any>;
+      const flow = probe.optionsFlow ?? {};
+      log(`  Option chain: ${probe.optionChain?.rowCount ?? 0} rows, flow: ${flow.entryCount ?? 0} entries (${flow.flowDebug ?? 'unknown'})`);
+      if (flow.flowDebug === 'unusualwhales') gaps.push('NOTE: Unusual Whales active as flow source');
+    }
+
+    return { layer: 'Layer 0: Provider Health', status: 'PASS', data: { providers: providers.length }, duration_ms: Date.now() - start, gap_notes: gaps };
+  } catch (err: any) {
+    gaps.push(`Provider check failed: ${err.message}`);
+    return { layer: 'Layer 0: Provider Health', status: 'SKIP', data: {}, duration_ms: Date.now() - start, gap_notes: gaps };
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -614,6 +649,10 @@ async function main() {
   log('Database connected');
 
   try {
+    // Layer 0: Provider health (incl. Unusual Whales)
+    separator('LAYER 0: Provider Health');
+    results.push(await testLayer0_ProviderHealth());
+
     // Layer 1: Send webhook
     separator('LAYER 1: Webhook Ingestion');
     results.push(await testLayer1_WebhookIngestion());

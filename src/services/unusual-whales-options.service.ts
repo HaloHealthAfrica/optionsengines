@@ -2,6 +2,7 @@
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { cache } from './cache.service.js';
+import type { ProviderHealthStatus } from './providers/market-data-provider.interface.js';
 import {
   UnusualWhalesOptionsClient,
   UnusualWhalesOptionContract,
@@ -33,6 +34,40 @@ export class UnusualWhalesOptionsService {
 
   private get isConfigured(): boolean {
     return Boolean(config.unusualWhalesApiKey);
+  }
+
+  /**
+   * Health check for E2E and monitoring. Fetches option contracts for SPY.
+   * Returns ProviderHealthStatus for provider health endpoint.
+   */
+  async healthCheck(symbol: string = 'SPY'): Promise<ProviderHealthStatus> {
+    const start = Date.now();
+    if (!this.isConfigured) {
+      return {
+        provider: 'unusualwhales',
+        healthy: false,
+        latencyMs: Date.now() - start,
+        lastError: 'UNUSUAL_WHALES_API_KEY not configured',
+      };
+    }
+    try {
+      const contracts = await this.client.getOptionContracts(symbol);
+      const latencyMs = Date.now() - start;
+      return {
+        provider: 'unusualwhales',
+        healthy: Array.isArray(contracts) && contracts.length > 0,
+        latencyMs,
+      };
+    } catch (err: unknown) {
+      const latencyMs = Date.now() - start;
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        provider: 'unusualwhales',
+        healthy: false,
+        latencyMs,
+        lastError: msg,
+      };
+    }
   }
 
   /**
