@@ -1078,7 +1078,6 @@ export default function StratCommandCenter() {
     return plans;
   }, [plans, planTab]);
 
-  const maxPlans = 10;
   const isDemoMode = apiError && !apiData;
 
   return (
@@ -1405,7 +1404,6 @@ export default function StratCommandCenter() {
           onConfirm={handleConfirmAddAlert}
           onCancel={() => setShowAddAlertModal(false)}
         />
-      )}
       )}
     </section>
   );
