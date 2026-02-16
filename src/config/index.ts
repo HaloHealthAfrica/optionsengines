@@ -106,6 +106,9 @@ interface Config {
   enableSatylandSubagent: boolean;
   enableShadowExecution: boolean;
 
+  // Advanced Strike Selection
+  enableAdvancedStrikeSelection: boolean;
+
   // Orchestrator
   enableOrchestrator: boolean;
   enableDualPaperTrading: boolean;
@@ -311,6 +314,9 @@ export const config: Config = {
   enableTtmSpecialist: getEnvVarBoolean('ENABLE_TTM_SPECIALIST', false),
   enableSatylandSubagent: getEnvVarBoolean('ENABLE_SATYLAND_SUBAGENT', false),
   enableShadowExecution: getEnvVarBoolean('ENABLE_SHADOW_EXECUTION', false),
+
+  // Advanced Strike Selection (Phase 2a)
+  enableAdvancedStrikeSelection: getEnvVarBoolean('ENABLE_ADVANCED_STRIKE_SELECTION', false),
 
   // Orchestrator
   enableOrchestrator: getEnvVarBoolean('ENABLE_ORCHESTRATOR', true),

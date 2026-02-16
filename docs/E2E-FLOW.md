@@ -181,10 +181,11 @@ POST /webhook (Express)
 
 | Property | Details |
 |---|---|
-| **Files** | `src/services/strike-selection.service.ts` |
-| **Services** | `selectStrike()` |
-| **Entry Function** | `selectStrike(symbol, direction)` |
-| **Output Contract** | `StrikeSelection { strike: number, expiration: Date, optionType: 'call'|'put' }` |
+| **Files** | `src/services/strike-selection.service.ts` (simple), `src/services/advanced-strike-selection.service.ts` (advanced), `src/services/option-chain-adapter.service.ts` (chain adapter), `src/lib/strikeSelection/` (framework) |
+| **Services** | `selectStrike()` (simple ATM), `advancedStrikeSelect()` (full framework) |
+| **Entry Function** | `selectStrike(symbol, direction)` or `advancedStrikeSelect(symbol, direction, timeframe, enrichment, mtfBiasState)` |
+| **Feature Flag** | `ENABLE_ADVANCED_STRIKE_SELECTION` (default: `false`) |
+| **Output Contract** | `StrikeSelection { strike, expiration, optionType }` or `AdvancedStrikeResult { strike, expiration, optionType, entryPrice, scores, guardrails, rationale }` |
 | **DB Tables** | None |
 | **Redis Keys** | None |
 | **External APIs** | Market data (stock price for ATM strike calculation) |
@@ -894,7 +895,7 @@ The `strike-selection-adapter.service.ts` provides delta/DTE hints based on conf
 | Medium (50–69) | 0.45–0.55 | Standard |
 | Low (<50) | 0.40–0.50 | Shorter |
 
-These hints are available but not currently consumed by the production `selectStrike()`.
+These hints are consumed by the advanced strike selection bridge (`advancedStrikeSelect()`) when `ENABLE_ADVANCED_STRIKE_SELECTION=true`. The bridge narrows the option chain using MTF bias hints before running the full framework scoring pipeline.
 
 ## Risk Reward Filters
 
@@ -2237,7 +2238,7 @@ captureTradeOutcome({
 
 ## Architectural Inconsistencies
 
-1. **Dual strike selection systems**: Production uses simplified ATM (`strike-selection.service.ts`) while an advanced framework exists in `src/lib/strikeSelection/` with filters and scoring. These are disconnected.
+1. **~~Dual strike selection systems~~** (RESOLVED Phase 2a): The advanced framework (`src/lib/strikeSelection/`) is now connected via `src/services/advanced-strike-selection.service.ts`. Gated behind `ENABLE_ADVANCED_STRIKE_SELECTION`. When enabled, both Engine A and Engine B use the full pipeline (option chain fetch → Greeks approximation → DTE/liquidity/delta filtering → multi-factor scoring → MTF bias hint narrowing). Falls back to simple ATM on failure.
 
 2. **Legacy signal processor**: `SignalProcessorWorker` still exists alongside the `OrchestratorWorker`. When `ENABLE_ORCHESTRATOR=false`, the legacy path is used but may not apply all the enrichment/gating that the orchestrator does.
 

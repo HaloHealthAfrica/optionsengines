@@ -8,6 +8,7 @@ import { evaluateMarketSession } from '../utils/market-session.js';
 import { TradeRecommendation, Signal, MarketContext } from './types.js';
 import { logger } from '../utils/logger.js';
 import { selectStrike } from '../services/strike-selection.service.js';
+import { advancedStrikeSelect } from '../services/advanced-strike-selection.service.js';
 import { buildEntryExitPlan } from '../services/entry-exit-agent.service.js';
 import { buildSignalEnrichment } from '../services/signal-enrichment.service.js';
 import { buildEntryDecisionInput } from '../services/entry-decision-adapter.service.js';
@@ -192,40 +193,85 @@ async function buildRecommendation(
       data: { signal_id: signal.signal_id, symbol: signal.symbol },
     });
 
-    let strike: number;
-    let expiration: Date;
-    let optionType: 'call' | 'put';
-    let entryPrice: number;
+    let strike = 0;
+    let expiration = new Date();
+    let optionType: 'call' | 'put' = 'call';
+    let entryPrice = 0;
+    let advancedStrikeUsed = false;
 
-    try {
-      ({ strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction));
-      Sentry.addBreadcrumb({
-        category: 'engine',
-        message: `Engine ${engine} entry plan creation`,
-        level: 'info',
-        data: { strike, expiration, optionType },
-      });
-      ({ entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType));
-    } catch (err) {
-      if (isTest) {
-        // Fallback for test signals when market data is unavailable
-        const payloadPrice = Number((signal.raw_payload as Record<string, unknown>)?.price) || 0;
-        strike = signal.direction === 'long' ? Math.ceil(payloadPrice) : Math.floor(payloadPrice);
-        const expirationDate = new Date();
-        expirationDate.setUTCDate(expirationDate.getUTCDate() + (config.maxHoldDays || 7));
-        const day = expirationDate.getUTCDay();
-        const daysUntilFriday = (5 - day + 7) % 7;
-        expirationDate.setUTCDate(expirationDate.getUTCDate() + daysUntilFriday);
-        expirationDate.setUTCHours(0, 0, 0, 0);
-        expiration = expirationDate;
-        optionType = signal.direction === 'long' ? 'call' : 'put';
-        entryPrice = payloadPrice * 0.02; // Approximate option price ~2% of underlying
-        logger.info('Test signal: using fallback strike/entry', {
+    // Phase 2a: Try advanced strike selection when enabled
+    if (config.enableAdvancedStrikeSelection && !isTest) {
+      const advResult = await advancedStrikeSelect(
+        signal.symbol,
+        signal.direction,
+        signal.timeframe,
+        context?.enrichment ? {
+          enrichedData: context.enrichment.enrichedData,
+          gammaContext: context.enrichment.gammaContext,
+          gammaDecision: context.enrichment.gammaDecision,
+          riskResult: context.enrichment.riskResult,
+        } : undefined,
+        mtfBias?.unifiedState
+          ? { confidence_score: mtfBias.unifiedState.confidence, regime_type: mtfBias.unifiedState.regimeType }
+          : null
+      );
+      if (advResult) {
+        strike = advResult.strike;
+        expiration = advResult.expiration;
+        optionType = advResult.optionType;
+        entryPrice = advResult.entryPrice;
+        advancedStrikeUsed = true;
+        logger.info('Advanced strike selection used', {
           signal_id: signal.signal_id,
-          strike, expiration, optionType, entryPrice,
+          symbol: signal.symbol,
+          engine,
+          strike,
+          expiration,
+          optionType,
+          entryPrice,
+          score: advResult.scores?.overall,
+          rationale: advResult.rationale,
         });
-      } else {
-        throw err;
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: `Engine ${engine} advanced strike selected`,
+          level: 'info',
+          data: { strike, expiration, optionType, score: advResult.scores?.overall },
+        });
+      }
+    }
+
+    // Fallback: simple strike selection (or test bypass)
+    if (!advancedStrikeUsed) {
+      try {
+        ({ strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction));
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: `Engine ${engine} entry plan creation`,
+          level: 'info',
+          data: { strike, expiration, optionType },
+        });
+        ({ entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType));
+      } catch (err) {
+        if (isTest) {
+          const payloadPrice = Number((signal.raw_payload as Record<string, unknown>)?.price) || 0;
+          strike = signal.direction === 'long' ? Math.ceil(payloadPrice) : Math.floor(payloadPrice);
+          const expirationDate = new Date();
+          expirationDate.setUTCDate(expirationDate.getUTCDate() + (config.maxHoldDays || 7));
+          const day = expirationDate.getUTCDay();
+          const daysUntilFriday = (5 - day + 7) % 7;
+          expirationDate.setUTCDate(expirationDate.getUTCDate() + daysUntilFriday);
+          expirationDate.setUTCHours(0, 0, 0, 0);
+          expiration = expirationDate;
+          optionType = signal.direction === 'long' ? 'call' : 'put';
+          entryPrice = payloadPrice * 0.02;
+          logger.info('Test signal: using fallback strike/entry', {
+            signal_id: signal.signal_id,
+            strike, expiration, optionType, entryPrice,
+          });
+        } else {
+          throw err;
+        }
       }
     }
 
@@ -531,8 +577,48 @@ async function buildEngineBRecommendation(
       return null;
     }
 
-    const { strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction);
-    const { entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType);
+    let strike = 0;
+    let expiration = new Date();
+    let optionType: 'call' | 'put' = 'call';
+    let entryPrice = 0;
+    let advancedStrikeUsedB = false;
+
+    // Phase 2a: Try advanced strike selection for Engine B when enabled
+    if (config.enableAdvancedStrikeSelection && !isTestB) {
+      const advResult = await advancedStrikeSelect(
+        signal.symbol,
+        signal.direction,
+        signal.timeframe,
+        {
+          enrichedData: enrichment.enrichedData as Record<string, unknown>,
+          gammaContext: enrichment.enrichedData.gammaContext as Record<string, unknown> | undefined,
+          riskResult: enrichment.riskResult as Record<string, unknown>,
+        },
+        mtfBiasB?.unifiedState
+          ? { confidence_score: mtfBiasB.unifiedState.confidence, regime_type: mtfBiasB.unifiedState.regimeType }
+          : null
+      );
+      if (advResult) {
+        strike = advResult.strike;
+        expiration = advResult.expiration;
+        optionType = advResult.optionType;
+        entryPrice = advResult.entryPrice;
+        advancedStrikeUsedB = true;
+        logger.info('Engine B: advanced strike selection used', {
+          signal_id: signal.signal_id,
+          symbol: signal.symbol,
+          strike,
+          expiration,
+          score: advResult.scores?.overall,
+        });
+      }
+    }
+
+    if (!advancedStrikeUsedB) {
+      ({ strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction));
+      ({ entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType));
+    }
+
     let baseSize = Math.max(1, Math.floor(config.maxPositionSize));
 
     // Apply confluence sizing multiplier for Engine B (Gap 9 fix)
