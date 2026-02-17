@@ -379,17 +379,52 @@ export class StratPlanLifecycleService {
   /**
    * Record realized PnL when linked position is closed (by position_id)
    */
-  async markClosedByPosition(positionId: string, realizedPnl: number): Promise<boolean> {
+  async markClosedByPosition(
+    positionId: string,
+    realizedPnl: number,
+    options?: { exitPrice?: number; holdDurationMinutes?: number }
+  ): Promise<boolean> {
+    const planRow = await db.query(
+      `SELECT plan_id, entry_price, stop_price FROM strat_plans
+       WHERE position_id = $1 AND plan_status = 'filled' LIMIT 1`,
+      [positionId]
+    ).then((r) => r.rows[0]);
+
+    if (!planRow) return false;
+
+    const entryPrice = planRow.entry_price != null ? Number(planRow.entry_price) : null;
+    const stopPrice = planRow.stop_price != null ? Number(planRow.stop_price) : null;
+    const riskDistance =
+      entryPrice != null && stopPrice != null ? Math.abs(entryPrice - stopPrice) : null;
+    const rMultipleAchieved =
+      riskDistance != null && riskDistance > 0 ? realizedPnl / riskDistance : null;
+
     const result = await db.query(
       `UPDATE strat_plans
-       SET realized_pnl = $2, closed_at = NOW(), updated_at = NOW()
+       SET realized_pnl = $2, closed_at = NOW(), updated_at = NOW(),
+           exit_price = $3, r_multiple_achieved = $4, hold_duration_minutes = $5
        WHERE position_id = $1 AND plan_status = 'filled'
        RETURNING plan_id`,
-      [positionId, realizedPnl]
+      [
+        positionId,
+        realizedPnl,
+        options?.exitPrice ?? null,
+        rMultipleAchieved,
+        options?.holdDurationMinutes ?? null,
+      ]
     );
     if (result.rows.length > 0) {
-      logger.info('Strat plan closed with PnL', { position_id: positionId, realized_pnl: realizedPnl });
-      publishStratPlanUpdate({ event: 'closed', plan_id: result.rows[0].plan_id, position_id: positionId, realized_pnl: realizedPnl });
+      logger.info('Strat plan closed with PnL', {
+        position_id: positionId,
+        realized_pnl: realizedPnl,
+        r_multiple: rMultipleAchieved,
+      });
+      publishStratPlanUpdate({
+        event: 'closed',
+        plan_id: result.rows[0].plan_id,
+        position_id: positionId,
+        realized_pnl: realizedPnl,
+      });
       return true;
     }
     return false;

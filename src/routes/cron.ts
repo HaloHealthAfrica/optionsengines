@@ -16,6 +16,12 @@ import { PaperExecutorWorker } from '../workers/paper-executor.js';
 import { PositionRefresherWorker } from '../workers/position-refresher.js';
 import { ExitMonitorWorker } from '../workers/exit-monitor.js';
 import { stratScannerService } from '../services/strat-scanner/index.js';
+import {
+  tuneWeights,
+  generateInsights,
+  saveInsights,
+} from '../services/strat-analytics/index.js';
+import { AlertOutcomeTrackerWorker } from '../workers/alert-outcome-tracker.worker.js';
 
 const router = Router();
 
@@ -189,6 +195,56 @@ router.post('/strat-scan', requireCronSecret, async (_req: Request, res: Respons
   } catch (err: unknown) {
     const durationMs = Date.now() - startTime;
     logger.error('Cron strat-scan failed', err);
+    return res.status(500).json({
+      ok: false,
+      durationMs,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * POST /api/cron/strat-feedback
+ *
+ * Runs Strat Feedback Loop: outcome tracker + scoring tuner + insights generation.
+ * Call weekly (e.g. Sunday evening) or on-demand.
+ */
+router.post('/strat-feedback', requireCronSecret, async (_req: Request, res: Response) => {
+  if (!config.enableStratPlanLifecycle) {
+    return res.status(200).json({
+      ok: true,
+      skip: true,
+      reason: 'Strat Plan Lifecycle disabled',
+    });
+  }
+
+  const startTime = Date.now();
+  const results: Record<string, unknown> = {};
+
+  try {
+    // 1. Run outcome tracker (one pass)
+    const outcomeWorker = new AlertOutcomeTrackerWorker(60_000);
+    await outcomeWorker.run();
+    results.outcomeTracker = 'ok';
+
+    // 2. Tune scoring weights
+    const tuneResult = await tuneWeights();
+    results.tune = tuneResult;
+
+    // 3. Generate and save insights
+    const insights = await generateInsights();
+    await saveInsights(insights);
+    results.insightsCount = insights.length;
+
+    const durationMs = Date.now() - startTime;
+    return res.json({
+      ok: true,
+      durationMs,
+      results,
+    });
+  } catch (err: unknown) {
+    const durationMs = Date.now() - startTime;
+    logger.error('Cron strat-feedback failed', err);
     return res.status(500).json({
       ok: false,
       durationMs,

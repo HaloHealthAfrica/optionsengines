@@ -15,6 +15,7 @@ import { UwFlowPollerWorker } from './uw-flow-poller.worker.js';
 import { GammaMetricsWorker } from './gamma-metrics.worker.js';
 import { PlanTriggerWorker } from './plan-trigger-worker.js';
 import { AlertTriggerMonitorWorker } from './alert-trigger-monitor.worker.js';
+import { AlertOutcomeTrackerWorker } from './alert-outcome-tracker.worker.js';
 import { startTradeEngineHeartbeat, stopTradeEngineHeartbeat } from '../services/trade-engine-health.service.js';
 
 const signalProcessor = new SignalProcessorWorker();
@@ -35,6 +36,7 @@ const uwFlowPoller = new UwFlowPollerWorker();
 const gammaMetricsWorker = new GammaMetricsWorker();
 const planTriggerWorker = new PlanTriggerWorker(30_000);
 const alertTriggerMonitorWorker = new AlertTriggerMonitorWorker(60_000);
+const alertOutcomeTrackerWorker = new AlertOutcomeTrackerWorker(60_000);
 
 let workersStarted = false;
 
@@ -72,6 +74,7 @@ export function startWorkers(): void {
   if (config.enableStratPlanLifecycle) {
     planTriggerWorker.start();
     alertTriggerMonitorWorker.start();
+    alertOutcomeTrackerWorker.start();
   }
   paperExecutor.start(config.paperExecutorInterval);
   positionRefresher.start(config.positionRefresherInterval);
@@ -105,7 +108,7 @@ export async function stopWorkers(timeoutMs: number = 30000): Promise<void> {
       ? gammaMetricsWorker.stop()
       : Promise.resolve(),
     config.enableStratPlanLifecycle
-      ? (planTriggerWorker.stop(), alertTriggerMonitorWorker.stop(), Promise.resolve())
+      ? (planTriggerWorker.stop(), alertTriggerMonitorWorker.stop(), alertOutcomeTrackerWorker.stop(), Promise.resolve())
       : Promise.resolve(),
     paperExecutor.stopAndDrain(timeoutMs),
     positionRefresher.stopAndDrain(timeoutMs),

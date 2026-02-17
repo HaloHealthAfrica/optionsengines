@@ -149,3 +149,12 @@ export function publishStratAlertTriggered(alert: Record<string, unknown>): void
 export function publishStratAlertInvalidated(alert: Record<string, unknown>): void {
   broadcastRealtime('strat_alert_invalidated', alert);
 }
+
+/** Emit when strat alert outcome is recorded (feedback loop) */
+export function publishStratOutcomeRecorded(payload: {
+  alertId: string;
+  outcome: string;
+  actualRR?: number;
+}): void {
+  broadcastRealtime('strat_outcome_recorded', payload);
+}

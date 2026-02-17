@@ -360,7 +360,8 @@ export type WSMessageType =
   | 'strat_alert_new'
   | 'strat_scan_complete'
   | 'strat_alert_triggered'
-  | 'strat_alert_invalidated';
+  | 'strat_alert_invalidated'
+  | 'strat_outcome_recorded';
 
 export interface WSPositionUpdate {
   type: 'position_update';

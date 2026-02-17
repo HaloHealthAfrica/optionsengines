@@ -98,3 +98,23 @@ export function evaluateMarketSession(input: {
     isWeekend,
   };
 }
+
+/** Map to strat feedback loop session labels: premarket, open, midday, power_hour, afterhours */
+export function getStratMarketSession(timestamp: Date = new Date()): string {
+  const ev = evaluateMarketSession({
+    timestamp,
+    allowPremarket: true,
+    allowAfterhours: true,
+    gracePeriodMinutes: 0,
+  });
+  if (ev.sessionLabel === 'CLOSED') return 'afterhours';
+  if (ev.sessionLabel === 'PRE') return 'premarket';
+  if (ev.sessionLabel === 'POST') return 'afterhours';
+  // RTH: 9:30-10:30=open, 10:30-14=midday, 14-16=power_hour
+  const rthOpenEnd = 10 * 60 + 30;
+  const middayEnd = 14 * 60;
+  const rthEnd = 16 * 60;
+  if (ev.minuteOfDay >= rthOpenEnd && ev.minuteOfDay < middayEnd) return 'midday';
+  if (ev.minuteOfDay >= middayEnd && ev.minuteOfDay < rthEnd) return 'power_hour';
+  return 'open';
+}

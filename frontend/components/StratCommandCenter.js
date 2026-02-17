@@ -6,13 +6,14 @@ import {
   Plus,
   Trash2,
   ChevronDown,
-  ChevronUp,
   Zap,
   Bell,
   BarChart3,
   AlertCircle,
   X,
+  Brain,
 } from 'lucide-react';
+import StratIntelligencePanel from './StratIntelligencePanel.js';
 
 const MOCK_ALERTS = [
   {
@@ -117,7 +118,7 @@ const MOCK_ALERTS = [
   },
 ];
 
-function ScoreBadge({ score }) {
+function ScoreBadge({ score, scoreCalibration }) {
   const n = Number(score) || 0;
   const cls =
     n >= 85
@@ -125,11 +126,22 @@ function ScoreBadge({ score }) {
       : n >= 75
         ? 'bg-amber-500/20 text-amber-600 dark:bg-amber-400/30 dark:text-amber-300 border-amber-500/40'
         : 'bg-rose-500/20 text-rose-600 dark:bg-rose-400/30 dark:text-rose-300 border-rose-500/40';
+  const calibrated = scoreCalibration?.isCalibrated;
+  const overPredicts = scoreCalibration && scoreCalibration.actualWinRate < scoreCalibration.predictedWinRate - 0.15;
   return (
     <span
-      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border font-mono text-sm font-bold ${cls}`}
+      className={`inline-flex h-9 shrink-0 items-center gap-0.5 rounded-lg border px-2 font-mono text-sm font-bold ${cls}`}
+      title={
+        calibrated === true
+          ? 'Well-calibrated in this range'
+          : overPredicts
+            ? `Model over-predicts — actual win rate ${((scoreCalibration?.actualWinRate ?? 0) * 100).toFixed(0)}%`
+            : null
+      }
     >
       {n}
+      {calibrated === true && <span className="text-emerald-600 dark:text-emerald-400">✓</span>}
+      {overPredicts && <span className="text-amber-600 dark:text-amber-400">⚠</span>}
     </span>
   );
 }
@@ -157,6 +169,7 @@ function AlertCard({
   onCreatePlan,
   onAlertMe,
   onChart,
+  alertContext,
 }) {
   const isTriggered = alert.status === 'triggered';
   const dirLabel = alert.direction === 'long' ? '▲ LONG' : '▼ SHORT';
@@ -178,7 +191,7 @@ function AlertCard({
         onClick={onToggle}
         className="flex w-full items-center gap-3 p-4 text-left transition hover:bg-slate-50/50 dark:hover:bg-slate-800/30"
       >
-        <ScoreBadge score={alert.score} />
+        <ScoreBadge score={alert.score} scoreCalibration={alertContext?.scoreCalibration} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold">{alert.symbol}</span>
@@ -209,6 +222,35 @@ function AlertCard({
 
       {expanded && (
         <div className="border-t border-slate-200 p-4 dark:border-slate-700/60">
+          {alertContext && (alertContext.patternStats || alertContext.symbolStats) && (
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/30">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                Historical: {alert.setupType} on {alert.symbol} {alert.timeframe}
+              </p>
+              <div className="flex flex-wrap gap-4 text-sm">
+                {alertContext.patternStats && (
+                  <span>
+                    Win rate: {((alertContext.patternStats.winRate ?? 0) * 100).toFixed(0)}% ({alertContext.patternStats.sampleSize} trades)
+                  </span>
+                )}
+                {alertContext.patternStats && (
+                  <span>
+                    Avg R: {(alertContext.patternStats.avgRR ?? 0).toFixed(1)}R
+                  </span>
+                )}
+                {alertContext.symbolStats && (
+                  <span>
+                    {alert.symbol} strat-friendliness: {((alertContext.symbolStats.winRate ?? 0) * 100).toFixed(0)}/100
+                  </span>
+                )}
+                {alertContext.flowEdge != null && alertContext.flowEdge > 0.05 && (
+                  <span className="text-emerald-600 dark:text-emerald-400">
+                    Flow alignment: +{((alertContext.flowEdge ?? 0) * 100).toFixed(0)}% win rate
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-wrap gap-4 font-mono text-sm">
               <div>
@@ -760,6 +802,8 @@ export default function StratCommandCenter() {
   const [planTab, setPlanTab] = useState('Active');
   const [watchlistInput, setWatchlistInput] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [mainTab, setMainTab] = useState('alerts'); // 'alerts' | 'intelligence'
+  const [alertContext, setAlertContext] = useState(null);
 
   const isDemoMode = apiError && !apiData;
 
@@ -899,6 +943,28 @@ export default function StratCommandCenter() {
       loadPlans();
     }
   }, [apiData, apiError, loadAlerts, loadPlans]);
+
+  useEffect(() => {
+    if (!expandedId || isDemoMode) {
+      setAlertContext(null);
+      return;
+    }
+    const alert = alerts.find((a) => a.id === expandedId);
+    if (!alert) {
+      setAlertContext(null);
+      return;
+    }
+    const params = new URLSearchParams({
+      pattern: alert.setupType || alert.setup || '',
+      symbol: alert.symbol || '',
+      timeframe: alert.timeframe || '',
+      score: String(alert.score || 0),
+    });
+    fetch(`/api/strat/analytics/alert-context?${params}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data) => setAlertContext(data))
+      .catch(() => setAlertContext(null));
+  }, [expandedId, alerts, isDemoMode]);
 
   const filteredAlerts = useMemo(() => {
     const source = isDemoMode ? MOCK_ALERTS : alerts;
@@ -1275,6 +1341,38 @@ export default function StratCommandCenter() {
         </div>
       )}
 
+      {/* Main Tab: Alerts vs Intelligence */}
+      <div className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800/50">
+        <button
+          type="button"
+          onClick={() => setMainTab('alerts')}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition ${
+            mainTab === 'alerts'
+              ? 'bg-white text-slate-900 shadow dark:bg-slate-700 dark:text-white'
+              : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+          }`}
+        >
+          <AlertCircle size={16} />
+          Alerts & Plans
+        </button>
+        <button
+          type="button"
+          onClick={() => setMainTab('intelligence')}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition ${
+            mainTab === 'intelligence'
+              ? 'bg-white text-slate-900 shadow dark:bg-slate-700 dark:text-white'
+              : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+          }`}
+        >
+          <Brain size={16} />
+          Intelligence
+        </button>
+      </div>
+
+      {mainTab === 'intelligence' ? (
+        <StratIntelligencePanel isDemoMode={isDemoMode} />
+      ) : (
+        <>
       {/* Stats Bar - clickable to filter */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <button
@@ -1393,6 +1491,7 @@ export default function StratCommandCenter() {
                   onCreatePlan={setCreateFromAlert}
                   onAlertMe={() => {}}
                   onChart={() => {}}
+                  alertContext={expandedId === alert.id ? alertContext : null}
                 />
               ))
             )}
@@ -1532,6 +1631,8 @@ export default function StratCommandCenter() {
           </div>
         </div>
       </div>
+        </>
+      )}
 
       {/* Modals */}
       {createFromAlert && (

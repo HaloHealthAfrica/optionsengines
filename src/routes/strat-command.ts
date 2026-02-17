@@ -11,6 +11,13 @@ import { authService } from '../services/auth.service.js';
 import { db } from '../services/database.service.js';
 import { watchlistManager, getStratPlanConfig } from '../services/strat-plan/index.js';
 import { stratScannerService } from '../services/strat-scanner/index.js';
+import {
+  stratAnalyticsService,
+  generateInsights,
+  saveInsights,
+  getCachedInsights,
+  tuneWeights,
+} from '../services/strat-analytics/index.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import {
@@ -290,6 +297,328 @@ router.post(
     } catch (err) {
       logger.error('Strat scan failed', { error: err });
       return res.status(500).json({ error: 'Scan failed' });
+    }
+  }
+);
+
+// --- Strat Analytics (Feedback Loop) ---
+function parseDateRange(req: Request): { from: Date; to: Date } | undefined {
+  const from = req.query.from as string | undefined;
+  const to = req.query.to as string | undefined;
+  if (from && to) {
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    if (!isNaN(fromDate.getTime()) && !isNaN(toDate.getTime())) {
+      return { from: fromDate, to: toDate };
+    }
+  }
+  return undefined;
+}
+
+/** GET /strat/analytics/overview - Overall stats */
+router.get(
+  '/analytics/overview',
+  requireAuth,
+  requireStratEnabled,
+  async (req: Request, res: Response) => {
+    try {
+      const stats = await stratAnalyticsService.getOverallStats(parseDateRange(req));
+      return res.json(stats);
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') {
+        return res.json({ totalAlerts: 0, triggeredCount: 0, triggerRate: 0, winRate: 0, avgRR: 0, profitFactor: 0, expectancy: 0 });
+      }
+      logger.error('Strat analytics overview failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/patterns - Win rate by pattern */
+router.get(
+  '/analytics/patterns',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const data = await stratAnalyticsService.getPatternPerformance();
+      return res.json({ patterns: data });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ patterns: [] });
+      logger.error('Strat analytics patterns failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/timeframes - Win rate by timeframe */
+router.get(
+  '/analytics/timeframes',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const data = await stratAnalyticsService.getTimeframePerformance();
+      return res.json({ timeframes: data });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ timeframes: [] });
+      logger.error('Strat analytics timeframes failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/symbols - Win rate by symbol */
+router.get(
+  '/analytics/symbols',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const data = await stratAnalyticsService.getSymbolPerformance();
+      return res.json({ symbols: data });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ symbols: [] });
+      logger.error('Strat analytics symbols failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/score-calibration - Score calibration */
+router.get(
+  '/analytics/score-calibration',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const data = await stratAnalyticsService.getScoreCalibration();
+      return res.json({ calibration: data });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ calibration: [] });
+      logger.error('Strat analytics score-calibration failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/market-regimes - Performance by market regime */
+router.get(
+  '/analytics/market-regimes',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const data = await stratAnalyticsService.getMarketRegimePerformance();
+      return res.json({ regimes: data });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ regimes: [] });
+      logger.error('Strat analytics market-regimes failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/flow-alignment - Flow alignment impact */
+router.get(
+  '/analytics/flow-alignment',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const data = await stratAnalyticsService.getFlowAlignmentPerformance();
+      return res.json(data);
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') {
+        return res.json({ alignedWinRate: 0, opposingWinRate: 0, flowAlignmentEdge: 0, isFlowUseful: false, sampleSizes: { aligned: 0, opposing: 0, neutral: 0 } });
+      }
+      logger.error('Strat analytics flow-alignment failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/confluence - TF confluence impact */
+router.get(
+  '/analytics/confluence',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const data = await stratAnalyticsService.getConfluencePerformance();
+      return res.json({ confluence: data });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ confluence: [] });
+      logger.error('Strat analytics confluence failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/candle-shapes - Candle shape performance */
+router.get(
+  '/analytics/candle-shapes',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const data = await stratAnalyticsService.getCandleShapePerformance();
+      return res.json({ candleShapes: data });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ candleShapes: [] });
+      logger.error('Strat analytics candle-shapes failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/alert-context - Historical stats for a specific pattern+symbol+timeframe+score */
+router.get(
+  '/analytics/alert-context',
+  requireAuth,
+  requireStratEnabled,
+  async (req: Request, res: Response) => {
+    try {
+      const pattern = req.query.pattern as string;
+      const symbol = req.query.symbol as string;
+      const timeframe = req.query.timeframe as string;
+      const score = parseInt(String(req.query.score || '0'), 10);
+      if (!pattern || !symbol || !timeframe) {
+        return res.json({ patternStats: null, symbolStats: null, scoreCalibration: null });
+      }
+      const [patterns, symbols, calibration, flow] = await Promise.all([
+        stratAnalyticsService.getPatternPerformance(),
+        stratAnalyticsService.getSymbolPerformance(),
+        stratAnalyticsService.getScoreCalibration(),
+        stratAnalyticsService.getFlowAlignmentPerformance(),
+      ]);
+      const patternStats = patterns.find((p) => p.pattern === pattern) ?? null;
+      const symbolStats = symbols.find((s) => s.symbol === symbol) ?? null;
+      const scoreRange = calibration.find((c) => {
+        const parts = c.range.split('-').map((p) => parseInt(p, 10));
+        const min = parts[0] ?? 0;
+        const max = parts[1] ?? 100;
+        return score >= min && score < max;
+      }) ?? null;
+      return res.json({
+        patternStats,
+        symbolStats,
+        scoreCalibration: scoreRange,
+        flowEdge: flow.flowAlignmentEdge,
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ patternStats: null, symbolStats: null, scoreCalibration: null });
+      logger.error('Strat alert context failed', { error: err });
+      return res.status(500).json({ error: 'Failed to fetch context' });
+    }
+  }
+);
+
+/** GET /strat/analytics/pattern-timeframe - Heatmap data (pattern × timeframe) */
+router.get(
+  '/analytics/pattern-timeframe',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const data = await stratAnalyticsService.getPatternTimeframeMatrix();
+      return res.json({ matrix: data });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ matrix: [] });
+      logger.error('Strat analytics pattern-timeframe failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/time-of-day - Time of day performance */
+router.get(
+  '/analytics/time-of-day',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const data = await stratAnalyticsService.getTimeOfDayPerformance();
+      return res.json({ sessions: data });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ sessions: [] });
+      logger.error('Strat analytics time-of-day failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/insights - Cached or generated insights */
+router.get(
+  '/analytics/insights',
+  requireAuth,
+  requireStratEnabled,
+  async (req: Request, res: Response) => {
+    try {
+      const refresh = req.query.refresh === 'true';
+      const limit = Math.min(50, parseInt(String(req.query.limit || 20), 10) || 20);
+      if (refresh) {
+        const insights = await generateInsights();
+        await saveInsights(insights);
+        return res.json({ insights });
+      }
+      const insights = await getCachedInsights(limit);
+      if (insights.length === 0) {
+        const generated = await generateInsights();
+        await saveInsights(generated);
+        return res.json({ insights: generated });
+      }
+      return res.json({ insights });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ insights: [] });
+      logger.error('Strat analytics insights failed', { error: err });
+      return res.status(500).json({ error: 'Analytics failed' });
+    }
+  }
+);
+
+/** GET /strat/analytics/tuning-history - Last tuning runs */
+router.get(
+  '/analytics/tuning-history',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const result = await db.query(
+        `SELECT id, previous_weights, new_weights, sample_size, tuned_at
+         FROM scoring_weight_history
+         ORDER BY tuned_at DESC
+         LIMIT 10`
+      );
+      return res.json({
+        history: result.rows.map((r) => ({
+          id: r.id,
+          previousWeights: r.previous_weights,
+          newWeights: r.new_weights,
+          sampleSize: r.sample_size,
+          tunedAt: r.tuned_at,
+        })),
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === '42P01') return res.json({ history: [] });
+      logger.error('Strat tuning history failed', { error: err });
+      return res.status(500).json({ error: 'Failed to fetch tuning history' });
+    }
+  }
+);
+
+/** POST /strat/analytics/tune - Run scoring weight tuner */
+router.post(
+  '/analytics/tune',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const result = await tuneWeights();
+      return res.json(result);
+    } catch (err) {
+      logger.error('Strat scoring tune failed', { error: err });
+      return res.status(500).json({ error: 'Tuning failed' });
     }
   }
 );

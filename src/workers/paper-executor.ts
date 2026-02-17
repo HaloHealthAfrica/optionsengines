@@ -314,7 +314,10 @@ export class PaperExecutorWorker {
             let setupType: string | null = null;
             if (config.enableStratPlanLifecycle) {
               stratPlanLifecycleService
-                .markClosedByPosition(closedPositionId, cap.realizedPnl)
+                .markClosedByPosition(closedPositionId, cap.realizedPnl, {
+                  exitPrice: price,
+                  holdDurationMinutes: Math.round(cap.durationMinutes),
+                })
                 .catch((err) => logger.warn('Strat plan close PnL failed', { positionId: closedPositionId, error: err }));
               const planRow = await db
                 .query(
