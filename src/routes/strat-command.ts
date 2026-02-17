@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { authService } from '../services/auth.service.js';
 import { db } from '../services/database.service.js';
 import { watchlistManager, getStratPlanConfig } from '../services/strat-plan/index.js';
-import { stratScannerService } from '../services/strat-scanner/index.js';
+import { runTier2FullScan } from '../workers/strat-cron/tier2-full-scan.js';
 import {
   stratAnalyticsService,
   generateInsights,
@@ -20,10 +20,7 @@ import {
 } from '../services/strat-analytics/index.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
-import {
-  publishStratAlertNew,
-  publishStratScanComplete,
-} from '../services/realtime-updates.service.js';
+import { publishStratAlertNew } from '../services/realtime-updates.service.js';
 
 const router = Router();
 
@@ -59,7 +56,9 @@ router.get(
 
       const result = await db.query(
         `SELECT alert_id, symbol, direction, timeframe, setup, entry, target, stop,
-                reversal_level, score, c1_type, c2_type, c1_shape, atr, rvol,
+                reversal_level, score, current_score, initial_score, score_delta, score_trend,
+                peak_score, score_velocity, score_history, last_evaluated_at, last_full_scan_at,
+                c1_type, c2_type, c1_shape, atr, rvol,
                 flow_sentiment, unusual_activity, status, source, options_suggestion,
                 condition_text, created_at, triggered_at
          FROM strat_alerts
@@ -80,7 +79,15 @@ router.get(
         target: Number(row.target),
         stop: Number(row.stop),
         reversalLevel: row.reversal_level != null ? Number(row.reversal_level) : null,
-        score: Number(row.score),
+        score: Number(row.current_score ?? row.score),
+        initialScore: row.initial_score != null ? Number(row.initial_score) : null,
+        scoreDelta: row.score_delta != null ? Number(row.score_delta) : null,
+        scoreTrend: row.score_trend,
+        peakScore: row.peak_score != null ? Number(row.peak_score) : null,
+        scoreVelocity: row.score_velocity != null ? Number(row.score_velocity) : null,
+        scoreHistory: row.score_history ?? [],
+        lastEvaluatedAt: row.last_evaluated_at,
+        lastFullScanAt: row.last_full_scan_at,
         c1Type: row.c1_type,
         c2Type: row.c2_type,
         c1Shape: row.c1_shape,
@@ -328,7 +335,7 @@ const scanBodySchema = z.object({
   timeframes: z.array(z.enum(['4H', 'D', 'W', 'M'])).optional(),
 });
 
-/** POST /strat/scan - Run strat scanner (on-demand) */
+/** POST /strat/scan - Run Tier 2 full scan (on-demand, triggers Tier 1 at end) */
 router.post(
   '/scan',
   requireAuth,
@@ -337,10 +344,18 @@ router.post(
     try {
       const parse = scanBodySchema.safeParse(req.body ?? {});
       const options = parse.success ? parse.data : {};
-      const alerts = await stratScannerService.run(options);
-      const scannedAt = new Date().toISOString();
-      publishStratScanComplete({ count: alerts.length, scannedAt });
-      return res.json({ alerts, scannedAt });
+      const result = await runTier2FullScan({
+        symbols: options.symbols,
+        timeframes: options.timeframes ?? ['4H', 'D', 'W', 'M'],
+        reason: 'manual_refresh',
+      });
+      return res.json({
+        alertsCount: result.alertsCount,
+        symbolsScanned: result.symbolsScanned,
+        timeframes: result.timeframes,
+        scannedAt: new Date().toISOString(),
+        tier1Result: result.tier1Result,
+      });
     } catch (err) {
       logger.error('Strat scan failed', { error: err });
       return res.status(500).json({ error: 'Scan failed' });

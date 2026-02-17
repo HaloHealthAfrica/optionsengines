@@ -22,6 +22,12 @@ import {
   saveInsights,
 } from '../services/strat-analytics/index.js';
 import { AlertOutcomeTrackerWorker } from '../workers/alert-outcome-tracker.worker.js';
+import { runTier1PriceCheck } from '../workers/strat-cron/tier1-price-check.js';
+import {
+  runTier2FullScan,
+  type ScanReason,
+} from '../workers/strat-cron/tier2-full-scan.js';
+import { isWithinTradingWindow, isLastTradingDayOfMonth } from '../utils/market-hours.js';
 
 const router = Router();
 
@@ -161,6 +167,188 @@ router.post('/process-queue', requireCronSecret, async (_req: Request, res: Resp
     res.status(500).json({
       ok: false,
       durationMs,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * POST /api/cron/tier1-price-check
+ *
+ * Tier 1: Re-evaluates active alerts with fresh price data. Every 5 min during market hours.
+ */
+router.post('/tier1-price-check', requireCronSecret, async (_req: Request, res: Response) => {
+  if (!config.enableStratPlanLifecycle) {
+    return res.status(200).json({ ok: true, skip: true, reason: 'Strat Plan Lifecycle disabled' });
+  }
+
+  if (!isWithinTradingWindow()) {
+    return res.status(200).json({ ok: true, skip: true, reason: 'Outside trading hours' });
+  }
+
+  const startTime = Date.now();
+  try {
+    const result = await runTier1PriceCheck();
+    const durationMs = Date.now() - startTime;
+    return res.json({
+      ok: true,
+      durationMs,
+      alertsChecked: result.alertCount,
+      triggersDetected: result.triggers,
+      invalidations: result.invalidations,
+      integrityBroken: result.integrityBroken,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    const durationMs = Date.now() - startTime;
+    logger.error('Cron tier1-price-check failed', err);
+    return res.status(500).json({
+      ok: false,
+      durationMs,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * POST /api/cron/tier2-scan-premarket
+ * 9:25 AM EST - Pre-market Daily scan (overnight gaps, new daily candle)
+ */
+router.post('/tier2-scan-premarket', requireCronSecret, async (_req: Request, res: Response) => {
+  if (!config.enableStratPlanLifecycle) {
+    return res.status(200).json({ ok: true, skip: true, reason: 'Strat Plan Lifecycle disabled' });
+  }
+  const startTime = Date.now();
+  try {
+    const result = await runTier2FullScan({
+      reason: 'scheduled_daily',
+      timeframes: ['4H', 'D'],
+    });
+    return res.json({
+      ok: true,
+      durationMs: Date.now() - startTime,
+      ...result,
+    });
+  } catch (err: unknown) {
+    logger.error('Cron tier2-scan-premarket failed', err);
+    return res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * POST /api/cron/tier2-scan-4h-open
+ * 9:30 AM EST - 4H candle close + market open
+ */
+router.post('/tier2-scan-4h-open', requireCronSecret, async (_req: Request, res: Response) => {
+  if (!config.enableStratPlanLifecycle) {
+    return res.status(200).json({ ok: true, skip: true, reason: 'Strat Plan Lifecycle disabled' });
+  }
+  const startTime = Date.now();
+  try {
+    const result = await runTier2FullScan({
+      reason: 'scheduled_4h',
+      timeframes: ['4H'],
+    });
+    return res.json({
+      ok: true,
+      durationMs: Date.now() - startTime,
+      ...result,
+    });
+  } catch (err: unknown) {
+    logger.error('Cron tier2-scan-4h-open failed', err);
+    return res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * POST /api/cron/tier2-scan-4h-midday
+ * 1:30 PM EST - 4H candle close
+ */
+router.post('/tier2-scan-4h-midday', requireCronSecret, async (_req: Request, res: Response) => {
+  if (!config.enableStratPlanLifecycle) {
+    return res.status(200).json({ ok: true, skip: true, reason: 'Strat Plan Lifecycle disabled' });
+  }
+  const startTime = Date.now();
+  try {
+    const result = await runTier2FullScan({
+      reason: 'scheduled_4h',
+      timeframes: ['4H'],
+    });
+    return res.json({
+      ok: true,
+      durationMs: Date.now() - startTime,
+      ...result,
+    });
+  } catch (err: unknown) {
+    logger.error('Cron tier2-scan-4h-midday failed', err);
+    return res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * POST /api/cron/tier2-scan-daily-close
+ * 4:00 PM EST - 4H + Daily candle close (+ Weekly on Fridays, Monthly on last trading day)
+ */
+router.post('/tier2-scan-daily-close', requireCronSecret, async (_req: Request, res: Response) => {
+  if (!config.enableStratPlanLifecycle) {
+    return res.status(200).json({ ok: true, skip: true, reason: 'Strat Plan Lifecycle disabled' });
+  }
+  const startTime = Date.now();
+  const isFriday = new Date().getDay() === 5;
+  const isLastTradingDay = isLastTradingDayOfMonth();
+  let timeframes: string[] = ['4H', 'D'];
+  if (isFriday) timeframes.push('W');
+  if (isLastTradingDay) timeframes.push('M');
+  const reason: ScanReason = isFriday ? 'scheduled_weekly' : 'scheduled_daily';
+
+  try {
+    const result = await runTier2FullScan({ reason, timeframes });
+    return res.json({
+      ok: true,
+      durationMs: Date.now() - startTime,
+      ...result,
+    });
+  } catch (err: unknown) {
+    logger.error('Cron tier2-scan-daily-close failed', err);
+    return res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * POST /api/cron/tier2-scan-weekly
+ * Friday 4:05 PM EST - Weekly candle close
+ */
+router.post('/tier2-scan-weekly', requireCronSecret, async (_req: Request, res: Response) => {
+  if (!config.enableStratPlanLifecycle) {
+    return res.status(200).json({ ok: true, skip: true, reason: 'Strat Plan Lifecycle disabled' });
+  }
+  const startTime = Date.now();
+  try {
+    const result = await runTier2FullScan({
+      reason: 'scheduled_weekly',
+      timeframes: ['4H', 'D', 'W'],
+    });
+    return res.json({
+      ok: true,
+      durationMs: Date.now() - startTime,
+      ...result,
+    });
+  } catch (err: unknown) {
+    logger.error('Cron tier2-scan-weekly failed', err);
+    return res.status(500).json({
+      ok: false,
       error: err instanceof Error ? err.message : String(err),
     });
   }

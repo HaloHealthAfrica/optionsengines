@@ -1,3 +1,29 @@
 {
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/tier1-price-check",
+      "schedule": "*/5 13-20 * * 1-5"
+    },
+    {
+      "path": "/api/cron/tier2-scan-premarket",
+      "schedule": "25 14 * * 1-5"
+    },
+    {
+      "path": "/api/cron/tier2-scan-4h-open",
+      "schedule": "30 14 * * 1-5"
+    },
+    {
+      "path": "/api/cron/tier2-scan-4h-midday",
+      "schedule": "30 18 * * 1-5"
+    },
+    {
+      "path": "/api/cron/tier2-scan-daily-close",
+      "schedule": "0 21 * * 1-5"
+    },
+    {
+      "path": "/api/cron/tier2-scan-weekly",
+      "schedule": "5 21 * * 5"
+    }
+  ]
 }

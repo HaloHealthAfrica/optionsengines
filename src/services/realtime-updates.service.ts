@@ -158,3 +158,40 @@ export function publishStratOutcomeRecorded(payload: {
 }): void {
   broadcastRealtime('strat_outcome_recorded', payload);
 }
+
+/** Emit when Tier 1 has updated scores for active alerts */
+export function publishStratScoresUpdated(payload: {
+  timestamp: string;
+  alertCount: number;
+}): void {
+  broadcastRealtime('strat_scores_updated' as any, payload);
+}
+
+/** Emit when C1 inside bar breaches C2 range */
+export function publishStratAlertIntegrityBroken(payload: {
+  alertId: string;
+  symbol: string;
+  reason: string;
+}): void {
+  broadcastRealtime('strat_alert_integrity_broken' as any, payload);
+}
+
+/** Emit when score spikes 10+ points in one check */
+export function publishStratAlertScoreSpike(payload: Record<string, unknown>): void {
+  broadcastRealtime('strat_alert_score_spike' as any, payload);
+}
+
+/** Emit when alert auto-archived (sustained low score) */
+export function publishStratAlertAutoArchived(payload: Record<string, unknown>): void {
+  broadcastRealtime('strat_alert_auto_archived' as any, payload);
+}
+
+/** Emit when trend reverses from weakening to strengthening */
+export function publishStratAlertMomentumShift(payload: Record<string, unknown>): void {
+  broadcastRealtime('strat_alert_momentum_shift' as any, payload);
+}
+
+/** Emit when score hits new peak >= 75 */
+export function publishStratAlertNewPeak(payload: Record<string, unknown>): void {
+  broadcastRealtime('strat_alert_new_peak' as any, payload);
+}

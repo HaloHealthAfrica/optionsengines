@@ -40,9 +40,17 @@ export interface StratAlertRecord {
   c1Type: string;
   c2Type: string;
   c1Shape: string;
+  c1High?: number;
+  c1Low?: number;
+  c2High?: number;
+  c2Low?: number;
   atr: number | null;
   rvol: string | null;
   tfConfluence: Record<string, string> | null;
+  tfConfluenceCount?: number;
+  patternQualityScore?: number;
+  candleShapeScore?: number;
+  flowAlignmentScore?: number;
   flowSentiment: 'bullish' | 'bearish' | 'neutral' | null;
   unusualActivity: boolean;
   status: 'pending';
@@ -105,7 +113,7 @@ function scoreSetup(
   rvol: string | null,
   tfConfluence: number,
   candleShape: string
-): number {
+): { total: number; patternQuality: number; candleShapeScore: number } {
   let patternQuality = 15;
   if (pattern.setup.includes('2-1-2')) patternQuality = 22;
   if (pattern.setup.includes('3-1-2') || pattern.setup.includes('3-2')) patternQuality = 20;
@@ -145,7 +153,11 @@ function scoreSetup(
 
   const total =
     patternQuality + riskReward + tfScore + rvolScore + shapeScore + atrScore;
-  return Math.min(100, Math.round(total));
+  return {
+    total: Math.min(100, Math.round(total)),
+    patternQuality,
+    candleShapeScore: shapeScore * 10, // 0-100 scale
+  };
 }
 
 export class StratScannerService {
@@ -241,13 +253,14 @@ export class StratScannerService {
           : entry - (pattern.c1.high - pattern.c1.low) * 2;
       }
 
-      const score = scoreSetup(
+      const scoreResult = scoreSetup(
         pattern,
         atr,
         rvol,
         tfConfluence,
         candleShape
       );
+      const score = scoreResult.total;
 
       const conditionText =
         pattern.direction === 'long'
@@ -267,10 +280,18 @@ export class StratScannerService {
         c1Type: pattern.c1Type,
         c2Type: pattern.c2Type,
         c1Shape: candleShape,
+        c1High: pattern.c1.high,
+        c1Low: pattern.c1.low,
+        c2High: pattern.c2.high,
+        c2Low: pattern.c2.low,
+        tfConfluence: null,
+        tfConfluenceCount: tfConfluence,
+        patternQualityScore: scoreResult.patternQuality * 4, // 0-100 scale
+        candleShapeScore: scoreResult.candleShapeScore,
         atr,
         rvol,
-        tfConfluence: null,
         flowSentiment: null,
+        flowAlignmentScore: 50,
         unusualActivity: false,
         status: 'pending',
         source: 'scanner',
@@ -292,10 +313,15 @@ export class StratScannerService {
           else if (putPrem > callPrem * 1.2) alert.flowSentiment = 'bearish';
           else alert.flowSentiment = 'neutral';
           if (flow.entries.length > 10) alert.unusualActivity = true;
-          if (alert.flowSentiment === (pattern.direction === 'long' ? 'bullish' : 'bearish'))
+          if (alert.flowSentiment === (pattern.direction === 'long' ? 'bullish' : 'bearish')) {
             alert.score = Math.min(100, alert.score + 10);
-          else if (alert.flowSentiment === (pattern.direction === 'long' ? 'bearish' : 'bullish'))
+            alert.flowAlignmentScore = 80;
+          } else if (alert.flowSentiment === (pattern.direction === 'long' ? 'bearish' : 'bullish')) {
             alert.score = Math.max(0, alert.score - 10);
+            alert.flowAlignmentScore = 20;
+          } else {
+            alert.flowAlignmentScore = 50;
+          }
         } catch {
           // ignore flow enrichment errors
         }
@@ -322,10 +348,13 @@ export class StratScannerService {
         const insert = await db.query(
           `INSERT INTO strat_alerts (
             symbol, direction, timeframe, setup, entry, target, stop,
-            reversal_level, score, c1_type, c2_type, c1_shape, atr, rvol,
-            tf_confluence, flow_sentiment, unusual_activity, status, source,
-            options_suggestion, condition_text, expires_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+            reversal_level, score, c1_type, c2_type, c1_shape, c1_high, c1_low, c2_high, c2_low,
+            atr, rvol, tf_confluence, tf_confluence_count,
+            pattern_quality_score, candle_shape_score, flow_alignment_score,
+            flow_sentiment, unusual_activity, status, source,
+            options_suggestion, condition_text, expires_at,
+            current_score, initial_score
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
           RETURNING alert_id, symbol, direction, timeframe, setup, entry, target, stop, score, status, source, created_at`,
           [
             a.symbol,
@@ -340,9 +369,17 @@ export class StratScannerService {
             a.c1Type,
             a.c2Type,
             a.c1Shape,
+            a.c1High ?? null,
+            a.c1Low ?? null,
+            a.c2High ?? null,
+            a.c2Low ?? null,
             a.atr,
             a.rvol,
             a.tfConfluence ? JSON.stringify(a.tfConfluence) : null,
+            a.tfConfluenceCount ?? null,
+            a.patternQualityScore ?? null,
+            a.candleShapeScore ?? null,
+            a.flowAlignmentScore ?? null,
             a.flowSentiment,
             a.unusualActivity,
             a.status,
@@ -350,6 +387,8 @@ export class StratScannerService {
             a.optionsSuggestion,
             a.conditionText,
             a.expiresAt,
+            a.score,
+            a.score,
           ]
         );
         const row = insert.rows[0];

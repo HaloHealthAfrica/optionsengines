@@ -12,6 +12,7 @@ import {
   stratPlanLifecycleService,
   getStratPlanConfig,
 } from '../services/strat-plan/index.js';
+import { runTier2FullScan } from '../workers/strat-cron/tier2-full-scan.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -75,6 +76,11 @@ router.post(
     if (!result.ok) {
       return res.status(400).json({ error: result.reason, ok: false });
     }
+    runTier2FullScan({
+      symbols: [symbol.toUpperCase()],
+      timeframes: ['4H', 'D', 'W', 'M'],
+      reason: 'new_ticker',
+    }).catch((err) => logger.warn('New ticker scan failed', { symbol, error: err }));
     return res.json({ ok: true, entry: result.entry });
   }
 );

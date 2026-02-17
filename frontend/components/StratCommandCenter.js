@@ -118,7 +118,30 @@ const MOCK_ALERTS = [
   },
 ];
 
-function ScoreBadge({ score, scoreCalibration }) {
+function ScoreSparkline({ history, initialScore, className = '' }) {
+  if (!Array.isArray(history) || history.length < 2) return null;
+  const scores = history.map((h) => (typeof h === 'object' && h?.score != null ? h.score : h));
+  const min = Math.min(...scores, initialScore ?? 0);
+  const max = Math.max(...scores, initialScore ?? 100);
+  const range = max - min || 1;
+  const w = 200;
+  const h = 30;
+  const pts = scores.map((s, i) => {
+    const x = (i / (scores.length - 1)) * (w - 4) + 2;
+    const y = h - 4 - ((s - min) / range) * (h - 8);
+    return `${x},${y}`;
+  });
+  const pathD = `M ${pts.join(' L ')}`;
+  const lastScore = scores[scores.length - 1];
+  const lineColor = lastScore > (initialScore ?? 50) ? '#10b981' : lastScore < (initialScore ?? 50) ? '#ef4444' : '#64748b';
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className={className} preserveAspectRatio="none">
+      <path d={pathD} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ScoreBadge({ score, scoreDelta, scoreTrend, scoreCalibration }) {
   const n = Number(score) || 0;
   const cls =
     n >= 85
@@ -128,9 +151,12 @@ function ScoreBadge({ score, scoreCalibration }) {
         : 'bg-rose-500/20 text-rose-600 dark:bg-rose-400/30 dark:text-rose-300 border-rose-500/40';
   const calibrated = scoreCalibration?.isCalibrated;
   const overPredicts = scoreCalibration && scoreCalibration.actualWinRate < scoreCalibration.predictedWinRate - 0.15;
+  const trendIcon = scoreTrend === 'strengthening' ? '↑' : scoreTrend === 'weakening' ? '↓' : '→';
+  const trendCls = scoreTrend === 'strengthening' ? 'text-emerald-600 dark:text-emerald-400' : scoreTrend === 'weakening' ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500';
+  const delta = scoreDelta != null ? Number(scoreDelta) : null;
   return (
     <span
-      className={`inline-flex h-9 shrink-0 items-center gap-0.5 rounded-lg border px-2 font-mono text-sm font-bold ${cls}`}
+      className={`inline-flex h-9 shrink-0 flex-col items-center justify-center gap-0 rounded-lg border px-2 font-mono text-sm font-bold ${cls}`}
       title={
         calibrated === true
           ? 'Well-calibrated in this range'
@@ -139,9 +165,17 @@ function ScoreBadge({ score, scoreCalibration }) {
             : null
       }
     >
-      {n}
-      {calibrated === true && <span className="text-emerald-600 dark:text-emerald-400">✓</span>}
-      {overPredicts && <span className="text-amber-600 dark:text-amber-400">⚠</span>}
+      <span className="flex items-center gap-0.5">
+        {n}
+        <span className={`text-xs ${trendCls}`}>{trendIcon}</span>
+        {calibrated === true && <span className="text-emerald-600 dark:text-emerald-400">✓</span>}
+        {overPredicts && <span className="text-amber-600 dark:text-amber-400">⚠</span>}
+      </span>
+      {delta != null && delta !== 0 && (
+        <span className={`text-[10px] font-normal ${delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+          {delta >= 0 ? '+' : ''}{delta} since detected
+        </span>
+      )}
     </span>
   );
 }
@@ -193,7 +227,7 @@ function AlertCard({
         onClick={onToggle}
         className="flex w-full items-center gap-3 p-4 text-left transition hover:bg-slate-50/50 dark:hover:bg-slate-800/30"
       >
-        <ScoreBadge score={alert.score} scoreCalibration={alertContext?.scoreCalibration} />
+        <ScoreBadge score={alert.score} scoreDelta={alert.scoreDelta} scoreTrend={alert.scoreTrend} scoreCalibration={alertContext?.scoreCalibration} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold">{alert.symbol}</span>
@@ -301,6 +335,26 @@ function AlertCard({
             <p className="mt-2 text-sm">
               Reversal above ${alert.reversalLevel.toFixed(2)}
             </p>
+          )}
+          {(alert.scoreHistory?.length > 0 || alert.scoreTrend || alert.peakScore != null) && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/30">
+              <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-slate-500">Evolution</p>
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <span>Score: {alert.score} {alert.scoreTrend === 'strengthening' && '↑'} {alert.scoreTrend === 'weakening' && '↓'} {alert.scoreTrend === 'stable' && '→'}</span>
+                {alert.scoreDelta != null && alert.scoreDelta !== 0 && (
+                  <span className={alert.scoreDelta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
+                    ({alert.scoreDelta >= 0 ? '+' : ''}{alert.scoreDelta} since detected)
+                  </span>
+                )}
+                {alert.peakScore != null && <span>Peak: {alert.peakScore}</span>}
+                {alert.scoreVelocity != null && alert.scoreVelocity !== 0 && (
+                  <span className="muted">Velocity: {alert.scoreVelocity >= 0 ? '+' : ''}{Number(alert.scoreVelocity).toFixed(1)} pts/hr</span>
+                )}
+              </div>
+              {alert.scoreHistory?.length > 1 && (
+                <ScoreSparkline history={alert.scoreHistory} initialScore={alert.initialScore ?? alert.score} className="mt-2 h-8 w-full max-w-[200px]" />
+              )}
+            </div>
           )}
           {alert.condition && (
             <div className="mt-2 rounded-lg bg-amber-500/20 px-3 py-2 text-sm dark:bg-amber-500/15">
@@ -809,7 +863,13 @@ function mapApiAlertToUI(row) {
     direction: row.direction,
     timeframe: row.timeframe,
     setupType: row.setup || row.setupType,
-    score: Number(row.score) || 0,
+    score: Number(row.currentScore ?? row.score) || 0,
+    initialScore: row.initialScore != null ? Number(row.initialScore) : null,
+    scoreDelta: row.scoreDelta != null ? Number(row.scoreDelta) : null,
+    scoreTrend: row.scoreTrend ?? null,
+    peakScore: row.peakScore != null ? Number(row.peakScore) : null,
+    scoreVelocity: row.scoreVelocity != null ? Number(row.scoreVelocity) : null,
+    scoreHistory: Array.isArray(row.scoreHistory) ? row.scoreHistory : [],
     status: row.status || 'watching',
     timestamp: (row.triggeredAt || row.triggered_at || row.createdAt || row.created_at || new Date()).toISOString?.() ?? String(row.triggeredAt || row.createdAt || new Date()),
     entry,
@@ -844,17 +904,19 @@ export default function StratCommandCenter() {
   const [mainTab, setMainTab] = useState('alerts'); // 'alerts' | 'intelligence'
   const [alertContext, setAlertContext] = useState(null);
   const [batchCreating, setBatchCreating] = useState(false);
+  const [lastScanAt, setLastScanAt] = useState(null);
 
   const isDemoMode = apiError && !apiData;
 
   const runStratScan = useCallback(async (opts = {}) => {
     setScanning(true);
     try {
-      await fetch('/api/strat/scan', {
+      const res = await fetch('/api/strat/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(opts),
       });
+      if (res.ok) setLastScanAt(new Date());
     } catch (err) {
       console.error('Strat scan failed:', err);
     } finally {
@@ -963,7 +1025,8 @@ export default function StratCommandCenter() {
           msg.type === 'strat_alert_new' ||
           msg.type === 'strat_scan_complete' ||
           msg.type === 'strat_alert_triggered' ||
-          msg.type === 'strat_alert_invalidated'
+          msg.type === 'strat_alert_invalidated' ||
+          msg.type === 'strat_scores_updated'
         ) {
           loadAlerts();
           loadPlans();
@@ -1489,6 +1552,11 @@ export default function StratCommandCenter() {
       ) : (
         <>
       {/* Stats Bar - clickable to filter */}
+      <div className="mb-2 flex items-center gap-2 text-xs text-slate-500">
+        {lastScanAt && (
+          <span>Last scan: {lastScanAt.toLocaleTimeString()} ({Math.round((Date.now() - lastScanAt.getTime()) / 60000)} min ago)</span>
+        )}
+      </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <button
           type="button"
