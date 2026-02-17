@@ -1098,7 +1098,7 @@ export default function StratCommandCenter() {
     };
   }, [alerts, plans, isDemoMode]);
 
-  const maxPlans = 10;
+  const maxPlans = apiData?.config?.max_concurrent_plans ?? apiData?.plans?.max_concurrent ?? 500;
 
   const handleConfirmPlanFromAlert = async (alertWithNotes) => {
     if (isDemoMode) {
@@ -1811,8 +1811,9 @@ export default function StratCommandCenter() {
                       <button
                         type="button"
                         onClick={() => handleRemovePlan(plan.id)}
-                        className="rounded p-1.5 text-slate-400 opacity-0 transition hover:bg-rose-100 hover:text-rose-600 group-hover:opacity-100 dark:hover:bg-rose-900/30"
+                        className="rounded p-1.5 text-slate-400 transition hover:bg-rose-100 hover:text-rose-600 dark:hover:bg-rose-900/30"
                         aria-label="Remove plan"
+                        title="Remove plan"
                       >
                         <Trash2 size={14} />
                       </button>

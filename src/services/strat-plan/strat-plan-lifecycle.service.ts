@@ -358,13 +358,30 @@ export class StratPlanLifecycleService {
   }
 
   /**
-   * Cancel plan (armed/draft only)
+   * Cancel or remove plan. Draft/armed/triggered/executing → mark cancelled.
+   * History plans (filled, expired, cancelled, rejected) → hard delete (remove from list).
    */
   async markCancelled(planId: string): Promise<boolean> {
+    const existing = await db.query(
+      `SELECT plan_id, plan_status FROM strat_plans WHERE plan_id = $1`,
+      [planId]
+    ).then((r) => r.rows[0]);
+    if (!existing) return false;
+
+    const status = (existing.plan_status ?? 'draft').toString();
+    const terminalStates = ['filled', 'expired', 'cancelled', 'rejected'];
+
+    if (terminalStates.includes(status)) {
+      await db.query(`DELETE FROM strat_plans WHERE plan_id = $1`, [planId]);
+      logger.info('Strat plan removed from history', { plan_id: planId });
+      publishStratPlanUpdate({ event: 'removed', plan_id: planId });
+      return true;
+    }
+
     const result = await db.query(
       `UPDATE strat_plans
        SET plan_status = 'cancelled', state = 'EXPIRED', updated_at = NOW()
-       WHERE plan_id = $1 AND plan_status IN ('draft', 'armed')
+       WHERE plan_id = $1 AND plan_status IN ('draft', 'armed', 'triggered', 'executing')
        RETURNING plan_id`,
       [planId]
     );

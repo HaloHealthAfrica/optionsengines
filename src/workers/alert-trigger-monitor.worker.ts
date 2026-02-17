@@ -169,7 +169,12 @@ export class AlertTriggerMonitorWorker {
           }
         } else if (invalidated) {
           await db.query(
-            `UPDATE strat_alerts SET status = 'invalidated' WHERE alert_id = $1`,
+            `UPDATE strat_alerts SET status = 'invalidated', outcome = 'invalidated' WHERE alert_id = $1`,
+            [alert.alert_id]
+          );
+          await db.query(
+            `UPDATE strat_plans SET plan_status = 'cancelled', rejection_reason = 'Source alert invalidated (stop hit)'
+             WHERE source_alert_id = $1 AND plan_status IN ('armed', 'draft')`,
             [alert.alert_id]
           );
 

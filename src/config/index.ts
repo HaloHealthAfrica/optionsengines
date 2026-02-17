@@ -412,7 +412,7 @@ export const config: Config = {
   // Strat Plan Lifecycle Engine
   enableStratPlanLifecycle: getEnvVarBoolean('ENABLE_STRAT_PLAN_LIFECYCLE', false),
   stratPlanMaxWatchlistTickers: getEnvVarNumber('STRAT_PLAN_MAX_WATCHLIST_TICKERS', 10),
-  stratPlanMaxConcurrentPlans: getEnvVarNumber('STRAT_PLAN_MAX_CONCURRENT_PLANS', 10),
+  stratPlanMaxConcurrentPlans: getEnvVarNumber('STRAT_PLAN_MAX_CONCURRENT_PLANS', 500),
   stratPlanMaxPlansPerTicker: getEnvVarNumber('STRAT_PLAN_MAX_PLANS_PER_TICKER', 2),
   stratPlanMaxInForce: getEnvVarNumber('STRAT_PLAN_MAX_IN_FORCE', 3),
   stratPlanWebhookAutoAdd: getEnvVarBoolean('STRAT_PLAN_WEBHOOK_AUTO_ADD', false),

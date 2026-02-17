@@ -122,6 +122,12 @@ export async function checkTriggerAndInvalidation(
       `UPDATE strat_alerts SET status = 'invalidated', outcome = 'invalidated' WHERE alert_id = $1`,
       [alert.alert_id]
     );
+    // Auto-cancel linked plans when source alert is invalidated
+    await db.query(
+      `UPDATE strat_plans SET plan_status = 'cancelled', rejection_reason = 'Source alert invalidated (stop hit)'
+       WHERE source_alert_id = $1 AND plan_status IN ('armed', 'draft')`,
+      [alert.alert_id]
+    );
     publishStratAlertInvalidated({
       alertId: alert.alert_id,
       symbol: alert.symbol,

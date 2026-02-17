@@ -10,7 +10,7 @@ import type { StratPlanConfig } from './types.js';
 
 const DEFAULTS: StratPlanConfig = {
   maxWatchlistTickers: config.stratPlanMaxWatchlistTickers ?? 10,
-  maxConcurrentPlans: config.stratPlanMaxConcurrentPlans ?? 10,
+  maxConcurrentPlans: config.stratPlanMaxConcurrentPlans ?? 500,
   maxPlansPerTicker: config.stratPlanMaxPlansPerTicker ?? 2,
   maxInForceSimultaneous: config.stratPlanMaxInForce ?? 3,
   webhookAutoAddToWatchlist: config.stratPlanWebhookAutoAdd ?? false,
@@ -42,7 +42,7 @@ export async function getStratPlanConfig(): Promise<StratPlanConfig> {
           cfg.maxWatchlistTickers = Math.max(1, parseInt(val, 10) || 10);
           break;
         case 'max_concurrent_plans':
-          cfg.maxConcurrentPlans = Math.max(1, parseInt(val, 10) || 10);
+          cfg.maxConcurrentPlans = Math.max(1, parseInt(val, 10) || 500);
           break;
         case 'max_plans_per_ticker':
           cfg.maxPlansPerTicker = Math.max(1, parseInt(val, 10) || 2);
