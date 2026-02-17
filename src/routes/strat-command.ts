@@ -127,6 +127,53 @@ const createAlertSchema = z.object({
   conditionText: z.string().max(500).optional(),
 });
 
+/** DELETE /strat/alerts/:id - Delete an alert (invalidated, expired, or any) */
+router.delete(
+  '/alerts/:id',
+  requireAuth,
+  requireStratEnabled,
+  async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id;
+      if (!id) return res.status(400).json({ error: 'Alert ID required' });
+      const result = await db.query(
+        `DELETE FROM strat_alerts WHERE alert_id = $1 RETURNING alert_id`,
+        [id]
+      );
+      if (result.rowCount === 0) {
+        return res.status(404).json({ error: 'Alert not found' });
+      }
+      return res.json({ ok: true, deleted: id });
+    } catch (err) {
+      logger.error('Strat alert delete failed', { error: err });
+      return res.status(500).json({ error: 'Failed to delete alert' });
+    }
+  }
+);
+
+/** POST /strat/alerts/cleanup - Delete all invalidated and expired alerts */
+router.post(
+  '/alerts/cleanup',
+  requireAuth,
+  requireStratEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const result = await db.query(
+        `DELETE FROM strat_alerts
+         WHERE status IN ('invalidated', 'expired')
+         RETURNING alert_id`
+      );
+      return res.json({
+        ok: true,
+        deleted: result.rowCount ?? 0,
+      });
+    } catch (err) {
+      logger.error('Strat alerts cleanup failed', { error: err });
+      return res.status(500).json({ error: 'Failed to cleanup alerts' });
+    }
+  }
+);
+
 /** POST /strat/alerts - Create strat alert (manual ingestion) */
 router.post(
   '/alerts',

@@ -169,9 +169,11 @@ function AlertCard({
   onCreatePlan,
   onAlertMe,
   onChart,
+  onDelete,
   alertContext,
 }) {
   const isTriggered = alert.status === 'triggered';
+  const canDelete = ['invalidated', 'expired'].includes(alert.status);
   const dirLabel = alert.direction === 'long' ? '▲ LONG' : '▼ SHORT';
   const dirCls =
     alert.direction === 'long'
@@ -214,6 +216,16 @@ function AlertCard({
           <p className="font-mono text-sm">${alert.entry?.toFixed(2)}</p>
           <p className="muted text-xs">R:R {alert.rr?.toFixed(2)}</p>
         </div>
+        {canDelete && onDelete && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onDelete(alert.id); }}
+            className="rounded p-1.5 text-slate-400 hover:bg-rose-100 hover:text-rose-600 dark:hover:bg-rose-900/30 dark:hover:text-rose-400"
+            aria-label="Delete alert"
+          >
+            <Trash2 size={16} />
+          </button>
+        )}
         <ChevronDown
           size={18}
           className={`shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
@@ -348,6 +360,19 @@ function AlertCard({
               <BarChart3 size={14} />
               Chart
             </button>
+            {canDelete && onDelete && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(alert.id);
+                }}
+                className="flex items-center gap-2 rounded-lg border border-rose-200 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-50 dark:border-rose-800 dark:hover:bg-rose-900/30 dark:text-rose-400"
+              >
+                <Trash2 size={14} />
+                Delete
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -513,6 +538,7 @@ function AddAlertModal({ onConfirm, onCancel }) {
     score: 75,
     conditionText: '',
     optionsSuggestion: '',
+    alsoCreatePlan: true,
   });
 
   const handleSubmit = (e) => {
@@ -534,6 +560,7 @@ function AddAlertModal({ onConfirm, onCancel }) {
       score: Number(form.score) || 75,
       conditionText: form.conditionText || undefined,
       optionsSuggestion: form.optionsSuggestion || undefined,
+      alsoCreatePlan: form.alsoCreatePlan,
     });
   };
 
@@ -599,6 +626,18 @@ function AddAlertModal({ onConfirm, onCancel }) {
             <div className="sm:col-span-2">
               <label className="mb-1 block text-[10px] uppercase tracking-widest text-slate-500">Options Suggestion</label>
               <input type="text" value={form.optionsSuggestion} onChange={(e) => setForm((p) => ({ ...p, optionsSuggestion: e.target.value }))} placeholder="139c & 145c 2/21 Exp" className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm dark:border-slate-700 dark:bg-slate-900" />
+            </div>
+            <div className="sm:col-span-2 flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="alsoCreatePlan"
+                checked={form.alsoCreatePlan}
+                onChange={(e) => setForm((p) => ({ ...p, alsoCreatePlan: e.target.checked }))}
+                className="rounded border-slate-300"
+              />
+              <label htmlFor="alsoCreatePlan" className="text-sm">
+                Also create plan (auto-on-trigger) — trade when alert triggers
+              </label>
             </div>
           </div>
           <div className="mt-4 flex gap-2">
@@ -804,6 +843,7 @@ export default function StratCommandCenter() {
   const [scanning, setScanning] = useState(false);
   const [mainTab, setMainTab] = useState('alerts'); // 'alerts' | 'intelligence'
   const [alertContext, setAlertContext] = useState(null);
+  const [batchCreating, setBatchCreating] = useState(false);
 
   const isDemoMode = apiError && !apiData;
 
@@ -1160,6 +1200,55 @@ export default function StratCommandCenter() {
     }
   };
 
+  const handleDeleteAlert = useCallback(async (alertId) => {
+    if (isDemoMode) return;
+    try {
+      const res = await fetch(`/api/strat/alerts/${alertId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json())?.error || 'Delete failed');
+      setExpandedId((x) => (x === alertId ? null : x));
+      loadAlerts();
+    } catch (err) {
+      setApiError(err?.message || 'Delete failed');
+    }
+  }, [isDemoMode, loadAlerts]);
+
+  const handleCleanupInvalidated = useCallback(async () => {
+    if (isDemoMode) return;
+    try {
+      const res = await fetch('/api/strat/alerts/cleanup', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Cleanup failed');
+      if (data.deleted > 0) {
+        loadAlerts();
+        setApiError(null);
+      }
+    } catch (err) {
+      setApiError(err?.message || 'Cleanup failed');
+    }
+  }, [isDemoMode, loadAlerts]);
+
+  const handleBatchCreatePlans = useCallback(async () => {
+    if (isDemoMode) return;
+    setBatchCreating(true);
+    try {
+      const res = await fetch('/api/strat-plan/plans/batch', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Batch create failed');
+      if (data.created > 0) {
+        loadPlans();
+        loadApiData();
+        setApiError(null);
+      }
+      if (data.failed > 0 && data.errors?.length) {
+        setApiError(`${data.failed} failed: ${data.errors[0]?.reason || 'capacity'}`);
+      }
+    } catch (err) {
+      setApiError(err?.message || 'Batch create failed');
+    } finally {
+      setBatchCreating(false);
+    }
+  }, [isDemoMode, loadPlans, loadApiData]);
+
   const handleConfirmAddAlert = async (form) => {
     try {
       const res = await fetch('/api/strat/alerts', {
@@ -1183,8 +1272,34 @@ export default function StratCommandCenter() {
         const err = await res.json();
         throw new Error(err?.error || 'Failed to add alert');
       }
+      const json = await res.json();
       setShowAddAlertModal(false);
       loadAlerts();
+      if (form.alsoCreatePlan && json?.alert?.id) {
+        const rev = form.reversalLevel ?? form.entry;
+        const planRes = await fetch('/api/strat-plan/plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: form.symbol,
+            direction: form.direction,
+            timeframe: form.timeframe === 'D' ? '1d' : form.timeframe === 'W' ? '1w' : form.timeframe === 'M' ? '1month' : '4h',
+            entry: form.entry,
+            target: form.target,
+            stop: form.stop,
+            reversalLevel: rev,
+            setup: form.setup,
+            sourceAlertId: json.alert.id,
+            executionMode: 'auto_on_trigger',
+            triggerCondition: form.direction === 'long' ? `price >= ${rev}` : `price <= ${rev}`,
+            fromAlert: true,
+          }),
+        });
+        if (planRes.ok) {
+          loadPlans();
+          loadApiData();
+        }
+      }
     } catch (err) {
       console.error('Add alert failed:', err);
       setApiError(err?.message);
@@ -1423,14 +1538,36 @@ export default function StratCommandCenter() {
             <h2 className="text-lg font-semibold">Strat Alerts</h2>
             <div className="flex items-center gap-2">
               {!isDemoMode && (
-                <button
-                  type="button"
-                  onClick={() => setShowAddAlertModal(true)}
-                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-                >
-                  <Plus size={14} />
-                  Add Alert
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={handleBatchCreatePlans}
+                    disabled={batchCreating || filteredAlerts.filter((a) => ['pending', 'watching'].includes(a.status)).length === 0}
+                    className="gradient-button flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50"
+                    title="Create plans with auto-on-trigger for all pending alerts. When they trigger, trades go to decision engines automatically."
+                  >
+                    <Zap size={14} className={batchCreating ? 'animate-pulse' : ''} />
+                    {batchCreating ? 'Creating...' : 'Create Plans for All'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCleanupInvalidated}
+                    disabled={!filteredAlerts.some((a) => ['invalidated', 'expired'].includes(a.status))}
+                    className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+                    title="Delete all invalidated and expired alerts"
+                  >
+                    <Trash2 size={14} />
+                    Clean up
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddAlertModal(true)}
+                    className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+                  >
+                    <Plus size={14} />
+                    Add Alert
+                  </button>
+                </>
               )}
               <input
               type="text"
@@ -1442,7 +1579,7 @@ export default function StratCommandCenter() {
             </div>
           </div>
           <div className="mb-4 flex flex-wrap gap-2">
-            {['all', 'triggered', 'pending', 'watching'].map((s) => (
+            {['all', 'triggered', 'pending', 'watching', 'invalidated', 'expired'].map((s) => (
               <button
                 key={s}
                 type="button"
@@ -1491,6 +1628,7 @@ export default function StratCommandCenter() {
                   onCreatePlan={setCreateFromAlert}
                   onAlertMe={() => {}}
                   onChart={() => {}}
+                  onDelete={isDemoMode ? undefined : handleDeleteAlert}
                   alertContext={expandedId === alert.id ? alertContext : null}
                 />
               ))

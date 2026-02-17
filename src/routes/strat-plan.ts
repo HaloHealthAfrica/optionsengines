@@ -135,6 +135,73 @@ const createPlanSchema = z.object({
   fromAlert: z.boolean().optional(),
 });
 
+/** POST /strat-plan/plans/batch - Create plans for all pending alerts (auto-on-trigger) */
+router.post(
+  '/plans/batch',
+  requireAuth,
+  requireStratPlanEnabled,
+  async (_req: Request, res: Response) => {
+    try {
+      const alertsResult = await db.query(
+        `SELECT a.alert_id, a.symbol, a.direction, a.timeframe, a.entry, a.target, a.stop,
+                a.reversal_level, a.setup
+         FROM strat_alerts a
+         WHERE a.status IN ('pending', 'watching')
+           AND NOT EXISTS (
+             SELECT 1 FROM strat_plans p
+             WHERE p.source_alert_id = a.alert_id
+               AND p.plan_status IN ('draft', 'armed', 'triggered', 'executing')
+           )
+         ORDER BY a.created_at DESC
+         LIMIT 20`
+      );
+      const alerts = alertsResult.rows;
+      const created = [];
+      const failed = [];
+      for (const row of alerts) {
+        const result = await stratPlanLifecycleService.createPlan({
+          symbol: row.symbol,
+          direction: row.direction,
+          timeframe: row.timeframe === 'D' ? '1d' : row.timeframe === 'W' ? '1w' : row.timeframe === 'M' ? '1month' : '4h',
+          source: 'manual',
+          entry: Number(row.entry),
+          target: Number(row.target),
+          stop: Number(row.stop),
+          reversalLevel: row.reversal_level != null ? Number(row.reversal_level) : undefined,
+          setup: row.setup,
+          sourceAlertId: row.alert_id,
+          executionMode: 'auto_on_trigger',
+          triggerCondition:
+            row.direction === 'long'
+              ? `price >= ${Number(row.reversal_level ?? row.entry)}`
+              : `price <= ${Number(row.reversal_level ?? row.entry)}`,
+          fromAlert: true,
+          rawPayload: {
+            entry: Number(row.entry),
+            target: Number(row.target),
+            stop: Number(row.stop),
+          },
+        });
+        if (result.ok && result.plan) {
+          created.push({ alertId: row.alert_id, symbol: row.symbol, planId: result.plan.plan_id });
+        } else {
+          failed.push({ alertId: row.alert_id, symbol: row.symbol, reason: result.reason });
+        }
+      }
+      return res.json({
+        ok: true,
+        created: created.length,
+        failed: failed.length,
+        plans: created,
+        errors: failed,
+      });
+    } catch (err) {
+      logger.error('Batch create plans failed', { error: err });
+      return res.status(500).json({ error: 'Batch create failed' });
+    }
+  }
+);
+
 /** POST /strat-plan/plans - Create plan manually or from alert */
 router.post(
   '/plans',
