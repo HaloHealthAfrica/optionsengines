@@ -112,6 +112,7 @@ export async function backendGetDashboard(token) {
     headers: {
       Authorization: `Bearer ${token}`,
     },
+    timeoutMs: 60000, // 60s - Fly.io cold start + DB can be slow
   });
   
   if (!response.ok) {
