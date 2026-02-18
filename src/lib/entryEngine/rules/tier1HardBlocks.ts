@@ -59,22 +59,40 @@ function volatilityMismatchRule(input: EntryDecisionInput): RuleResult | null {
 }
 
 function portfolioGuardrailsRule(input: EntryDecisionInput): RuleResult | null {
-  if (input.riskContext.openTradesCount >= PORTFOLIO_GUARDRAILS.maxOpenTrades) {
+  const maxOpenTrades =
+    input.riskContext.maxOpenPositions ?? PORTFOLIO_GUARDRAILS.maxOpenTrades;
+  if (input.riskContext.openTradesCount >= maxOpenTrades) {
     return {
       tier: 1,
       rule: 'PORTFOLIO_MAX_TRADES',
       triggered: true,
-      message: `Open trades ${input.riskContext.openTradesCount} exceeds max ${PORTFOLIO_GUARDRAILS.maxOpenTrades}`,
+      message: `Open trades ${input.riskContext.openTradesCount} exceeds max ${maxOpenTrades}`,
       severity: 'HIGH',
     };
   }
 
-  if (input.riskContext.dailyPnL <= PORTFOLIO_GUARDRAILS.maxDailyLoss) {
+  const maxDailyLoss =
+    input.riskContext.maxDailyLoss != null
+      ? -input.riskContext.maxDailyLoss
+      : PORTFOLIO_GUARDRAILS.maxDailyLoss;
+  if (input.riskContext.dailyPnL <= maxDailyLoss) {
     return {
       tier: 1,
       rule: 'DAILY_LOSS_LIMIT',
       triggered: true,
-      message: `Daily PnL ${input.riskContext.dailyPnL} below limit ${PORTFOLIO_GUARDRAILS.maxDailyLoss}`,
+      message: `Daily PnL ${input.riskContext.dailyPnL} below limit ${maxDailyLoss}`,
+      severity: 'HIGH',
+    };
+  }
+
+  const maxPerSymbol = input.riskContext.maxPositionsPerSymbol;
+  const openPerSymbol = input.riskContext.openSymbolPositions ?? 0;
+  if (maxPerSymbol != null && maxPerSymbol > 0 && openPerSymbol >= maxPerSymbol) {
+    return {
+      tier: 1,
+      rule: 'MAX_POSITIONS_PER_SYMBOL',
+      triggered: true,
+      message: `Open positions ${openPerSymbol} exceeds max per symbol ${maxPerSymbol}`,
       severity: 'HIGH',
     };
   }

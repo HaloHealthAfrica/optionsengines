@@ -227,7 +227,12 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     riskResult.dailyPnL = dailyPnL;
     riskResult.maxDailyLoss = config.maxDailyLoss;
 
-    if (!rejectionReason && !testBypass && dailyPnL <= -config.maxDailyLoss) {
+    if (
+      !rejectionReason &&
+      !testBypass &&
+      !config.entryEngineManagesRiskGating &&
+      dailyPnL <= -config.maxDailyLoss
+    ) {
       rejectionReason = 'daily_loss_cap_exceeded';
       logger.warn('Daily loss cap exceeded — rejecting signal', {
         signal_id: signal.signal_id,
@@ -333,7 +338,12 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
   };
   riskResult.effectiveOpenPositions = effectiveOpenPositions;
 
-  if (!rejectionReason && !testBypass && effectiveOpenPositions >= config.maxOpenPositions) {
+  if (
+    !rejectionReason &&
+    !testBypass &&
+    !config.entryEngineManagesRiskGating &&
+    effectiveOpenPositions >= config.maxOpenPositions
+  ) {
     rejectionReason = 'max_open_positions_exceeded';
   } else if (testBypass && effectiveOpenPositions >= config.maxOpenPositions) {
     logger.info('Test signal bypassing max_open_positions check', {
@@ -347,6 +357,7 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
   if (
     !rejectionReason &&
     !testBypass &&
+    !config.entryEngineManagesRiskGating &&
     riskLimit.max_positions_per_symbol &&
     openSymbolPositions >= riskLimit.max_positions_per_symbol
   ) {

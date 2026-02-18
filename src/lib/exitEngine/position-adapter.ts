@@ -4,7 +4,9 @@
  */
 
 import type { ExitDecisionInput } from './types.js';
-import type { Greeks } from '../shared/types.js';
+import type { Greeks, RegimeType, SetupType } from '../shared/types.js';
+import { deriveSetupTypeFromDte } from '../shared/setup-type.js';
+import { EXIT_POLICIES } from './constants.js';
 
 const ZERO_GREEKS: Greeks = { delta: 0, gamma: 0, theta: 0, vega: 0 };
 
@@ -35,15 +37,31 @@ export interface MarketSnapshot {
   optionAsk?: number;
 }
 
+export interface OptionSnapshot {
+  bid: number;
+  ask: number;
+  mid: number;
+  greeks: Greeks;
+  iv: number;
+}
+
+export interface ExitAdapterContext {
+  optionSnapshot?: OptionSnapshot | null;
+  regime?: RegimeType;
+  setupType?: SetupType;
+}
+
 /**
  * Build ExitDecisionInput from position, exit_rules, and market snapshot.
- * Uses stub values for Greeks, regime, GEX when unavailable.
+ * Uses EXIT_POLICIES for setup-specific guardrails when DB rules don't override.
+ * Wires real Greeks, regime, and spread when context provides them.
  */
 export function buildExitDecisionInput(
   position: PositionRow,
   rule: ExitRuleRow,
   market: MarketSnapshot,
-  now: Date
+  now: Date,
+  context?: ExitAdapterContext
 ): ExitDecisionInput {
   const entryTs = new Date(position.entry_timestamp);
   const expiryDate = new Date(position.expiration);
@@ -56,16 +74,37 @@ export function buildExitDecisionInput(
     (expiryDate.getTime() - now.getTime()) / 86400000
   );
 
+  const setupType = context?.setupType ?? deriveSetupTypeFromDte(dteAtEntry);
+  const policy = EXIT_POLICIES[setupType];
+
   const stopLossPercent = rule.stop_loss_percent ?? 50;
   const profitTargetPercent = rule.profit_target_percent ?? 50;
-  const maxHoldHours = rule.max_hold_time_hours ?? 120;
+  const maxHoldHours = rule.max_hold_time_hours ?? policy.maxHoldMinutes / 60;
+
+  const progressChecks = policy.progressChecks.map((p) => ({
+    atMinute: p.atMinute,
+    minProfitPercent: p.minProfitPercent,
+  }));
+  const timeStopsMinutes = policy.timeStops.map((t) => t.atDay * 24 * 60);
+  timeStopsMinutes.push(maxHoldHours * 60);
+
+  const partialTargets = policy.profitPartials.map((p) => p.atPercent);
+
+  const snapshot = context?.optionSnapshot;
+  const currentGreeks = snapshot?.greeks ?? ZERO_GREEKS;
+  const currentIV = snapshot?.iv ?? 0;
+  const bid = snapshot?.bid ?? market.optionBid ?? market.optionMid * 0.99;
+  const ask = snapshot?.ask ?? market.optionAsk ?? market.optionMid * 1.01;
+  const spreadPercent =
+    bid > 0 && ask > 0 ? ((ask - bid) / ((bid + ask) / 2)) * 100 : 0;
+  const regime = context?.regime ?? 'NEUTRAL';
 
   return {
     tradePosition: {
       id: position.position_id,
       symbol: position.symbol,
       direction: position.type === 'call' ? 'CALL' : 'PUT',
-      setupType: 'SWING',
+      setupType,
     },
     entryData: {
       timestamp: entryTs.getTime(),
@@ -78,37 +117,35 @@ export function buildExitDecisionInput(
       dteAtEntry: Math.round(dteAtEntry * 10) / 10,
       strike: position.strike,
       greeksAtEntry: ZERO_GREEKS,
-      ivAtEntry: undefined,
+      ivAtEntry: snapshot?.iv,
     },
     guardrails: {
       maxHoldTime: maxHoldHours * 60,
-      timeStops: [],
-      progressChecks: [
-        { atMinute: 60, minProfitPercent: 0 },
-        { atMinute: maxHoldHours * 30, minProfitPercent: 5 },
-      ],
-      thetaBurnLimit: 30,
+      timeStops: timeStopsMinutes,
+      progressChecks,
+      thetaBurnLimit: policy.thetaBurnLimit,
       invalidationLevels: {
         stopLoss: -stopLossPercent,
         thesisInvalidation: -30,
       },
+      minDteExit: rule.min_dte_exit,
     },
     targets: {
-      partialTakeProfitPercent: [25, 50, 80],
+      partialTakeProfitPercent: partialTargets,
       fullTakeProfitPercent: profitTargetPercent,
       stopLossPercent,
     },
     liveMarket: {
       timestamp: now.getTime(),
       underlyingPrice: market.underlyingPrice,
-      optionBid: market.optionBid ?? market.optionMid * 0.99,
-      optionAsk: market.optionAsk ?? market.optionMid * 1.01,
+      optionBid: bid,
+      optionAsk: ask,
       optionMid: market.optionMid,
-      currentGreeks: ZERO_GREEKS,
-      currentIV: 0,
+      currentGreeks,
+      currentIV,
       currentDTE: Math.round(dteNow * 10) / 10,
-      spreadPercent: 0,
-      regime: 'NEUTRAL',
+      spreadPercent,
+      regime,
       gexState: 'NEUTRAL',
     },
   };

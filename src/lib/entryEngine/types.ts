@@ -29,6 +29,13 @@ export interface EntryDecisionInput {
     openTradesCount: number;
     portfolioDelta: number;
     portfolioTheta: number;
+    /** From config; used when ENTRY_ENGINE_MANAGES_RISK_GATING. Block when dailyPnL <= -maxDailyLoss */
+    maxDailyLoss?: number;
+    /** From config; used when ENTRY_ENGINE_MANAGES_RISK_GATING */
+    maxOpenPositions?: number;
+    /** From risk_limits; used when ENTRY_ENGINE_MANAGES_RISK_GATING */
+    maxPositionsPerSymbol?: number;
+    openSymbolPositions?: number;
   };
   /** V3: Unified bias state for tier rules (intent, space, liquidity, trigger) */
   marketState?: UnifiedBiasState;

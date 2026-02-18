@@ -18,6 +18,7 @@
 import { selectStrike as advancedSelectStrike } from '../lib/strikeSelection/index.js';
 import type { StrikeSelectionInput, StrikeSelectionOutput, OptionContract } from '../lib/strikeSelection/types.js';
 import type { SetupType, RegimeType, GEXState } from '../lib/shared/types.js';
+import { deriveSetupType } from '../lib/shared/setup-type.js';
 import { adaptOptionChain } from './option-chain-adapter.service.js';
 import { marketData } from './market-data.js';
 import { getStrikeSelectionHint, type StrikeSelectionHint } from './mtf-bias/strike-selection-adapter.service.js';
@@ -34,27 +35,6 @@ export interface AdvancedStrikeResult {
   scores?: StrikeSelectionOutput['scores'];
   guardrails?: StrikeSelectionOutput['guardrails'];
   rationale?: string[];
-}
-
-/**
- * Derive SetupType from signal timeframe.
- * Intraday (<=15m) → SCALP_GUARDED, daily/4h → SWING, weekly → POSITION, monthly → LEAPS
- */
-function deriveSetupType(timeframe: string): SetupType {
-  const tf = timeframe.toLowerCase();
-  if (tf.includes('1m') || tf.includes('3m') || tf.includes('5m') || tf.includes('15m') || tf === 'scalp') {
-    return 'SCALP_GUARDED';
-  }
-  if (tf.includes('30m') || tf.includes('1h') || tf.includes('4h') || tf.includes('d') || tf === 'swing') {
-    return 'SWING';
-  }
-  if (tf.includes('w') || tf === 'position') {
-    return 'POSITION';
-  }
-  if (tf.includes('m') && (tf.includes('month') || parseInt(tf) > 30)) {
-    return 'LEAPS';
-  }
-  return 'SWING'; // safe default
 }
 
 /**

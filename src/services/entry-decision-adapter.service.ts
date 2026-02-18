@@ -7,6 +7,7 @@ import type { EntryDecisionInput } from '../lib/entryEngine/types.js';
 import type { Signal } from '../orchestrator/types.js';
 import type { MarketContext } from '../orchestrator/types.js';
 import type { GEXState, RegimeType, SessionType } from '../lib/shared/types.js';
+import { deriveSetupType } from '../lib/shared/setup-type.js';
 import { evaluateMarketSession } from '../utils/market-session.js';
 import { config } from '../config/index.js';
 
@@ -36,6 +37,20 @@ function dealerPositionToRegime(dealerPosition: string | undefined): RegimeType 
   if (pos === 'long_gamma') return 'BULL';
   if (pos === 'short_gamma') return 'BEAR';
   return 'NEUTRAL';
+}
+
+/**
+ * Derive IV percentile for entry engine volatility band check.
+ * Uses enrichment.ivPercentile when available; otherwise ATR-derived volatility proxy.
+ * Volatility (ATR/price*100) typically 5-25% maps to percentile 0-100.
+ */
+function deriveIvPercentile(enriched: Record<string, unknown> | undefined, volatility: number): number {
+  const fromEnrichment = Number(enriched?.ivPercentile ?? enriched?.iv_percentile);
+  if (Number.isFinite(fromEnrichment) && fromEnrichment >= 0 && fromEnrichment <= 100) {
+    return Math.round(fromEnrichment);
+  }
+  const proxy = Math.min(100, Math.max(0, (volatility - 5) * 5));
+  return Math.round(proxy);
 }
 
 /**
@@ -72,11 +87,27 @@ export function buildEntryDecisionInput(
 
   const openTrades = Number(risk?.openPositions ?? risk?.effectiveOpenPositions ?? 0);
 
+  const riskContext: EntryDecisionInput['riskContext'] = {
+    dailyPnL: Number(risk?.dailyPnL ?? 0),
+    openTradesCount: openTrades,
+    portfolioDelta: 0,
+    portfolioTheta: 0,
+  };
+  if (config.entryEngineManagesRiskGating) {
+    riskContext.maxDailyLoss = config.maxDailyLoss;
+    riskContext.maxOpenPositions = config.maxOpenPositions;
+    riskContext.maxPositionsPerSymbol = Number(risk?.maxPositionsPerSymbol ?? 0) || undefined;
+    riskContext.openSymbolPositions = Number(risk?.openSymbolPositions ?? 0) || undefined;
+  }
+
+  const setupType = deriveSetupType(signal.timeframe || '5m');
+  const ivPercentile = deriveIvPercentile(enriched, volatility);
+
   return {
     symbol: signal.symbol,
     timestamp: ts.getTime(),
     direction: signal.direction === 'long' ? 'CALL' : 'PUT',
-    setupType: 'SWING',
+    setupType,
     signal: {
       confidence: Math.max(0, Math.min(100, confidence)),
       pattern: typeof payload?.pattern === 'string' ? (payload.pattern as string) : 'signal',
@@ -87,19 +118,14 @@ export function buildEntryDecisionInput(
       regime: dealerPositionToRegime(gex?.dealerPosition),
       gexState: netGexToGexState(gex?.netGex),
       volatility,
-      ivPercentile: 50,
+      ivPercentile,
     },
     timingContext: {
       session: mapSessionToTiming(sessionEval.sessionLabel),
       minutesFromOpen: Math.max(0, sessionEval.minuteOfDay - (9 * 60 + 30)),
       liquidityState: 'NORMAL',
     },
-    riskContext: {
-      dailyPnL: Number(risk?.dailyPnL ?? 0),
-      openTradesCount: openTrades,
-      portfolioDelta: 0,
-      portfolioTheta: 0,
-    },
+    riskContext,
     ...(marketState && { marketState }),
   };
 }

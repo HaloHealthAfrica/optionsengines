@@ -63,6 +63,8 @@ export interface Guardrails {
     stopLoss: number;
     thesisInvalidation: number;
   };
+  /** Min DTE before exit; when currentDTE <= this, exit (from exit_rules.min_dte_exit) */
+  minDteExit?: number;
 }
 
 export interface ValidationError {

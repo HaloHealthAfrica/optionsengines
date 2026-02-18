@@ -21,6 +21,7 @@ const GuardrailsSchema = z.object({
     stopLoss: z.number(),
     thesisInvalidation: z.number(),
   }),
+  minDteExit: z.number().positive().optional(),
 });
 
 export const ExitDecisionInputSchema = z.object({

@@ -143,8 +143,11 @@ export class PositioningService {
     let gex: GexData;
     let source: 'marketdata' | 'unusualwhales' = 'marketdata';
 
-    // When ENABLE_DEALER_UW_GAMMA=true, prefer Unusual Whales gamma API
-    if (config.enableDealerUwGamma && config.unusualWhalesApiKey) {
+    // Unusual Whales primary when enabled and API key configured (gamma URL optional; provider uses default)
+    const uwConfigured = Boolean(config.unusualWhalesApiKey);
+    const useUwPrimary = config.enableDealerUwGamma && uwConfigured;
+
+    if (useUwPrimary) {
       const uwGex = await this.tryUnusualWhalesGex(symbol);
       if (uwGex) {
         gex = uwGex;
@@ -152,11 +155,12 @@ export class PositioningService {
         logger.debug('GEX from Unusual Whales (primary)', { symbol });
       } else {
         gex = await this.fetchMarketDataGex(symbol);
+        logger.debug('GEX fallback to MarketData.app (UW unavailable)', { symbol });
       }
     } else {
-      // Default: MarketData first, fallback to UW when MarketData returns all zeros
+      // MarketData first when UW not primary; fallback to UW when MarketData returns all zeros
       gex = await this.fetchMarketDataGex(symbol);
-      if (isGexAllZeros(gex) && config.unusualWhalesApiKey) {
+      if (isGexAllZeros(gex) && uwConfigured) {
         const uwGex = await this.tryUnusualWhalesGex(symbol);
         if (uwGex) {
           gex = uwGex;

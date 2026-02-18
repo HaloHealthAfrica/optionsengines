@@ -12,6 +12,8 @@ import { config } from '../config/index.js';
 import { retry } from '../utils/retry.js';
 import { CircuitBreaker } from './circuit-breaker.service.js';
 import { Candle, GexData, GexStrikeLevel, Indicators, OptionsFlowEntry, OptionsFlowSummary } from '../types/index.js';
+import type { Greeks } from '../lib/shared/types.js';
+import { adaptOptionChain, approximateGreeks, estimateIV } from './option-chain-adapter.service.js';
 import { marketDataStream } from './market-data-stream.service.js';
 import { unusualWhalesOptionsService } from './unusual-whales-options.service.js';
 import * as Sentry from '@sentry/node';
@@ -406,6 +408,75 @@ export class MarketDataService {
     }
 
     logger.warn('All option data providers failed or returned no price', { symbol, strike, optionType });
+    return null;
+  }
+
+  /**
+   * Get option snapshot (bid, ask, mid, greeks, iv) for exit engine.
+   * Fetches options chain, finds matching contract, returns Greeks and spread.
+   * Falls back to getOptionPrice + BS approximation when chain unavailable.
+   */
+  async getOptionSnapshot(
+    symbol: string,
+    strike: number,
+    expiration: Date,
+    optionType: 'call' | 'put'
+  ): Promise<{
+    bid: number;
+    ask: number;
+    mid: number;
+    greeks: Greeks;
+    iv: number;
+  } | null> {
+    const cacheKey = `option-snapshot:${symbol}:${strike}:${expiration.toISOString().slice(0, 10)}:${optionType}`;
+    const cached = cache.get<{ bid: number; ask: number; mid: number; greeks: Greeks; iv: number }>(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const [chain, spotPrice, fallbackMid] = await Promise.all([
+        this.getOptionsChain(symbol).catch(() => [] as MarketDataOptionRow[]),
+        this.getStockPrice(symbol),
+        this.getOptionPrice(symbol, strike, expiration, optionType),
+      ]);
+
+      const expiryStr = expiration.toISOString().slice(0, 10);
+      const contracts = adaptOptionChain(chain, spotPrice, optionType);
+      const match = contracts.find(
+        (c) => c.strike === strike && (c.expiry === expiryStr || c.expiry?.startsWith?.(expiryStr))
+      );
+
+      if (match) {
+        const result = {
+          bid: match.bid,
+          ask: match.ask,
+          mid: match.mid,
+          greeks: match.greeks,
+          iv: match.iv ?? 0.3,
+        };
+        cache.set(cacheKey, result, 30);
+        return result;
+      }
+
+      if (fallbackMid != null && Number.isFinite(fallbackMid) && spotPrice > 0 && strike > 0) {
+        const dte = Math.max(0, (expiration.getTime() - Date.now()) / 86400000);
+        const dteYears = dte / 365;
+        const iv = estimateIV(spotPrice, strike, dteYears, fallbackMid, optionType);
+        const greeks = approximateGreeks(spotPrice, strike, dteYears, iv, optionType);
+        const spreadFraction = fallbackMid > 1 ? 0.02 : 0.05;
+        const halfSpread = fallbackMid * spreadFraction;
+        const result = {
+          bid: Math.max(0.01, fallbackMid - halfSpread),
+          ask: fallbackMid + halfSpread,
+          mid: fallbackMid,
+          greeks,
+          iv,
+        };
+        cache.set(cacheKey, result, 30);
+        return result;
+      }
+    } catch (error) {
+      logger.warn('getOptionSnapshot failed', { symbol, strike, optionType, error });
+    }
     return null;
   }
 

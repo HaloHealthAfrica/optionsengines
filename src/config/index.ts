@@ -66,6 +66,7 @@ interface Config {
   // Risk Management
   maxPositionSize: number;
   maxDailyLoss: number;
+  entryEngineManagesRiskGating: boolean;
   maxOpenPositions: number;
   maxExposurePercent: number;
   allowPremarket: boolean;
@@ -89,6 +90,7 @@ interface Config {
   timeStopDte: number;
   maxHoldDays: number;
   enableExitDecisionEngine: boolean;
+  exitEngineSoleAuthority: boolean;
   enableExitIntelligence: boolean;
   trailingStopPercent: number;
   trailingStopActivationPercent: number;
@@ -283,6 +285,8 @@ export const config: Config = {
   // Risk Management
   maxPositionSize: getEnvVarNumber('MAX_POSITION_SIZE', 10),
   maxDailyLoss: getEnvVarNumber('MAX_DAILY_LOSS', 1000),
+  /** When true, risk gating (daily loss cap, position limits) is done by entry engine, not enrichment */
+  entryEngineManagesRiskGating: getEnvVarBoolean('ENTRY_ENGINE_MANAGES_RISK_GATING', true),
   maxOpenPositions: getEnvVarNumber('MAX_OPEN_POSITIONS', 5),
   maxExposurePercent: getEnvVarNumber('MAX_EXPOSURE_PERCENT', 20),
   allowPremarket: getEnvVarBoolean('ALLOW_PREMARKET', nodeEnv === 'test'),
@@ -312,6 +316,8 @@ export const config: Config = {
   timeStopDte: getEnvVarNumber('TIME_STOP_DTE', 1),
   maxHoldDays: getEnvVarNumber('MAX_HOLD_DAYS', 5),
   enableExitDecisionEngine: getEnvVarBoolean('ENABLE_EXIT_DECISION_ENGINE', true),
+  /** When true, exit engine is sole authority; DB exit_rules fallback is skipped */
+  exitEngineSoleAuthority: getEnvVarBoolean('EXIT_ENGINE_SOLE_AUTHORITY', true),
   enableExitIntelligence: getEnvVarBoolean('ENABLE_EXIT_INTELLIGENCE', true),
   trailingStopPercent: getEnvVarNumber('TRAILING_STOP_PERCENT', 15),
   trailingStopActivationPercent: getEnvVarNumber('TRAILING_STOP_ACTIVATION_PERCENT', 20),
@@ -368,10 +374,11 @@ export const config: Config = {
   uwFlowPollerIntervalMs: getEnvVarNumber('UW_FLOW_POLLER_INTERVAL_MS', 120000),
 
   // Dealer strategy: UW gamma API (GammaDealerStrategy) | GEX/flow (DealerPositioningStrategy)
+  // When true (default): Unusual Whales is primary for GEX/gamma; MarketData.app fallback when UW unavailable
   enableDealerUwGamma: getEnvVarBooleanWithFallback(
     'ENABLE_DEALER_UW_GAMMA',
     'ENABLE_GAMMA_STRATEGY',
-    false
+    true
   ),
   enableDealerGex: getEnvVarBooleanWithFallback(
     'ENABLE_DEALER_GEX',

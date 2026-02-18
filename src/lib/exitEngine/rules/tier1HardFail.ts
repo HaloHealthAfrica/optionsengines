@@ -40,6 +40,21 @@ export function evaluateTier1Rules(input: ExitDecisionInput, metrics: ExitMetric
     });
   }
 
+  const minDte = input.guardrails.minDteExit;
+  if (
+    minDte != null &&
+    minDte > 0 &&
+    input.liveMarket.currentDTE <= minDte
+  ) {
+    rules.push({
+      tier: 1,
+      rule: 'MIN_DTE_EXIT',
+      triggered: true,
+      message: `DTE ${input.liveMarket.currentDTE.toFixed(1)} at or below min ${minDte}`,
+      severity: 'HIGH',
+    });
+  }
+
   const stopLossThreshold = -Math.abs(input.targets.stopLossPercent);
   if (metrics.optionPnLPercent <= stopLossThreshold) {
     rules.push({

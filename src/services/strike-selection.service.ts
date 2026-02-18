@@ -1,5 +1,6 @@
 import { marketData } from './market-data.js';
 import { config } from '../config/index.js';
+import { DTE_POLICY } from '../lib/shared/constants.js';
 import * as Sentry from '@sentry/node';
 
 export type StrikeSelection = {
@@ -8,14 +9,30 @@ export type StrikeSelection = {
   optionType: 'call' | 'put';
 };
 
-function calculateExpiration(dteDays: number): Date {
-  const base = new Date();
-  base.setUTCDate(base.getUTCDate() + dteDays);
-  const day = base.getUTCDay();
+/** Align date to next Friday (weekly options expiry) */
+function nextFriday(from: Date): Date {
+  const d = new Date(from);
+  const day = d.getUTCDay();
   const daysUntilFriday = (5 - day + 7) % 7;
-  base.setUTCDate(base.getUTCDate() + daysUntilFriday);
-  base.setUTCHours(0, 0, 0, 0);
-  return base;
+  const addDays = daysUntilFriday === 0 ? 7 : daysUntilFriday;
+  d.setUTCDate(d.getUTCDate() + addDays);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Calculate expiration using DTE policy (SWING default).
+ * Uses DTE_POLICY.SWING preferred [30, 60]; falls back to config.maxHoldDays when set.
+ */
+function calculateExpiration(): Date {
+  const policy = DTE_POLICY.SWING;
+  const preferred = policy.preferred ?? [Math.floor((policy.min + policy.max) / 2)];
+  const targetDte = config.maxHoldDays > 0
+    ? Math.min(policy.max, Math.max(policy.min, config.maxHoldDays))
+    : Math.min(policy.max, Math.max(policy.min, preferred[0]));
+  const base = new Date();
+  base.setUTCDate(base.getUTCDate() + targetDte);
+  return nextFriday(base);
 }
 
 function calculateStrike(price: number, direction: 'long' | 'short'): number {
@@ -32,7 +49,7 @@ export async function selectStrike(symbol: string, direction: 'long' | 'short'):
     });
     const price = await marketData.getStockPrice(symbol);
     const strike = calculateStrike(price, direction);
-    const expiration = calculateExpiration(config.maxHoldDays);
+    const expiration = calculateExpiration();
     const optionType = direction === 'long' ? 'call' : 'put';
     Sentry.addBreadcrumb({
       category: 'strike-selection',

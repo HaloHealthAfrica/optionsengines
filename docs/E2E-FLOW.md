@@ -6,6 +6,10 @@
 **Last Updated**: 2026-02-15
 **Classification**: Internal Technical Reference
 
+**Related docs**:
+- [E2E-AUDIT-PROMPT.md](./E2E-AUDIT-PROMPT.md) — End-of-day trading + platform audit prompt
+- [E2E-AUDIT-SQL.md](./E2E-AUDIT-SQL.md) — SQL queries for audit evidence gathering
+
 ---
 
 # 1. SYSTEM OVERVIEW

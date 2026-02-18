@@ -207,14 +207,27 @@ export class ExitMonitorWorker {
 
           if (!exitReason && config.enableExitDecisionEngine) {
             const underlying = Number.isFinite(underlyingPrice) ? underlyingPrice : position.entry_price * 100;
+            const [optionSnapshot, marketState] = await Promise.all([
+              marketData.getOptionSnapshot(
+                position.symbol,
+                position.strike,
+                new Date(position.expiration),
+                position.type
+              ),
+              getCurrentState(position.symbol),
+            ]);
+            const regime = marketState?.bias === 'BULLISH' ? 'BULL' : marketState?.bias === 'BEARISH' ? 'BEAR' : 'NEUTRAL';
             const input = buildExitDecisionInput(
               position,
               rule,
               {
                 underlyingPrice: underlying,
                 optionMid: currentPrice,
+                optionBid: optionSnapshot?.bid,
+                optionAsk: optionSnapshot?.ask,
               },
-              now
+              now,
+              { optionSnapshot: optionSnapshot ?? undefined, regime }
             );
             const result = evaluateExitDecision(input);
             if (result.action === 'FULL_EXIT' || result.action === 'PARTIAL_EXIT') {
@@ -249,7 +262,7 @@ export class ExitMonitorWorker {
             }
           }
 
-          if (!exitReason) {
+          if (!exitReason && !config.exitEngineSoleAuthority) {
             if (
               rule.profit_target_percent !== undefined &&
               pnlPercent >= rule.profit_target_percent

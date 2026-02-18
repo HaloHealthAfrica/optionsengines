@@ -182,7 +182,7 @@ export async function runTradeAudit(dateFilter: string = 'CURRENT_DATE'): Promis
        ) p ON true
        WHERE we.created_at >= ${useCurrentDate ? 'CURRENT_DATE' : '$1::date'}
          AND COALESCE(we.is_test, false) = false
-         AND we.status = 'processed'
+         AND we.status = 'accepted'
        ORDER BY we.created_at`,
       dateParam ? [dateParam] : []
     );

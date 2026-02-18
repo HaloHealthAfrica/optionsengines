@@ -27,8 +27,8 @@ function pdf(x: number): number {
   return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
 }
 
-/** Black-Scholes Greeks approximation */
-function approximateGreeks(
+/** Black-Scholes Greeks approximation (exported for exit engine snapshot fallback) */
+export function approximateGreeks(
   spotPrice: number,
   strike: number,
   dteYears: number,
@@ -56,7 +56,7 @@ function approximateGreeks(
 }
 
 /** Estimate IV from option mid price using bisection (rough approximation) */
-function estimateIV(
+export function estimateIV(
   spotPrice: number,
   strike: number,
   dteYears: number,
