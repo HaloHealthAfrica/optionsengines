@@ -98,6 +98,10 @@ interface Config {
   // Capacity Management
   minHoldMinutesForCapacityClose: number;
 
+  // Same-Strike Cooldown (blocks duplicate orders unless different engine or source)
+  enableSameStrikeCooldown: boolean;
+  cooldownMinutesSameStrike: number;
+
   // A/B Testing
   abSplitPercentage: number;
   enableVariantB: boolean;
@@ -324,6 +328,10 @@ export const config: Config = {
 
   // Capacity Management
   minHoldMinutesForCapacityClose: getEnvVarNumber('MIN_HOLD_MINUTES_FOR_CAPACITY_CLOSE', 15),
+
+  // Same-Strike Cooldown (blocks duplicate orders unless different engine or source)
+  enableSameStrikeCooldown: getEnvVarBoolean('ENABLE_SAME_STRIKE_COOLDOWN', true),
+  cooldownMinutesSameStrike: getEnvVarNumber('COOLDOWN_MINUTES_SAME_STRIKE', 15),
 
   // A/B Testing
   abSplitPercentage: getEnvVarNumber('AB_SPLIT_PERCENTAGE', 0),

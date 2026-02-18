@@ -101,7 +101,7 @@ export default function Orders() {
 
   const columns =
     activeTab === 'closed'
-      ? ['Symbol', 'Type', 'Strike', 'Expiry', 'Qty', 'Entry', 'Realized P&L', 'Engine', 'Time']
+      ? ['Symbol', 'Type', 'Strike', 'Expiry', 'Qty', 'Entry', 'Exit', 'Realized P&L', 'Engine', 'Time']
       : ['Symbol', 'Type', 'Strike', 'Expiry', 'Qty', 'Price', 'Status', 'Engine', 'Time'];
 
   return (
@@ -236,6 +236,11 @@ export default function Orders() {
                           : '--'}
                       </td>
                       <td className="px-4 py-4">
+                        {item.exit_price !== null && item.exit_price !== undefined
+                          ? `$${Number(item.exit_price).toFixed(2)}`
+                          : '--'}
+                      </td>
+                      <td className="px-4 py-4">
                         {item.realized_pnl !== null && item.realized_pnl !== undefined
                           ? `$${Number(item.realized_pnl).toFixed(2)}`
                           : '--'}
@@ -330,6 +335,14 @@ export default function Orders() {
                     <span>
                       {selectedItem.item.entry_price !== null && selectedItem.item.entry_price !== undefined
                         ? `$${Number(selectedItem.item.entry_price).toFixed(2)}`
+                        : '--'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="muted">Exit</span>
+                    <span>
+                      {selectedItem.item.exit_price !== null && selectedItem.item.exit_price !== undefined
+                        ? `$${Number(selectedItem.item.exit_price).toFixed(2)}`
                         : '--'}
                     </span>
                   </div>

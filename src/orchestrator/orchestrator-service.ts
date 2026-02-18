@@ -27,6 +27,10 @@ import {
 } from '../strategies/DealerPositioningStrategy.js';
 import type { GammaStrategyDecision, MarketDataLike } from '../strategies/types.js';
 import { alertService } from '../services/alert.service.js';
+import {
+  shouldBlockSameStrike,
+  extractWebhookSource,
+} from '../services/same-strike-cooldown.service.js';
 import * as Sentry from '@sentry/node';
 
 export class OrchestratorService {
@@ -757,6 +761,9 @@ export class OrchestratorService {
       engineB ? { engine: 'B' as const, rec: engineB } : null,
     ].filter(Boolean) as Array<{ engine: 'A' | 'B'; rec: TradeRecommendation }>;
 
+    const webhookSource = extractWebhookSource(signal.raw_payload as Record<string, unknown>);
+    const isTest = !!(signal.raw_payload as Record<string, unknown>)?.is_test;
+
     for (const { engine, rec } of recommendations) {
       if (rec.is_shadow) {
         continue;
@@ -769,6 +776,22 @@ export class OrchestratorService {
         optionType,
         rec.strike
       );
+
+      const block = await shouldBlockSameStrike({
+        optionSymbol,
+        engine,
+        webhookSource,
+        isTest,
+      });
+      if (block) {
+        logger.info('Same-strike cooldown: skipping order', {
+          signal_id: signal.signal_id,
+          optionSymbol,
+          engine,
+          webhookSource,
+        });
+        continue;
+      }
 
       const existing = await db.query(
         `SELECT order_id FROM orders WHERE signal_id = $1 AND engine = $2 AND order_type = $3 LIMIT 1`,

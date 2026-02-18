@@ -12,6 +12,7 @@ type PositionRow = {
   type: 'call' | 'put';
   quantity: number;
   entry_price: number;
+  exit_price?: number | null;
   current_price?: number | null;
   unrealized_pnl?: number | null;
   realized_pnl?: number | null;
@@ -32,6 +33,7 @@ function mapPosition(row: PositionRow) {
     expiry: row.expiration ? new Date(row.expiration).toISOString().slice(0, 10) : null,
     qty: Number(row.quantity),
     entry_price: row.entry_price !== null ? Number(row.entry_price) : null,
+    exit_price: row.exit_price !== null && row.exit_price !== undefined ? Number(row.exit_price) : null,
     current_price: row.current_price !== null && row.current_price !== undefined ? Number(row.current_price) : null,
     unrealized_pnl: row.unrealized_pnl !== null && row.unrealized_pnl !== undefined ? Number(row.unrealized_pnl) : null,
     realized_pnl: row.realized_pnl !== null && row.realized_pnl !== undefined ? Number(row.realized_pnl) : null,
@@ -56,6 +58,7 @@ export async function publishPositionUpdate(positionId: string): Promise<void> {
             type,
             quantity,
             entry_price,
+            exit_price,
             current_price,
             unrealized_pnl,
             realized_pnl,

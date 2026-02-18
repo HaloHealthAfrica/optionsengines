@@ -267,9 +267,9 @@ export class PaperExecutorWorker {
 
               await txClient.query(
                 `UPDATE refactored_positions
-                 SET status = $1, exit_timestamp = $2, realized_pnl = $3, last_updated = $2
-                 WHERE position_id = $4`,
-                ['closed', fillTimestamp, realizedPnl, existingPosition.position_id]
+                 SET status = $1, exit_timestamp = $2, realized_pnl = $3, exit_price = $4, last_updated = $2
+                 WHERE position_id = $5`,
+                ['closed', fillTimestamp, realizedPnl, price, existingPosition.position_id]
               );
 
               closedPositionId = existingPosition.position_id;

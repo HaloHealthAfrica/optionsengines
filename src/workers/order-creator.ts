@@ -9,6 +9,10 @@ import { stratPlanLifecycleService } from '../services/strat-plan/index.js';
 import * as Sentry from '@sentry/node';
 import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
 import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
+import {
+  shouldBlockSameStrike,
+  extractWebhookSource,
+} from '../services/same-strike-cooldown.service.js';
 
 interface ApprovedSignal {
   signal_id: string;
@@ -107,10 +111,12 @@ export class OrderCreatorWorker {
     updateWorkerStatus('OrderCreatorWorker', { lastRunAt: new Date() });
 
     try {
-      const signals = await db.query<ApprovedSignal & { enriched_data?: string; is_test?: boolean }>(
+      const signals = await db.query<
+        ApprovedSignal & { enriched_data?: string; is_test?: boolean; raw_payload?: Record<string, unknown> }
+      >(
         `SELECT s.signal_id, s.symbol, s.direction, s.timeframe, s.timestamp,
                 s.experiment_id, e.variant AS engine, rs.enriched_data,
-                COALESCE(s.is_test, false) AS is_test
+                COALESCE(s.is_test, false) AS is_test, s.raw_payload
          FROM signals s
          LEFT JOIN experiments e ON e.signal_id = s.signal_id
          LEFT JOIN refactored_signals rs ON rs.signal_id = s.signal_id
@@ -161,11 +167,37 @@ export class OrderCreatorWorker {
           const expiration = calculateExpiration(config.maxHoldDays);
           const optionType = signal.direction === 'long' ? 'call' : 'put';
           const optionSymbol = buildOptionSymbol(signal.symbol, expiration, optionType, strike);
+          const engine = signal.engine ?? 'A';
+
+          let rawPayload: Record<string, unknown> = {};
+          if (typeof signal.raw_payload === 'object' && signal.raw_payload != null) {
+            rawPayload = signal.raw_payload;
+          } else if (typeof signal.raw_payload === 'string') {
+            try {
+              rawPayload = JSON.parse(signal.raw_payload) as Record<string, unknown>;
+            } catch {
+              /* use {} */
+            }
+          }
+          const webhookSource = extractWebhookSource(rawPayload);
+          const block = await shouldBlockSameStrike({
+            optionSymbol,
+            engine,
+            webhookSource,
+            isTest: signal.is_test ?? false,
+          });
+          if (block) {
+            logger.info('Same-strike cooldown: skipping order', {
+              signal_id: signal.signal_id,
+              optionSymbol,
+              engine,
+              webhookSource,
+            });
+            continue;
+          }
 
           const baseQty = Math.max(1, Math.floor(maxPositionSize * capacityRatio));
           const quantity = Math.max(1, Math.floor(baseQty * confluenceMultiplier));
-
-          const engine = signal.engine ?? 'A';
           const experimentId = signal.experiment_id ?? null;
 
           await db.query(

@@ -160,6 +160,7 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
               type,
               quantity,
               entry_price,
+              exit_price,
               realized_pnl,
               position_pnl_percent,
               entry_timestamp,
@@ -240,6 +241,7 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
     expiry: row.expiration ? new Date(row.expiration).toISOString().slice(0, 10) : null,
     qty: Number(row.quantity),
     entry_price: row.entry_price !== null && row.entry_price !== undefined ? Number(row.entry_price) : null,
+    exit_price: row.exit_price !== null && row.exit_price !== undefined ? Number(row.exit_price) : null,
     realized_pnl: row.realized_pnl !== null && row.realized_pnl !== undefined ? Number(row.realized_pnl) : null,
     pnl_percent:
       row.position_pnl_percent !== null && row.position_pnl_percent !== undefined
