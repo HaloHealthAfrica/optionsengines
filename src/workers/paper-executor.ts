@@ -12,6 +12,11 @@ import { stratPlanLifecycleService } from '../services/strat-plan/index.js';
 import * as Sentry from '@sentry/node';
 import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
 import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
+import {
+  calculateRealizedPnL,
+  costBasis,
+  type PositionSide,
+} from '../lib/pnl/calculate-realized-pnl.js';
 
 interface PendingOrder {
   order_id: string;
@@ -201,6 +206,29 @@ export class PaperExecutorWorker {
             return 'failed';
           }
 
+          // Price integrity: option price must be > 0 and < reasonable threshold (10x typical max)
+          if (price <= 0 || !Number.isFinite(price)) {
+            logger.warn('Paper executor: invalid option price', {
+              order_id: order.order_id,
+              price,
+              symbol: order.symbol,
+            });
+            await db.query(
+              `UPDATE orders SET status = $1 WHERE order_id = $2`,
+              ['failed', order.order_id]
+            );
+            return 'failed';
+          }
+          const OPTION_PRICE_MAX = 1000; // Guard against underlying/price ingestion errors
+          if (price > OPTION_PRICE_MAX) {
+            logger.warn('Paper executor: option price exceeds threshold, flagging', {
+              order_id: order.order_id,
+              price,
+              threshold: OPTION_PRICE_MAX,
+              symbol: order.symbol,
+            });
+          }
+
           const fillTimestamp = new Date();
 
           // --- Begin atomic fill transaction ---
@@ -232,21 +260,26 @@ export class PaperExecutorWorker {
           } catch { /* optional — bias state not critical for position creation */ }
 
           const orderIsTest = order.is_test ?? false;
+          const isExitOrder = order.signal_id == null;
+
           await db.transaction(async (txClient) => {
-            // 1. Insert trade
-            await txClient.query(
-              `INSERT INTO trades (order_id, fill_price, fill_quantity, fill_timestamp, commission, engine, experiment_id, is_test)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-              [order.order_id, price, order.quantity, fillTimestamp, 0, order.engine ?? null, order.experiment_id ?? null, orderIsTest]
+            // Idempotency: skip if trade already exists for this order (e.g. retry)
+            const existingTrade = await txClient.query(
+              `SELECT trade_id FROM trades WHERE order_id = $1 LIMIT 1`,
+              [order.order_id]
             );
+            if (existingTrade.rows.length > 0) {
+              logger.info('Paper executor: order already filled (idempotency skip)', {
+                order_id: order.order_id,
+              });
+              await txClient.query(
+                `UPDATE orders SET status = $1 WHERE order_id = $2 AND status != $1`,
+                ['filled', order.order_id]
+              );
+              return;
+            }
 
-            // 2. Update order status
-            await txClient.query(
-              `UPDATE orders SET status = $1 WHERE order_id = $2`,
-              ['filled', order.order_id]
-            );
-
-            // 3. Find existing position (use FOR UPDATE to prevent race with exit monitor)
+            // 1. Find existing position first (before inserting trade) for atomic close
             const existingPositionResult = await txClient.query(
               `SELECT * FROM refactored_positions
                WHERE option_symbol = $1 AND status IN ('open', 'closing')
@@ -256,34 +289,101 @@ export class PaperExecutorWorker {
             );
 
             const existingPosition = existingPositionResult.rows[0];
+
             if (existingPosition && existingPosition.status === 'closing') {
-              const realizedPnl =
-                (price - existingPosition.entry_price) * existingPosition.quantity * 100;
-              const costBasis = existingPosition.entry_price * existingPosition.quantity * 100;
-              const pnlPercent = costBasis > 0 ? (realizedPnl / costBasis) * 100 : 0;
-              const pnlR = costBasis > 0 ? realizedPnl / (costBasis * 0.01) : 0;
+              // Close path: compute P&L, atomic update first, then insert trade only if close succeeds
+              const positionSide = (existingPosition.position_side ?? 'LONG') as PositionSide;
+              const multiplier = Number(existingPosition.multiplier ?? 100);
+              const realizedPnl = calculateRealizedPnL({
+                entry_price: existingPosition.entry_price,
+                exit_price: price,
+                quantity: existingPosition.quantity,
+                multiplier,
+                position_side: positionSide,
+              });
+              const basis = costBasis(
+                existingPosition.entry_price,
+                existingPosition.quantity,
+                multiplier
+              );
+              const pnlPercent = basis > 0 ? (realizedPnl / basis) * 100 : 0;
+              const pnlR = basis > 0 ? realizedPnl / (basis * 0.01) : 0;
               const entryTs = new Date(existingPosition.entry_timestamp);
               const durationMinutes = Math.max(0, (fillTimestamp.getTime() - entryTs.getTime()) / 60_000);
 
-              await txClient.query(
+              // Atomic close guard: only update if still closing (prevents double-close)
+              const updateResult = await txClient.query(
                 `UPDATE refactored_positions
                  SET status = $1, exit_timestamp = $2, realized_pnl = $3, exit_price = $4, last_updated = $2
-                 WHERE position_id = $5`,
+                 WHERE position_id = $5 AND status = 'closing'
+                 RETURNING position_id`,
                 ['closed', fillTimestamp, realizedPnl, price, existingPosition.position_id]
+              );
+
+              if (updateResult.rows.length === 0) {
+                logger.warn('Paper executor: position already closed (race/duplicate), skipping order', {
+                  position_id: existingPosition.position_id,
+                  order_id: order.order_id,
+                });
+                return; // Do NOT insert trade - position was already closed
+              }
+
+              logger.info('Position closed with P&L', {
+                position_id: existingPosition.position_id,
+                position_side: positionSide,
+                entry_price: existingPosition.entry_price,
+                exit_price: price,
+                qty: existingPosition.quantity,
+                multiplier,
+                computed_pnl: realizedPnl,
+                stored_pnl: realizedPnl,
+              });
+
+              // Only insert trade after successful close
+              await txClient.query(
+                `INSERT INTO trades (order_id, fill_price, fill_quantity, fill_timestamp, commission, engine, experiment_id, is_test)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [order.order_id, price, order.quantity, fillTimestamp, 0, order.engine ?? null, order.experiment_id ?? null, orderIsTest]
+              );
+              await txClient.query(
+                `UPDATE orders SET status = $1 WHERE order_id = $2`,
+                ['filled', order.order_id]
               );
 
               closedPositionId = existingPosition.position_id;
               pnlForCapture = { pnlR, pnlPercent, durationMinutes: Math.round(durationMinutes), realizedPnl, existingPosition };
+            } else if (isExitOrder) {
+              // Exit order with no position to close = orphan; fail the order
+              logger.warn('Paper executor: exit order has no position to close, failing', {
+                order_id: order.order_id,
+                option_symbol: order.option_symbol,
+              });
+              await txClient.query(
+                `UPDATE orders SET status = $1 WHERE order_id = $2`,
+                ['failed', order.order_id]
+              );
+              return;
             } else {
-              // New position
+              // New position (entry order)
+              await txClient.query(
+                `INSERT INTO trades (order_id, fill_price, fill_quantity, fill_timestamp, commission, engine, experiment_id, is_test)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [order.order_id, price, order.quantity, fillTimestamp, 0, order.engine ?? null, order.experiment_id ?? null, orderIsTest]
+              );
+              await txClient.query(
+                `UPDATE orders SET status = $1 WHERE order_id = $2`,
+                ['filled', order.order_id]
+              );
+
+              const positionSide: PositionSide = 'LONG'; // Current platform: buy-to-open only
               const insertResult = await txClient.query(
                 `INSERT INTO refactored_positions (
                   symbol, option_symbol, strike, expiration, type, quantity,
                   entry_price, engine, experiment_id, status, entry_timestamp, last_updated,
                   entry_bias_score, entry_regime_type, entry_mode_hint,
                   entry_macro_class, entry_acceleration_state_strength_delta,
-                  is_test
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16, $17)
+                  is_test, position_side, instrument_type, multiplier
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
                 RETURNING position_id`,
                 [
                   order.symbol, order.option_symbol, order.strike, order.expiration,
@@ -292,6 +392,9 @@ export class PaperExecutorWorker {
                   entryBiasScore, entryRegimeType, entryModeHint,
                   entryMacroClass, entryAccel,
                   orderIsTest,
+                  positionSide,
+                  'OPTION',
+                  100,
                 ]
               );
               positionId = insertResult.rows[0]?.position_id ?? null;

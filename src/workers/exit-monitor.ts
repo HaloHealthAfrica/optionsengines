@@ -2,6 +2,7 @@
 import { db } from '../services/database.service.js';
 import { marketData } from '../services/market-data.js';
 import { logger } from '../utils/logger.js';
+import { calculateUnrealizedPnL } from '../lib/pnl/calculate-realized-pnl.js';
 import { sleep } from '../utils/sleep.js';
 import { publishPositionUpdate, publishRiskUpdate } from '../services/realtime-updates.service.js';
 import * as Sentry from '@sentry/node';
@@ -28,6 +29,8 @@ interface OpenPosition {
   experiment_id?: string | null;
   high_water_mark?: number | null;
   trailing_stop_price?: number | null;
+  position_side?: string | null;
+  multiplier?: number | null;
 }
 
 interface ExitRule {
@@ -136,9 +139,14 @@ export class ExitMonitorWorker {
             continue;
           }
 
-          const unrealizedPnl =
-            (currentPrice - position.entry_price) * position.quantity * 100;
-          const costBasis = position.entry_price * position.quantity * 100;
+          const unrealizedPnl = calculateUnrealizedPnL({
+            entry_price: position.entry_price,
+            current_price: currentPrice,
+            quantity: position.quantity,
+            multiplier: position.multiplier ?? 100,
+            position_side: position.position_side ?? 'LONG',
+          });
+          const costBasis = position.entry_price * position.quantity * (position.multiplier ?? 100);
           const pnlPercent = costBasis > 0 ? (unrealizedPnl / costBasis) * 100 : 0;
 
           const hoursInPosition =
