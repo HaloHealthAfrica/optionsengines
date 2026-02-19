@@ -44,6 +44,15 @@
     "simulate:adaptive": "tsx scripts/run-adaptive-feedback-sim.ts",
     "run:adaptive-tuner": "tsx scripts/run-adaptive-tuner.ts",
     "audit:pnl": "tsx scripts/audit-pnl-and-duplicates.ts",
+    "verify:p0": "node scripts/run-p0-verification.js",
+    "baseline:engine-a": "node scripts/record-engine-a-baseline.js",
+    "audit:enrichment": "node scripts/run-enrichment-audit.js",
+    "trace:webhooks": "tsx scripts/trace-webhooks.ts",
+    "diagnose:gex": "tsx scripts/diagnose-gex-provider.ts",
+    "gex:health": "node scripts/run-gex-health-check.js",
+    "simulate:dte": "node scripts/simulate-dte-buckets.js",
+    "compare:engine-ab": "node scripts/compare-engine-a-b.js",
+    "verify:canary": "node scripts/run-canary-verification.js",
     "recompute:pnl": "tsx scripts/recompute-pnl.ts"
   },
   "keywords": [

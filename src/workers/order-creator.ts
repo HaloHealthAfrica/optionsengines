@@ -164,7 +164,8 @@ export class OrderCreatorWorker {
 
           const price = await marketData.getStockPrice(signal.symbol);
           const strike = calculateStrike(price, signal.direction);
-          const expiration = calculateExpiration(config.maxHoldDays);
+          const dteDays = Math.max(config.maxHoldDays, config.minDteEntry ?? 0);
+          const expiration = calculateExpiration(dteDays);
           const optionType = signal.direction === 'long' ? 'call' : 'put';
           const optionSymbol = buildOptionSymbol(signal.symbol, expiration, optionType, strike);
           const engine = signal.engine ?? 'A';

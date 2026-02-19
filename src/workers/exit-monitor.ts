@@ -10,9 +10,11 @@ import { registerWorkerErrorHandlers } from '../services/worker-observability.se
 import { updateWorkerStatus } from '../services/trade-engine-health.service.js';
 import { config } from '../config/index.js';
 import { evaluateExitDecision } from '../lib/exitEngine/index.js';
-import { buildExitDecisionInput } from '../lib/exitEngine/position-adapter.js';
+import { buildExitDecisionInput, type GEXState } from '../lib/exitEngine/position-adapter.js';
+import { positioningService } from '../services/positioning.service.js';
 import { evaluateExitAdjustments } from '../services/exit-intelligence/index.js';
 import { getCurrentState } from '../services/bias-state-aggregator/bias-state-aggregator.service.js';
+import { shadowExecutor } from '../services/shadow-executor.service.js';
 
 interface OpenPosition {
   position_id: string;
@@ -102,21 +104,13 @@ export class ExitMonitorWorker {
         `SELECT * FROM exit_rules WHERE enabled = true ORDER BY created_at DESC LIMIT 1`
       );
       const rule = ruleResult.rows[0];
-      if (!rule) {
-        return;
-      }
-
       const positions = await db.query<OpenPosition>(
         `SELECT * FROM refactored_positions WHERE status = $1 ORDER BY entry_timestamp ASC LIMIT 200`,
         ['open']
       );
 
-      if (positions.rows.length === 0) {
-        return;
-      }
-
       let exitsCreated = 0;
-
+      if (rule && positions.rows.length > 0) {
       for (const position of positions.rows) {
         try {
           const now = new Date();
@@ -215,7 +209,7 @@ export class ExitMonitorWorker {
 
           if (!exitReason && config.enableExitDecisionEngine) {
             const underlying = Number.isFinite(underlyingPrice) ? underlyingPrice : position.entry_price * 100;
-            const [optionSnapshot, marketState] = await Promise.all([
+            const [optionSnapshot, marketState, gexData] = await Promise.all([
               marketData.getOptionSnapshot(
                 position.symbol,
                 position.strike,
@@ -223,8 +217,15 @@ export class ExitMonitorWorker {
                 position.type
               ),
               getCurrentState(position.symbol),
+              positioningService.getGexSnapshot(position.symbol).catch(() => null),
             ]);
             const regime = marketState?.bias === 'BULLISH' ? 'BULL' : marketState?.bias === 'BEARISH' ? 'BEAR' : 'NEUTRAL';
+            const gexState: GEXState =
+              gexData?.dealerPosition === 'long_gamma'
+                ? (gexData.netGex != null && Math.abs(gexData.netGex) > 1e8 ? 'POSITIVE_HIGH' : 'POSITIVE_LOW')
+                : gexData?.dealerPosition === 'short_gamma'
+                  ? (gexData.netGex != null && Math.abs(gexData.netGex) > 1e8 ? 'NEGATIVE_HIGH' : 'NEGATIVE_LOW')
+                  : 'NEUTRAL';
             const input = buildExitDecisionInput(
               position,
               rule,
@@ -235,7 +236,7 @@ export class ExitMonitorWorker {
                 optionAsk: optionSnapshot?.ask,
               },
               now,
-              { optionSnapshot: optionSnapshot ?? undefined, regime }
+              { optionSnapshot: optionSnapshot ?? undefined, regime, gexState }
             );
             const result = evaluateExitDecision(input);
             if (result.action === 'FULL_EXIT' || result.action === 'PARTIAL_EXIT') {
@@ -384,6 +385,16 @@ export class ExitMonitorWorker {
             tags: { worker: 'ExitMonitorWorker', positionId: position.position_id },
           });
           // Don't track as error if it's just missing API keys
+        }
+      }
+      }
+
+      if (config.enableShadowExecution) {
+        try {
+          await shadowExecutor.refreshShadowPositions();
+          await shadowExecutor.monitorShadowExits();
+        } catch (err) {
+          logger.warn('Shadow monitor failed', { error: err instanceof Error ? err.message : String(err) });
         }
       }
 

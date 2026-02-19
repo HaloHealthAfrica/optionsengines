@@ -15,6 +15,9 @@ import { OrderCreatorWorker } from '../workers/order-creator.js';
 import { PaperExecutorWorker } from '../workers/paper-executor.js';
 import { PositionRefresherWorker } from '../workers/position-refresher.js';
 import { ExitMonitorWorker } from '../workers/exit-monitor.js';
+import { shadowExecutor } from '../services/shadow-executor.service.js';
+import { runEnrichmentAudit } from '../services/enrichment-audit.service.js';
+import { alertService } from '../services/alert.service.js';
 import { stratScannerService } from '../services/strat-scanner/index.js';
 import {
   tuneWeights,
@@ -151,6 +154,18 @@ router.post('/process-queue', requireCronSecret, async (_req: Request, res: Resp
       const msg = err instanceof Error ? err.message : String(err);
       results.errors.push(`exitMonitor: ${msg}`);
       logger.error('Cron exit monitor failed', err);
+    }
+
+    // 6. Shadow positions – refresh PnL and apply exits (Phase 3, when ENABLE_SHADOW_EXECUTION)
+    if (config.enableShadowExecution) {
+      try {
+        await shadowExecutor.refreshShadowPositions();
+        await shadowExecutor.monitorShadowExits();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        results.errors.push(`shadowMonitor: ${msg}`);
+        logger.error('Cron shadow monitor failed', err);
+      }
     }
 
     const durationMs = Date.now() - startTime;
@@ -383,6 +398,54 @@ router.post('/strat-scan', requireCronSecret, async (_req: Request, res: Respons
   } catch (err: unknown) {
     const durationMs = Date.now() - startTime;
     logger.error('Cron strat-scan failed', err);
+    return res.status(500).json({
+      ok: false,
+      durationMs,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/**
+ * POST /api/cron/strat-feedback
+ *
+ * Runs Strat Feedback Loop: outcome tracker + scoring tuner + insights generation.
+ * Call weekly (e.g. Sunday evening) or on-demand.
+ */
+/**
+ * POST /api/cron/enrichment-audit
+ *
+ * Phase 5: Daily enrichment coverage audit.
+ * Returns 200 if pass, 503 if fail. On fail, sends Discord/Slack alert.
+ * Call daily (e.g. 6 AM or end of trading day).
+ */
+router.post('/enrichment-audit', requireCronSecret, async (req: Request, res: Response) => {
+  const hours = parseInt(String(req.query.hours || 24), 10) || 24;
+  const thresholdPct = parseFloat(String(req.query.threshold || 1)) || 1;
+
+  const startTime = Date.now();
+  try {
+    const result = await runEnrichmentAudit(hours, thresholdPct);
+    const durationMs = Date.now() - startTime;
+
+    if (!result.pass && config.alertsEnabled) {
+      await alertService.sendEnrichmentAlert({
+        missingCount: result.missing,
+        missingPct: result.missingPct,
+        total: result.total,
+        thresholdPct: result.thresholdPct,
+        hours: result.hours,
+      });
+    }
+
+    return res.status(result.pass ? 200 : 503).json({
+      ok: result.pass,
+      durationMs,
+      ...result,
+    });
+  } catch (err: unknown) {
+    const durationMs = Date.now() - startTime;
+    logger.error('Cron enrichment-audit failed', err);
     return res.status(500).json({
       ok: false,
       durationMs,

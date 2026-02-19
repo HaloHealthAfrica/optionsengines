@@ -17,6 +17,8 @@ export interface StrikeSelectionInput {
     maxCapitalAllocation: number;
   };
   optionChain: OptionContract[];
+  /** Override: min DTE at entry when set (e.g. from config.minDteEntry). Phase 2 hardening. */
+  minDteOverride?: number;
 }
 
 export interface OptionContract {

@@ -32,12 +32,21 @@ function buildOptionSymbol(
   return `${symbol}-${yyyy}${mm}${dd}-${type.toUpperCase()}-${strike.toFixed(2)}`;
 }
 
+/** Optional Engine B recommendation for strike/expiration (Phase 3 shadow comparison) */
+export interface ShadowRecommendation {
+  strike: number;
+  expiration: Date;
+  quantity: number;
+  entry_price?: number;
+}
+
 export class ShadowExecutor {
   async simulateExecution(
     decision: MetaDecision,
     signal: EnrichedSignal,
     experimentId: string,
-    metaGamma?: string
+    metaGamma?: string,
+    recommendation?: ShadowRecommendation
   ): Promise<void> {
     if (decision.decision !== 'approve') {
       logger.info('Shadow execution skipped (decision reject)', {
@@ -53,19 +62,34 @@ export class ShadowExecutor {
       level: 'info',
       data: { experimentId, signalId: signal.signalId },
     });
-    const price = await marketData.getStockPrice(signal.symbol);
-    const strike = calculateStrike(price, signal.direction);
-    const expiration = calculateExpiration(config.maxHoldDays);
+
+    let strike: number;
+    let expiration: Date;
+    let quantity: number;
+    let optionPrice: number | null;
+
+    if (recommendation?.strike != null && recommendation?.expiration) {
+      strike = recommendation.strike;
+      expiration = recommendation.expiration instanceof Date ? recommendation.expiration : new Date(recommendation.expiration);
+      quantity = Math.max(1, recommendation.quantity ?? config.maxPositionSize);
+      optionPrice = recommendation.entry_price != null && Number.isFinite(recommendation.entry_price)
+        ? recommendation.entry_price
+        : await marketData.getOptionPrice(signal.symbol, strike, expiration, signal.direction === 'long' ? 'call' : 'put');
+    } else {
+      const price = await marketData.getStockPrice(signal.symbol);
+      strike = calculateStrike(price, signal.direction);
+      expiration = calculateExpiration(config.maxHoldDays);
+      quantity = Math.max(1, config.maxPositionSize);
+      optionPrice = await marketData.getOptionPrice(
+        signal.symbol,
+        strike,
+        expiration,
+        signal.direction === 'long' ? 'call' : 'put'
+      );
+    }
+
     const optionType = signal.direction === 'long' ? 'call' : 'put';
     const optionSymbol = buildOptionSymbol(signal.symbol, expiration, optionType, strike);
-    const quantity = Math.max(1, config.maxPositionSize);
-
-    const optionPrice = await marketData.getOptionPrice(
-      signal.symbol,
-      strike,
-      expiration,
-      optionType
-    );
 
     if (optionPrice == null || !Number.isFinite(optionPrice)) {
       logger.warn('Shadow trade skipped - option price unavailable', {

@@ -200,6 +200,7 @@ export async function advancedStrikeSelect(
         maxCapitalAllocation,
       },
       optionChain: chain,
+      ...(config.minDteEntry > 0 && { minDteOverride: config.minDteEntry }),
     };
 
     // 10. Run the advanced selector

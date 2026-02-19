@@ -27,9 +27,12 @@ function nextFriday(from: Date): Date {
 function calculateExpiration(): Date {
   const policy = DTE_POLICY.SWING;
   const preferred = policy.preferred ?? [Math.floor((policy.min + policy.max) / 2)];
-  const targetDte = config.maxHoldDays > 0
+  let targetDte = config.maxHoldDays > 0
     ? Math.min(policy.max, Math.max(policy.min, config.maxHoldDays))
     : Math.min(policy.max, Math.max(policy.min, preferred[0]));
+  if (config.minDteEntry > 0) {
+    targetDte = Math.max(targetDte, config.minDteEntry);
+  }
   const base = new Date();
   base.setUTCDate(base.getUTCDate() + targetDte);
   return nextFriday(base);

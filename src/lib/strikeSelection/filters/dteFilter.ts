@@ -3,5 +3,8 @@ import { DTE_POLICY } from '../../shared/constants.js';
 
 export function filterByDTE(input: StrikeSelectionInput): OptionContract[] {
   const policy = DTE_POLICY[input.setupType];
-  return input.optionChain.filter((contract) => contract.dte >= policy.min && contract.dte <= policy.max);
+  const effectiveMin = input.minDteOverride != null && input.minDteOverride > 0
+    ? Math.max(policy.min, input.minDteOverride)
+    : policy.min;
+  return input.optionChain.filter((contract) => contract.dte >= effectiveMin && contract.dte <= policy.max);
 }

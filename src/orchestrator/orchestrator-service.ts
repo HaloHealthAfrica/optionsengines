@@ -231,6 +231,10 @@ export class OrchestratorService {
               );
             } catch (fallbackErr) {
               logger.warn('Failed to persist enrichment to refactored_signals', { error: fallbackErr, signal_id: signal.signal_id });
+              Sentry.captureException(fallbackErr, {
+                tags: { component: 'orchestrator', failure: 'refactored_signals_insert' },
+                extra: { signal_id: signal.signal_id, symbol: signal.symbol },
+              });
             }
           }
 
@@ -717,11 +721,22 @@ export class OrchestratorService {
       reasons: ['orchestrator shadow execution'],
     };
 
+    const shadowRec =
+      recommendation?.strike != null && recommendation?.expiration
+        ? {
+            strike: recommendation.strike,
+            expiration: recommendation.expiration instanceof Date ? recommendation.expiration : new Date(recommendation.expiration),
+            quantity: recommendation.quantity ?? 1,
+            entry_price: recommendation.entry_price,
+          }
+        : undefined;
+
     await this.shadowExecutor.simulateExecution(
       metaDecision,
       enrichedSignal,
       experimentId,
-      dealerDecision ? JSON.stringify(dealerDecision) : undefined
+      dealerDecision ? JSON.stringify(dealerDecision) : undefined,
+      shadowRec
     );
   }
 

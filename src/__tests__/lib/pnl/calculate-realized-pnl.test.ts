@@ -67,7 +67,7 @@ describe('calculateRealizedPnL', () => {
         multiplier,
         position_side: 'SHORT',
       });
-      expect(pnl).toBe(45); // (2.15-1.7)*1*100
+      expect(pnl).toBeCloseTo(45, 2); // (2.15-1.7)*1*100
     });
 
     it('short put loss: sold low, bought back high', () => {
@@ -78,7 +78,7 @@ describe('calculateRealizedPnL', () => {
         multiplier,
         position_side: 'SHORT',
       });
-      expect(pnl).toBe(-45);
+      expect(pnl).toBeCloseTo(-45, 2);
     });
 
     it('short call profit: sold high, bought back low', () => {
@@ -165,7 +165,7 @@ describe('calculateUnrealizedPnL', () => {
       multiplier,
       position_side: 'SHORT',
     });
-    expect(pnl).toBe(45);
+    expect(pnl).toBeCloseTo(45, 2);
   });
 });
 

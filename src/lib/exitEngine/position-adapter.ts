@@ -45,10 +45,14 @@ export interface OptionSnapshot {
   iv: number;
 }
 
+export type GEXState = 'POSITIVE_HIGH' | 'POSITIVE_LOW' | 'NEUTRAL' | 'NEGATIVE_LOW' | 'NEGATIVE_HIGH';
+
 export interface ExitAdapterContext {
   optionSnapshot?: OptionSnapshot | null;
   regime?: RegimeType;
   setupType?: SetupType;
+  /** Gamma regime from positioning (enables REGIME_FLIP / gamma-aware exits when GEX available) */
+  gexState?: GEXState;
 }
 
 /**
@@ -98,6 +102,7 @@ export function buildExitDecisionInput(
   const spreadPercent =
     bid > 0 && ask > 0 ? ((ask - bid) / ((bid + ask) / 2)) * 100 : 0;
   const regime = context?.regime ?? 'NEUTRAL';
+  const gexState = context?.gexState ?? 'NEUTRAL';
 
   return {
     tradePosition: {
@@ -146,7 +151,7 @@ export function buildExitDecisionInput(
       currentDTE: Math.round(dteNow * 10) / 10,
       spreadPercent,
       regime,
-      gexState: 'NEUTRAL',
+      gexState,
     },
   };
 }

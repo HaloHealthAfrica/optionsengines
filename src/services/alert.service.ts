@@ -198,7 +198,58 @@ export async function sendTestAlert(): Promise<{ discord: boolean; slack: boolea
   return result;
 }
 
+/**
+ * Send enrichment audit failure alert (Phase 5).
+ * Called when missing refactored_signals exceeds threshold.
+ */
+export async function sendEnrichmentAlert(params: {
+  missingCount: number;
+  missingPct: number;
+  total: number;
+  thresholdPct: number;
+  hours: number;
+}): Promise<void> {
+  if (!config.alertsEnabled) return;
+
+  const text = `**Enrichment Audit FAIL** — ${params.missingCount} missing (${params.missingPct.toFixed(2)}%) of ${params.total} accepted webhooks in last ${params.hours}h. Threshold: ${params.thresholdPct}%. Run \`npm run audit:enrichment\` or \`npx tsx scripts/trace-webhooks.ts <signal_id>\` for details.`;
+
+  const discordPayload = {
+    content: text,
+    embeds: [
+      {
+        title: 'Enrichment Coverage Alert',
+        color: 0xef4444,
+        fields: [
+          { name: 'Missing', value: String(params.missingCount), inline: true },
+          { name: 'Missing %', value: `${params.missingPct.toFixed(2)}%`, inline: true },
+          { name: 'Total', value: String(params.total), inline: true },
+          { name: 'Threshold', value: `${params.thresholdPct}%`, inline: true },
+          { name: 'Window', value: `${params.hours}h`, inline: true },
+        ],
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+
+  const slackPayload = {
+    text: `Enrichment Audit FAIL: ${params.missingCount} missing (${params.missingPct.toFixed(2)}%) of ${params.total} in last ${params.hours}h. Threshold ${params.thresholdPct}%.`,
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*Enrichment Audit FAIL*\nMissing: ${params.missingCount} (${params.missingPct.toFixed(2)}%) of ${params.total} accepted webhooks in last ${params.hours}h. Threshold: ${params.thresholdPct}%.`,
+        },
+      },
+    ],
+  };
+
+  await Promise.all([sendDiscord(discordPayload), sendSlack(slackPayload)]);
+  logger.info('Enrichment alert sent', { missingCount: params.missingCount, missingPct: params.missingPct });
+}
+
 export const alertService = {
   sendConfluenceAlert,
   sendTestAlert,
+  sendEnrichmentAlert,
 };

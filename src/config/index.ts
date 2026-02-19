@@ -89,6 +89,8 @@ interface Config {
   stopLossPct: number;
   timeStopDte: number;
   maxHoldDays: number;
+  /** Min DTE at entry (default 0 = off). When > 0, filters out shorter-dated options. Phase 2 hardening. */
+  minDteEntry: number;
   enableExitDecisionEngine: boolean;
   exitEngineSoleAuthority: boolean;
   enableExitIntelligence: boolean;
@@ -319,6 +321,7 @@ export const config: Config = {
   stopLossPct: getEnvVarNumber('STOP_LOSS_PCT', 50),
   timeStopDte: getEnvVarNumber('TIME_STOP_DTE', 1),
   maxHoldDays: getEnvVarNumber('MAX_HOLD_DAYS', 5),
+  minDteEntry: getEnvVarNumber('MIN_DTE_ENTRY', 0),
   enableExitDecisionEngine: getEnvVarBoolean('ENABLE_EXIT_DECISION_ENGINE', true),
   /** When true, exit engine is sole authority; DB exit_rules fallback is skipped */
   exitEngineSoleAuthority: getEnvVarBoolean('EXIT_ENGINE_SOLE_AUTHORITY', true),
