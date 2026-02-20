@@ -57,19 +57,42 @@ async function main() {
         headers: { Authorization: `Bearer ${mdKey}` },
       });
       const json = (await res.json()) as Record<string, unknown>;
-      const rows = (json?.data ?? json?.options ?? json) as unknown[];
-      const arr = Array.isArray(rows) ? rows : [];
-      const withGamma = arr.filter((r: any) => r?.gamma != null || r?.greek_gamma != null || r?.greeks?.gamma != null);
-      const withOI = arr.filter((r: any) => r?.open_interest != null || r?.oi != null || r?.openInterest != null);
-      const sample = arr[0] as Record<string, unknown> | undefined;
       console.log(`   Status: ${res.status}`);
-      console.log(`   Rows: ${arr.length}`);
-      console.log(`   With gamma: ${withGamma.length}`);
-      console.log(`   With openInterest: ${withOI.length}`);
-      if (sample) {
-        console.log(`   Sample keys: ${Object.keys(sample).join(', ')}`);
-        console.log(`   Sample gamma: ${JSON.stringify(sample.gamma ?? sample.greek_gamma ?? sample.greeks)}`);
-        console.log(`   Sample OI: ${JSON.stringify(sample.open_interest ?? sample.oi ?? sample.openInterest)}`);
+      if (res.status === 203) {
+        console.log(`   Note: 203 = valid cached response (treat same as 200)`);
+      }
+
+      // MarketData.app returns columnar arrays: {optionSymbol: [...], strike: [...], gamma: [...], ...}
+      if (Array.isArray(json?.optionSymbol)) {
+        const count = (json.optionSymbol as unknown[]).length;
+        const gammaArr = json.gamma as number[] | undefined;
+        const oiArr = json.openInterest as number[] | undefined;
+        const withGamma = gammaArr ? gammaArr.filter(g => g != null && g !== 0).length : 0;
+        const withOI = oiArr ? oiArr.filter(oi => oi != null && oi !== 0).length : 0;
+        console.log(`   Format: columnar arrays`);
+        console.log(`   Rows: ${count}`);
+        console.log(`   With gamma (non-zero): ${withGamma}`);
+        console.log(`   With openInterest (non-zero): ${withOI}`);
+        console.log(`   Available fields: ${Object.keys(json).join(', ')}`);
+        if (count > 0) {
+          console.log(`   Sample [0]: strike=${(json.strike as number[])?.[0]}, gamma=${gammaArr?.[0]}, OI=${oiArr?.[0]}, side=${(json.side as string[])?.[0]}`);
+        }
+      } else {
+        // Fallback: row-based format
+        const rows = (json?.data ?? json?.options ?? json) as unknown[];
+        const arr = Array.isArray(rows) ? rows : [];
+        const withGamma = arr.filter((r: any) => r?.gamma != null || r?.greek_gamma != null || r?.greeks?.gamma != null);
+        const withOI = arr.filter((r: any) => r?.open_interest != null || r?.oi != null || r?.openInterest != null);
+        const sample = arr[0] as Record<string, unknown> | undefined;
+        console.log(`   Format: row objects`);
+        console.log(`   Rows: ${arr.length}`);
+        console.log(`   With gamma: ${withGamma.length}`);
+        console.log(`   With openInterest: ${withOI.length}`);
+        if (sample) {
+          console.log(`   Sample keys: ${Object.keys(sample).join(', ')}`);
+          console.log(`   Sample gamma: ${JSON.stringify(sample.gamma ?? sample.greek_gamma ?? sample.greeks)}`);
+          console.log(`   Sample OI: ${JSON.stringify(sample.open_interest ?? sample.oi ?? sample.openInterest)}`);
+        }
       }
     } catch (e) {
       console.log(`   ERROR: ${e}`);

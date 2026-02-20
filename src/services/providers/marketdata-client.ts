@@ -42,24 +42,59 @@ export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'hea
   readonly name = 'marketdata' as const;
   private readonly apiKey: string;
   private readonly baseUrl: string = 'https://api.marketdata.app';
+  private readonly proxyUrl: string;
+  private proxyFetchFn: ((url: string | URL, init?: any) => Promise<any>) | null = null;
+  private proxyInitialized = false;
 
   constructor() {
     this.apiKey = config.marketDataApiKey;
+    this.proxyUrl = config.marketDataProxyUrl;
 
     if (!this.apiKey) {
       logger.warn('MarketData.app API key not configured');
     }
+    if (this.proxyUrl) {
+      logger.info('MarketData.app proxy configured — all requests will route through static IP', {
+        proxy: this.proxyUrl.replace(/\/\/.*@/, '//***@'),
+      });
+    }
+  }
+
+  /**
+   * Returns a fetch function that routes through the proxy when MARKETDATA_PROXY_URL is set.
+   * Uses Node's built-in undici ProxyAgent so no extra dependency is needed.
+   */
+  private async getFetch(): Promise<typeof fetch> {
+    if (!this.proxyUrl) return fetch;
+
+    if (!this.proxyInitialized) {
+      try {
+        const undici = await import('undici');
+        const agent = new undici.ProxyAgent(this.proxyUrl);
+        this.proxyFetchFn = (url: string | URL, init?: any) =>
+          undici.fetch(url, { ...init, dispatcher: agent });
+        logger.info('MarketData.app undici ProxyAgent initialized');
+      } catch (err) {
+        logger.error('Failed to init MarketData.app proxy — falling back to direct fetch', err);
+      }
+      this.proxyInitialized = true;
+    }
+
+    return (this.proxyFetchFn as typeof fetch) ?? fetch;
   }
 
   /**
    * Make request to MarketData.app API.
    * 404 with {s:no_data} is a valid empty state - returns null to signal caller to use [].
+   * 403 = IP block from multi-IP detection - retry once after brief pause.
+   * 203 = valid cached response, treated same as 200.
    */
-  private async request<T>(endpoint: string): Promise<T> {
+  private async request<T>(endpoint: string, retryOn403 = true): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
+    const fetchFn = await this.getFetch();
 
     try {
-      const response = await fetch(url, {
+      const response = await fetchFn(url, {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
         },
@@ -76,6 +111,33 @@ export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'hea
         } catch {
           // not JSON
         }
+      }
+
+      if (response.status === 403) {
+        let diagInfo: Record<string, unknown> = {};
+        try { diagInfo = JSON.parse(responseText); } catch { /* not JSON */ }
+
+        logger.warn('MarketData.app 403: IP block detected', {
+          authorizedIP: diagInfo.authorizedIP,
+          blockedIP: diagInfo.blockedIP,
+          endpoint,
+          guide: 'https://www.marketdata.app/docs/api/troubleshooting/multiple-ip-addresses',
+        });
+
+        if (retryOn403) {
+          await new Promise(resolve => setTimeout(resolve, 5_000));
+          return this.request<T>(endpoint, false);
+        }
+
+        throw new Error(
+          `MarketData.app 403: IP block. Authorized: ${diagInfo.authorizedIP}, Blocked: ${diagInfo.blockedIP}. ` +
+          `Ensure all API requests originate from a single IP. ` +
+          `Guide: https://www.marketdata.app/docs/api/troubleshooting/multiple-ip-addresses`
+        );
+      }
+
+      if (response.status === 203) {
+        logger.debug('MarketData.app response served from cache (HTTP 203)', { endpoint });
       }
 
       if (!response.ok) {
@@ -203,8 +265,46 @@ export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'hea
   }
 
   /**
+   * Transform MarketData.app columnar response (parallel arrays) into row objects.
+   * The API returns {optionSymbol: [...], strike: [...], gamma: [...], ...}.
+   */
+  private transformColumnarResponse(response: any): MarketDataOptionRow[] {
+    if (!response?.optionSymbol || !Array.isArray(response.optionSymbol)) {
+      return [];
+    }
+
+    const count = response.optionSymbol.length;
+    const rows: MarketDataOptionRow[] = [];
+
+    for (let i = 0; i < count; i++) {
+      const side = response.side?.[i];
+      const optionType: 'call' | 'put' =
+        (side === 'call' || side === 'Call' || side === 'C') ? 'call' : 'put';
+
+      const expTs = response.expiration?.[i];
+      const expiration = typeof expTs === 'number'
+        ? new Date(expTs * 1000).toISOString().split('T')[0]
+        : String(expTs ?? '');
+
+      rows.push({
+        optionSymbol: response.optionSymbol[i],
+        strike: Number(response.strike?.[i] ?? 0),
+        expiration,
+        optionType,
+        openInterest: response.openInterest?.[i],
+        gamma: response.gamma?.[i],
+        volume: response.volume?.[i],
+        iv: response.iv?.[i],
+      });
+    }
+
+    return rows.filter(row => Number.isFinite(row.strike) && row.expiration);
+  }
+
+  /**
    * Get options chain data for GEX calculations.
    * 404 no_data returns [] (valid empty state).
+   * Handles MarketData.app columnar response format (parallel arrays).
    */
   async getOptionsChain(symbol: string): Promise<MarketDataOptionRow[]> {
     try {
@@ -214,6 +314,13 @@ export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'hea
       if (response?.s === 'no_data') {
         return [];
       }
+
+      if (Array.isArray(response?.optionSymbol)) {
+        const rows = this.transformColumnarResponse(response);
+        logger.debug('MarketData.app options chain fetched (columnar)', { symbol, count: rows.length });
+        return rows;
+      }
+
       const rows: any[] = response?.options ?? response?.data ?? response?.rows ?? [];
       const normalized = rows
         .map((row) => {
@@ -248,6 +355,7 @@ export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'hea
   /**
    * Get options flow data.
    * 404 no_data returns [] (valid empty state).
+   * Handles MarketData.app columnar response format (parallel arrays).
    */
   async getOptionsFlow(symbol: string, limit: number = 50): Promise<MarketDataOptionRow[]> {
     try {
@@ -257,6 +365,13 @@ export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'hea
       if (response?.s === 'no_data') {
         return [];
       }
+
+      if (Array.isArray(response?.optionSymbol)) {
+        const rows = this.transformColumnarResponse(response);
+        logger.debug('MarketData.app options flow fetched (columnar)', { symbol, count: rows.length });
+        return rows;
+      }
+
       const rows: any[] = response?.data ?? response?.flow ?? response?.rows ?? [];
       const normalized = rows
         .map((row) => {

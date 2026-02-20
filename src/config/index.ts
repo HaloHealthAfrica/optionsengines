@@ -34,6 +34,8 @@ interface Config {
   polygonWsEnabled: boolean;
   twelveDataApiKey: string;
   marketDataApiKey: string;
+  /** HTTP/SOCKS proxy URL for MarketData.app requests (ensures single outbound IP) */
+  marketDataProxyUrl: string;
   unusualWhalesApiKey: string;
   unusualWhalesGammaUrl: string;
   unusualWhalesOptionsEnabled: boolean;
@@ -258,6 +260,7 @@ export const config: Config = {
   twelveDataApiKey: getEnvVar('TWELVE_DATA_API_KEY', ''),
   marketDataApiKey:
     getEnvVar('MARKET_DATA_API_KEY', '') || getEnvVar('MARKETDATA_API_KEY', ''),
+  marketDataProxyUrl: getEnvVar('MARKETDATA_PROXY_URL', ''),
   unusualWhalesApiKey: getEnvVar('UNUSUAL_WHALES_API_KEY', ''),
   unusualWhalesGammaUrl: getEnvVar('UNUSUAL_WHALES_GAMMA_URL', ''),
   /** When true: UW is primary for option chain, option price, and flow. MarketData.app fallback. Matches 120/min, 15K/day subscription. */
