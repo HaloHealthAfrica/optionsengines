@@ -7,12 +7,9 @@ type ConfigSummary = {
   appMode: string;
   databaseUrl: string;
   marketDataProvider: string;
-  alpacaPaper: boolean;
-  alpacaBaseUrl: string;
   polygonBaseUrl: string;
   slowRequestMs: number;
   cacheTtlSeconds: number;
-  alpacaRateLimit: number;
   twelveDataRateLimit: number;
   polygonRateLimit: number;
   polygonWsEnabled: boolean;
@@ -70,12 +67,9 @@ export function logConfigSummary(summary: ConfigSummary = config): void {
     appMode: summary.appMode,
     databaseUrl: maskDatabaseUrl(summary.databaseUrl),
     marketDataProvider: summary.marketDataProvider,
-    alpacaPaper: summary.alpacaPaper,
-    alpacaBaseUrl: summary.alpacaBaseUrl,
     polygonBaseUrl: summary.polygonBaseUrl,
     slowRequestMs: summary.slowRequestMs,
     cacheTtlSeconds: summary.cacheTtlSeconds,
-    alpacaRateLimit: summary.alpacaRateLimit,
     twelveDataRateLimit: summary.twelveDataRateLimit,
     polygonRateLimit: summary.polygonRateLimit,
     polygonWsEnabled: summary.polygonWsEnabled,

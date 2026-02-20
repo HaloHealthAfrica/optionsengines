@@ -191,7 +191,7 @@ router.get('/', requireAuth, async (_req: Request, res: Response) => {
     decision: buildDecisionSummary(row),
   }));
 
-  // Enrich pending orders with live option price (from Alpaca, Polygon, or Unusual Whales)
+  // Enrich pending orders with live option price (from Polygon, Unusual Whales, or MarketData.app)
   const orders = await Promise.all(
     ordersRaw.map(async (order) => {
       if (order.symbol && order.strike != null && order.expiry && order.type) {

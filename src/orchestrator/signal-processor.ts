@@ -36,15 +36,14 @@ export class SignalProcessor {
     try {
       await client.query('BEGIN');
 
-      // Phase 3b: Recover stale locks from crashed instances
+      // Phase 3b: Recover stale locks from crashed instances (any status)
       if (config.lockStalenessMinutes > 0) {
         const recovered = await client.query(
           `UPDATE signals
            SET processing_lock = FALSE, locked_by = NULL, locked_at = NULL
            WHERE processing_lock = TRUE
-             AND processed = FALSE
              AND locked_at < NOW() - ($1 || ' minutes')::interval
-           RETURNING signal_id`,
+           RETURNING signal_id, status`,
           [String(config.lockStalenessMinutes)]
         );
         if (recovered.rowCount && recovered.rowCount > 0) {
@@ -52,6 +51,22 @@ export class SignalProcessor {
             count: recovered.rowCount,
             instanceId: config.instanceId,
             stalenessMinutes: config.lockStalenessMinutes,
+          });
+        }
+
+        // Reset market_data_unavailable rejections so they can be retried
+        const resetMd = await client.query(
+          `UPDATE signals
+           SET status = 'pending', rejection_reason = NULL, processing_attempts = 0, next_retry_at = NULL
+           WHERE status = 'rejected'
+             AND rejection_reason = 'market_data_unavailable'
+             AND processing_lock = FALSE
+             AND processed = FALSE
+           RETURNING signal_id`
+        );
+        if (resetMd.rowCount && resetMd.rowCount > 0) {
+          logger.warn('Reset market_data_unavailable rejections for retry', {
+            count: resetMd.rowCount,
           });
         }
       }

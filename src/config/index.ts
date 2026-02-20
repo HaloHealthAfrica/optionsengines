@@ -24,10 +24,6 @@ interface Config {
   // Market Data
   marketDataProvider: string;
   marketDataProviderPriority: string[];
-  alpacaApiKey: string;
-  alpacaSecretKey: string;
-  alpacaPaper: boolean;
-  alpacaBaseUrl: string;
   polygonApiKey: string;
   polygonBaseUrl: string;
   polygonRateLimit: number;
@@ -47,7 +43,6 @@ interface Config {
   cacheTtlSeconds: number;
 
   // Rate Limiting
-  alpacaRateLimit: number;
   twelveDataRateLimit: number;
   unusualWhalesRateLimitPerMinute: number;
   unusualWhalesRateLimitPerDay: number;
@@ -243,7 +238,7 @@ export const config: Config = {
 
   // Market Data
   marketDataProvider: getEnvVar('MARKET_DATA_PROVIDER', 'twelvedata'),
-  // Preferred: Unusual Whales (options/gamma/flow), TwelveData, MarketData.app. Alpaca commented out.
+  // Preferred: Unusual Whales (options/gamma/flow), TwelveData, MarketData.app.
   marketDataProviderPriority: getEnvVar(
     'MARKET_DATA_PROVIDER_PRIORITY',
     'twelvedata,marketdata'
@@ -251,10 +246,6 @@ export const config: Config = {
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean),
-  alpacaApiKey: getEnvVar('ALPACA_API_KEY', ''),
-  alpacaSecretKey: getEnvVar('ALPACA_SECRET_KEY', ''),
-  alpacaPaper: getEnvVarBoolean('ALPACA_PAPER', true),
-  alpacaBaseUrl: getEnvVar('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets'),
   polygonApiKey: getEnvVar('POLYGON_API_KEY', ''),
   polygonBaseUrl: getEnvVar('POLYGON_BASE_URL', 'https://api.massive.com'),
   polygonRateLimit: getEnvVarNumber('POLYGON_RATE_LIMIT', 5),
@@ -274,7 +265,6 @@ export const config: Config = {
   cacheTtlSeconds: getEnvVarNumber('CACHE_TTL_SECONDS', 60),
 
   // Rate Limiting
-  alpacaRateLimit: getEnvVarNumber('ALPACA_RATE_LIMIT', 200),
   twelveDataRateLimit: getEnvVarNumber('TWELVE_DATA_RATE_LIMIT', 800),
   unusualWhalesRateLimitPerMinute: getEnvVarNumber('UNUSUAL_WHALES_RATE_LIMIT_PER_MINUTE', 120),
   unusualWhalesRateLimitPerDay: getEnvVarNumber('UNUSUAL_WHALES_RATE_LIMIT_PER_DAY', 15000),

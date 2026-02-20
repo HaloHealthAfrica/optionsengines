@@ -47,7 +47,7 @@ export interface ProviderHealthStatus {
  * Methods that are not supported should not be present (checked via `in` operator).
  */
 export interface IMarketDataProvider {
-  /** Unique provider name (e.g. 'alpaca', 'twelvedata', 'marketdata', 'polygon') */
+  /** Unique provider name (e.g. 'twelvedata', 'marketdata', 'polygon') */
   readonly name: string;
 
   /**

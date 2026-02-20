@@ -342,7 +342,6 @@ export interface CacheConfig {
 }
 
 export interface RateLimiterConfig {
-  alpacaLimit: number;
   twelveDataLimit: number;
   polygonLimit: number;
 }

@@ -111,7 +111,6 @@ export class OrchestratorService {
 
   /** Non-transient failures that will not succeed on retry */
   private static NON_TRANSIENT_FAILURES = new Set([
-    'market_data_unavailable',
     'signal_stale',
     'market_closed',
     'max_open_positions_exceeded',
@@ -129,7 +128,7 @@ export class OrchestratorService {
     const attempts = Number(signal.processing_attempts ?? 0);
     const isTransient = !OrchestratorService.NON_TRANSIENT_FAILURES.has(reason);
 
-    if (attempts < 1 && isTransient) {
+    if (attempts < 2 && isTransient) {
       const nextRetryAt = new Date(Date.now() + retryDelayMs);
       await this.signalProcessor.scheduleRetry(
         signal.signal_id,
@@ -265,6 +264,15 @@ export class OrchestratorService {
           };
         }
         if (enrichment.rejectionReason) {
+          const isRetryable = !OrchestratorService.NON_TRANSIENT_FAILURES.has(enrichment.rejectionReason);
+          if (isRetryable) {
+            return this.handleProcessingFailure(
+              signal,
+              enrichment.rejectionReason,
+              config.orchestratorRetryDelayMs,
+              Date.now() - startedAt
+            );
+          }
           Sentry.addBreadcrumb({
             category: 'risk',
             message: 'Signal rejected by enrichment',

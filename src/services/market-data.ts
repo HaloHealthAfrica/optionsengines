@@ -1,5 +1,4 @@
 // Market Data Service - Unified interface with caching, fallback, and circuit breaker
-import { AlpacaClient } from './providers/alpaca-client.js';
 import { TwelveDataClient } from './providers/twelvedata-client.js';
 import { MarketDataClient, MarketDataOptionRow } from './providers/marketdata-client.js';
 import type { ProviderHealthStatus } from './providers/market-data-provider.interface.js';
@@ -18,10 +17,9 @@ import { marketDataStream } from './market-data-stream.service.js';
 import { unusualWhalesOptionsService } from './unusual-whales-options.service.js';
 import * as Sentry from '@sentry/node';
 
-type Provider = 'alpaca' | 'polygon' | 'marketdata' | 'twelvedata' | 'unusualwhales';
+type Provider = 'polygon' | 'marketdata' | 'twelvedata' | 'unusualwhales';
 
 export class MarketDataService {
-  private alpaca: AlpacaClient;
   private polygon: PolygonClient;
   private marketData: MarketDataClient;
   private twelveData: TwelveDataClient;
@@ -33,7 +31,6 @@ export class MarketDataService {
   private readonly streamEnabled: boolean = config.polygonWsEnabled;
 
   constructor() {
-    this.alpaca = new AlpacaClient();
     this.polygon = new PolygonClient();
     this.marketData = new MarketDataClient();
     this.twelveData = new TwelveDataClient();
@@ -43,7 +40,7 @@ export class MarketDataService {
       : [];
     const normalizedProviders = priorityInput
       .map((value) => value.toLowerCase())
-      .filter((value) => ['alpaca', 'polygon', 'marketdata', 'twelvedata'].includes(value));
+      .filter((value) => ['polygon', 'marketdata', 'twelvedata'].includes(value));
     this.providerPriority = (normalizedProviders.length > 0
       ? normalizedProviders
       : ['twelvedata', 'marketdata']) as Provider[];
@@ -153,8 +150,6 @@ export class MarketDataService {
             const rateLimiterKey = providerName === 'marketdata' ? 'marketdata' : providerName;
             await rateLimiter.waitForToken(rateLimiterKey);
             switch (providerName) {
-              case 'alpaca':
-                return this.alpaca.getCandles(symbol, timeframe, limit);
               case 'polygon':
                 return this.polygon.getCandles(symbol, timeframe, limit);
               case 'marketdata':
@@ -230,8 +225,6 @@ export class MarketDataService {
           async () => {
             await rateLimiter.waitForToken(providerName === 'marketdata' ? 'twelvedata' : providerName);
             switch (providerName) {
-              case 'alpaca':
-                throw new Error('Alpaca disabled - use twelvedata, marketdata, or unusualwhales');
               case 'polygon': {
                 const polygonQuote = await this.polygon.getLatestQuote(symbol);
                 return polygonQuote.mid;
@@ -325,7 +318,7 @@ export class MarketDataService {
   }
 
   /**
-   * Get option price with caching (Alpaca and Polygon support options).
+   * Get option price with caching (Polygon and Unusual Whales support options).
    * Returns null when all providers fail or return partial/empty data. Does not throw.
    */
   async getOptionPrice(
@@ -346,7 +339,7 @@ export class MarketDataService {
     if (config.unusualWhalesOptionsEnabled && config.unusualWhalesApiKey) {
       optionProviders.push('unusualwhales');
     }
-    optionProviders.push('alpaca', 'polygon');
+    optionProviders.push('polygon');
 
     for (const providerName of optionProviders) {
       if (!this.checkCircuitBreaker(providerName)) {
@@ -361,8 +354,6 @@ export class MarketDataService {
               await rateLimiter.waitForToken(providerName);
             }
             switch (providerName) {
-              case 'alpaca':
-                return this.alpaca.getOptionPrice(symbol, strike, expiration, optionType);
               case 'polygon':
                 return this.polygon.getOptionPrice(symbol, strike, expiration, optionType);
               case 'unusualwhales':
@@ -481,37 +472,16 @@ export class MarketDataService {
   }
 
   /**
-   * Check if market is open
+   * Check if market is open (TwelveData primary, time-based fallback)
    */
   async isMarketOpen(): Promise<boolean> {
     const cacheKey = 'market:isOpen';
 
-    // Check cache first
     const cached = cache.get<boolean>(cacheKey);
     if (cached !== undefined) {
       return cached;
     }
 
-    // Try Alpaca first
-    if (this.checkCircuitBreaker('alpaca')) {
-      try {
-        const isOpen = await retry(() => this.alpaca.isMarketOpen(), {
-          retries: this.maxRetries,
-          onRetry: (error, attempt, delayMs) => {
-            logger.warn(`Retry ${attempt} for alpaca market open`, { error, delayMs });
-          },
-        });
-        this.recordSuccess('alpaca');
-        cache.set(cacheKey, isOpen, 60); // Cache for 60 seconds
-        return isOpen;
-      } catch (error) {
-        this.recordFailure('alpaca');
-        logger.warn('Alpaca market hours check failed, falling back', { error });
-      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'alpaca' } });
-      }
-    }
-
-    // Fallback to TwelveData
     try {
       const isOpen = await retry(() => this.twelveData.isMarketOpen(), {
         retries: this.maxRetries,
@@ -524,14 +494,42 @@ export class MarketDataService {
       return isOpen;
     } catch (error) {
       this.recordFailure('twelvedata');
-      logger.error('Failed to check market hours', error);
+      logger.warn('TwelveData market hours check failed, using time-based fallback', { error });
       Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'twelvedata' } });
-      return false; // Default to closed on error
     }
+
+    const isOpen = this.isMarketOpenByTime();
+    cache.set(cacheKey, isOpen, 60);
+    return isOpen;
   }
 
   /**
-   * Get market hours information
+   * Time-based market open check (ET: Mon-Fri 9:30-16:00).
+   * Used as a last-resort fallback when API checks fail.
+   */
+  private isMarketOpenByTime(): boolean {
+    const now = new Date();
+    const etOffset = this.getETOffset(now);
+    const etHours = (now.getUTCHours() + etOffset + 24) % 24;
+    const etMinutes = now.getUTCMinutes();
+    const etTotalMinutes = etHours * 60 + etMinutes;
+    const day = now.getUTCDay();
+    const isWeekday = day >= 1 && day <= 5;
+    const marketOpen = 9 * 60 + 30;
+    const marketClose = 16 * 60;
+    return isWeekday && etTotalMinutes >= marketOpen && etTotalMinutes < marketClose;
+  }
+
+  private getETOffset(date: Date): number {
+    const jan = new Date(date.getFullYear(), 0, 1);
+    const jul = new Date(date.getFullYear(), 6, 1);
+    const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
+    const isDST = date.getTimezoneOffset() < stdOffset;
+    return isDST ? -4 : -5;
+  }
+
+  /**
+   * Get market hours information (TwelveData primary, time-based fallback)
    */
   async getMarketHours(): Promise<{
     isMarketOpen: boolean;
@@ -539,34 +537,20 @@ export class MarketDataService {
     nextOpen?: Date;
     nextClose?: Date;
   }> {
-    try {
-      const hours = await retry(() => this.alpaca.getMarketHours(), {
-        retries: this.maxRetries,
-        onRetry: (error, attempt, delayMs) => {
-          logger.warn(`Retry ${attempt} for alpaca market hours`, { error, delayMs });
-        },
-      });
-      this.recordSuccess('alpaca');
-      
-      let minutesUntilClose: number | undefined;
-      if (hours.isOpen && hours.nextClose) {
-        const now = Date.now();
-        const closeTime = hours.nextClose.getTime();
-        minutesUntilClose = Math.floor((closeTime - now) / 60000);
-      }
+    const isOpen = await this.isMarketOpen();
 
-      return {
-        isMarketOpen: hours.isOpen,
-        minutesUntilClose,
-        nextOpen: hours.nextOpen,
-        nextClose: hours.nextClose,
-      };
-    } catch (error) {
-      this.recordFailure('alpaca');
-      logger.error('Failed to get market hours', error);
-      Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'alpaca' } });
-      return { isMarketOpen: false };
+    let minutesUntilClose: number | undefined;
+    if (isOpen) {
+      const now = new Date();
+      const etOffset = this.getETOffset(now);
+      const etHours = (now.getUTCHours() + etOffset + 24) % 24;
+      const etMinutes = now.getUTCMinutes();
+      const etTotalMinutes = etHours * 60 + etMinutes;
+      const marketClose = 16 * 60;
+      minutesUntilClose = Math.max(0, marketClose - etTotalMinutes);
     }
+
+    return { isMarketOpen: isOpen, minutesUntilClose };
   }
 
   /**
@@ -897,8 +881,7 @@ export class MarketDataService {
     const providers: Array<{ name: Provider; client: { healthCheck(symbol?: string): Promise<ProviderHealthStatus> } }> = [];
 
     for (const p of this.providerPriority) {
-      const client = p === 'alpaca' ? this.alpaca
-        : p === 'polygon' ? this.polygon
+      const client = p === 'polygon' ? this.polygon
         : p === 'marketdata' ? this.marketData
         : p === 'twelvedata' ? this.twelveData
         : null;
