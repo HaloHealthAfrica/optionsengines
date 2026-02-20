@@ -54,19 +54,20 @@ export class SignalProcessor {
           });
         }
 
-        // Reset market_data_unavailable rejections so they can be retried
-        const resetMd = await client.query(
+        // Bulk-reject stale pending signals so they don't clog the queue
+        const staleRejected = await client.query(
           `UPDATE signals
-           SET status = 'pending', rejection_reason = NULL, processing_attempts = 0, next_retry_at = NULL
-           WHERE status = 'rejected'
-             AND rejection_reason = 'market_data_unavailable'
-             AND processing_lock = FALSE
+           SET status = 'rejected', rejection_reason = 'signal_stale',
+               processing_lock = FALSE, locked_by = NULL, locked_at = NULL
+           WHERE (status IS NULL OR status = 'pending')
              AND processed = FALSE
-           RETURNING signal_id`
+             AND processing_lock = FALSE
+             AND timestamp < NOW() - INTERVAL '${config.signalMaxAgeMinutes} minutes'`
         );
-        if (resetMd.rowCount && resetMd.rowCount > 0) {
-          logger.warn('Reset market_data_unavailable rejections for retry', {
-            count: resetMd.rowCount,
+        if (staleRejected.rowCount && staleRejected.rowCount > 0) {
+          logger.warn('Bulk-rejected stale pending signals', {
+            count: staleRejected.rowCount,
+            maxAgeMinutes: config.signalMaxAgeMinutes,
           });
         }
       }
@@ -87,8 +88,9 @@ export class SignalProcessor {
              AND (status IS NULL OR status = 'pending')
              AND (queued_until IS NULL OR queued_until <= NOW())
              AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+             AND timestamp >= NOW() - INTERVAL '${config.signalMaxAgeMinutes} minutes'
            ${signalFilter}
-           ORDER BY timestamp ASC
+           ORDER BY timestamp DESC
            LIMIT $1
            FOR UPDATE SKIP LOCKED
          )
