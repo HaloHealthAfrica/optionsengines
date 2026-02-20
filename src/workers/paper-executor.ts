@@ -375,6 +375,10 @@ export class PaperExecutorWorker {
                 ['filled', order.order_id]
               );
 
+              const entrySnapshot = await marketData.getOptionSnapshot(
+                order.symbol, order.strike, new Date(order.expiration), order.type
+              ).catch(() => null);
+
               const positionSide: PositionSide = 'LONG'; // Current platform: buy-to-open only
               const insertResult = await txClient.query(
                 `INSERT INTO refactored_positions (
@@ -382,8 +386,9 @@ export class PaperExecutorWorker {
                   entry_price, engine, experiment_id, status, entry_timestamp, last_updated,
                   entry_bias_score, entry_regime_type, entry_mode_hint,
                   entry_macro_class, entry_acceleration_state_strength_delta,
-                  is_test, position_side, instrument_type, multiplier
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+                  is_test, position_side, instrument_type, multiplier,
+                  greeks_at_entry, iv_at_entry
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
                 RETURNING position_id`,
                 [
                   order.symbol, order.option_symbol, order.strike, order.expiration,
@@ -395,6 +400,8 @@ export class PaperExecutorWorker {
                   positionSide,
                   'OPTION',
                   100,
+                  entrySnapshot?.greeks ? JSON.stringify(entrySnapshot.greeks) : null,
+                  entrySnapshot?.iv ?? null,
                 ]
               );
               positionId = insertResult.rows[0]?.position_id ?? null;

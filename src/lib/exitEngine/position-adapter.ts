@@ -21,6 +21,8 @@ export interface PositionRow {
   entry_price: number;
   entry_timestamp: Date;
   engine?: 'A' | 'B' | null;
+  greeks_at_entry?: Record<string, number> | null;
+  iv_at_entry?: number | null;
 }
 
 export interface ExitRuleRow {
@@ -121,8 +123,10 @@ export function buildExitDecisionInput(
       expiry: expiryDate.toISOString().slice(0, 10),
       dteAtEntry: Math.round(dteAtEntry * 10) / 10,
       strike: position.strike,
-      greeksAtEntry: ZERO_GREEKS,
-      ivAtEntry: snapshot?.iv,
+      greeksAtEntry: position.greeks_at_entry
+        ? { delta: position.greeks_at_entry.delta ?? 0, gamma: position.greeks_at_entry.gamma ?? 0, theta: position.greeks_at_entry.theta ?? 0, vega: position.greeks_at_entry.vega ?? 0 }
+        : ZERO_GREEKS,
+      ivAtEntry: position.iv_at_entry ?? snapshot?.iv,
     },
     guardrails: {
       maxHoldTime: maxHoldHours * 60,

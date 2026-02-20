@@ -182,7 +182,18 @@ async function buildRecommendation(
           level: 'info',
           data: { signal_id: signal.signal_id, rationale: entryResult.rationale },
         });
-        return null;
+        return {
+          experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
+          engine,
+          symbol: signal.symbol,
+          direction: signal.direction,
+          strike: 0,
+          expiration: new Date(),
+          quantity: 0,
+          entry_price: 0,
+          is_shadow: false,
+          entryWait: true,
+        };
       }
     }
 
@@ -426,6 +437,55 @@ async function buildEngineBRecommendation(
           });
           return null;
         }
+      }
+    }
+
+    if (context?.enrichment && !isTestB) {
+      const entryInput = buildEntryDecisionInput(
+        signal,
+        context,
+        context.enrichment,
+        mtfBiasB?.unifiedState
+      );
+      const entryResult = evaluateEntryDecision(entryInput);
+      if (entryResult.action === 'BLOCK') {
+        logger.info('Engine B entry decision blocked', {
+          signal_id: signal.signal_id,
+          symbol: signal.symbol,
+          rationale: entryResult.rationale,
+        });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'Engine B entry blocked by tier rules',
+          level: 'info',
+          data: { signal_id: signal.signal_id, rationale: entryResult.rationale },
+        });
+        return null;
+      }
+      if (entryResult.action === 'WAIT') {
+        logger.info('Engine B entry decision wait', {
+          signal_id: signal.signal_id,
+          symbol: signal.symbol,
+          rationale: entryResult.rationale,
+        });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'Engine B entry delayed by tier rules',
+          level: 'info',
+          data: { signal_id: signal.signal_id, rationale: entryResult.rationale },
+        });
+        return {
+          experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
+          engine: 'B',
+          symbol: signal.symbol,
+          direction: signal.direction,
+          strike: 0,
+          expiration: new Date(),
+          quantity: 0,
+          entry_price: 0,
+          is_shadow: false,
+          entryWait: true,
+        };
       }
     }
 

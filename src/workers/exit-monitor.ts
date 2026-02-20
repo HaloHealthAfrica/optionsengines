@@ -33,6 +33,8 @@ interface OpenPosition {
   trailing_stop_price?: number | null;
   position_side?: string | null;
   multiplier?: number | null;
+  greeks_at_entry?: Record<string, number> | null;
+  iv_at_entry?: number | null;
 }
 
 interface ExitRule {

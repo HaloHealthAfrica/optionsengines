@@ -365,6 +365,52 @@ export class OrchestratorService {
           data: { execution_mode: policy.execution_mode, variant: experiment.variant },
         });
         let { engineA, engineB } = await this.distributeSignal(signal, contextWithEnrichment, experiment);
+
+        const activeRec = experiment.variant === 'A' ? engineA : engineB;
+        if (activeRec?.entryWait) {
+          const attempts = Number(signal.processing_attempts ?? 0);
+          const maxWaitRetries = 3;
+          if (attempts < maxWaitRetries) {
+            const waitDelayMs = 5 * 60 * 1000;
+            const nextRetryAt = new Date(Date.now() + waitDelayMs);
+            await this.signalProcessor.scheduleRetry(
+              signal.signal_id,
+              attempts + 1,
+              nextRetryAt,
+              'entry_wait'
+            );
+            logger.info('Entry engine WAIT — signal re-queued', {
+              signal_id: signal.signal_id,
+              symbol: signal.symbol,
+              attempt: attempts + 1,
+              maxRetries: maxWaitRetries,
+              next_retry_at: nextRetryAt.toISOString(),
+            });
+            Sentry.addBreadcrumb({
+              category: 'engine',
+              message: 'Entry wait — signal re-queued',
+              level: 'info',
+              data: { signal_id: signal.signal_id, attempt: attempts + 1 },
+            });
+          } else {
+            await this.signalProcessor.updateStatus(signal.signal_id, 'rejected', 'entry_wait_exhausted');
+            await this.signalProcessor.markFailed(signal.signal_id);
+            logger.info('Entry engine WAIT retries exhausted — signal rejected', {
+              signal_id: signal.signal_id,
+              symbol: signal.symbol,
+              attempts,
+            });
+          }
+          return {
+            experiment,
+            policy,
+            market_context,
+            success: false,
+            error: 'entry_wait',
+            duration_ms: Date.now() - startedAt,
+          };
+        }
+
         if (experiment.variant === 'B' && engineB == null) {
           logger.warn('Engine B returned no recommendation', {
             signal_id: signal.signal_id,

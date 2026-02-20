@@ -114,6 +114,8 @@ export interface TradeRecommendation {
   stop_loss?: number;
   take_profit?: number;
   is_shadow: boolean;
+  /** When true, the entry engine returned WAIT — orchestrator should re-queue the signal */
+  entryWait?: boolean;
   /** Phase 2b: Optional entry metadata for audit trail */
   entry_metadata?: {
     advancedStrikeUsed?: boolean;
