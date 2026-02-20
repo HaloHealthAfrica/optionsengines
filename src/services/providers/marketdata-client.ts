@@ -41,46 +41,18 @@ import type { IMarketDataProvider, ProviderHealthStatus } from './market-data-pr
 export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'healthCheck'> {
   readonly name = 'marketdata' as const;
   private readonly apiKey: string;
-  private readonly baseUrl: string = 'https://api.marketdata.app';
-  private readonly proxyUrl: string;
-  private proxyFetchFn: ((url: string | URL, init?: any) => Promise<any>) | null = null;
-  private proxyInitialized = false;
+  private readonly baseUrl: string;
 
   constructor() {
     this.apiKey = config.marketDataApiKey;
-    this.proxyUrl = config.marketDataProxyUrl;
+    this.baseUrl = (config.marketDataBaseUrl || 'https://api.marketdata.app').replace(/\/+$/, '');
 
     if (!this.apiKey) {
       logger.warn('MarketData.app API key not configured');
     }
-    if (this.proxyUrl) {
-      logger.info('MarketData.app proxy configured — all requests will route through static IP', {
-        proxy: this.proxyUrl.replace(/\/\/.*@/, '//***@'),
-      });
+    if (this.baseUrl !== 'https://api.marketdata.app') {
+      logger.info('MarketData.app routing through proxy', { baseUrl: this.baseUrl });
     }
-  }
-
-  /**
-   * Returns a fetch function that routes through the proxy when MARKETDATA_PROXY_URL is set.
-   * Uses Node's built-in undici ProxyAgent so no extra dependency is needed.
-   */
-  private async getFetch(): Promise<typeof fetch> {
-    if (!this.proxyUrl) return fetch;
-
-    if (!this.proxyInitialized) {
-      try {
-        const undici = await import('undici');
-        const agent = new undici.ProxyAgent(this.proxyUrl);
-        this.proxyFetchFn = (url: string | URL, init?: any) =>
-          undici.fetch(url, { ...init, dispatcher: agent });
-        logger.info('MarketData.app undici ProxyAgent initialized');
-      } catch (err) {
-        logger.error('Failed to init MarketData.app proxy — falling back to direct fetch', err);
-      }
-      this.proxyInitialized = true;
-    }
-
-    return (this.proxyFetchFn as typeof fetch) ?? fetch;
   }
 
   /**
@@ -91,10 +63,9 @@ export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'hea
    */
   private async request<T>(endpoint: string, retryOn403 = true): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
-    const fetchFn = await this.getFetch();
 
     try {
-      const response = await fetchFn(url, {
+      const response = await fetch(url, {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
         },

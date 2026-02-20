@@ -50,7 +50,8 @@ async function main() {
   // 2. MarketData.app options chain (used for GEX computation)
   if (mdKey) {
     console.log('2. MarketData.app options chain (gamma + openInterest for GEX)');
-    const url = `https://api.marketdata.app/v1/options/chain/${SYMBOL}`;
+    const mdBaseUrl = process.env.MARKETDATA_BASE_URL || 'https://proxyip.fly.dev';
+    const url = `${mdBaseUrl}/v1/options/chain/${SYMBOL}`;
     console.log(`   URL: ${url}`);
     try {
       const res = await fetch(url, {

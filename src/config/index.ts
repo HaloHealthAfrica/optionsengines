@@ -34,7 +34,9 @@ interface Config {
   polygonWsEnabled: boolean;
   twelveDataApiKey: string;
   marketDataApiKey: string;
-  /** HTTP/SOCKS proxy URL for MarketData.app requests (ensures single outbound IP) */
+  /** Base URL for MarketData.app API (set to reverse-proxy URL for static outbound IP) */
+  marketDataBaseUrl: string;
+  /** HTTP/SOCKS proxy URL for MarketData.app requests (alternative to base URL swap) */
   marketDataProxyUrl: string;
   unusualWhalesApiKey: string;
   unusualWhalesGammaUrl: string;
@@ -260,6 +262,7 @@ export const config: Config = {
   twelveDataApiKey: getEnvVar('TWELVE_DATA_API_KEY', ''),
   marketDataApiKey:
     getEnvVar('MARKET_DATA_API_KEY', '') || getEnvVar('MARKETDATA_API_KEY', ''),
+  marketDataBaseUrl: getEnvVar('MARKETDATA_BASE_URL', 'https://proxyip.fly.dev'),
   marketDataProxyUrl: getEnvVar('MARKETDATA_PROXY_URL', ''),
   unusualWhalesApiKey: getEnvVar('UNUSUAL_WHALES_API_KEY', ''),
   unusualWhalesGammaUrl: getEnvVar('UNUSUAL_WHALES_GAMMA_URL', ''),
