@@ -56,7 +56,7 @@ afterAll(async () => {
  * Matches any query parameters and ignores authorization headers
  */
 export function mockGEXAPI(symbol: string = 'SPY') {
-  return nock('https://api.marketdata.app', {
+  return nock(process.env.MARKETDATA_BASE_URL || 'https://proxyip.fly.dev', {
     // Ignore authorization headers in matching
     badheaders: [],
   })

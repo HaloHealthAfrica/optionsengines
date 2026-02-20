@@ -169,7 +169,7 @@ export class TestOrchestratorImpl implements TestOrchestrator {
     scopes.push(alpacaScope);
     
     // Mock MarketDataApp API
-    const marketDataScope = nock('https://api.marketdata.app')
+    const marketDataScope = nock(process.env.MARKETDATA_BASE_URL || 'https://proxyip.fly.dev')
       .persist()
       .get(/.*/)
       .reply(200, {

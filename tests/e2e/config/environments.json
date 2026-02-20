@@ -20,7 +20,7 @@
       },
       "marketdata": {
         "mock": true,
-        "baseUrl": "https://api.marketdata.app"
+        "baseUrl": "https://proxyip.fly.dev"
       },
       "broker": {
         "mock": true,
@@ -50,7 +50,7 @@
       },
       "marketdata": {
         "mock": false,
-        "baseUrl": "https://api.marketdata.app"
+        "baseUrl": "https://proxyip.fly.dev"
       },
       "broker": {
         "mock": true,
@@ -80,7 +80,7 @@
       },
       "marketdata": {
         "mock": false,
-        "baseUrl": "https://api.marketdata.app"
+        "baseUrl": "https://proxyip.fly.dev"
       },
       "broker": {
         "mock": false,

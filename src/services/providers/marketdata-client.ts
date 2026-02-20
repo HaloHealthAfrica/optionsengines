@@ -45,14 +45,12 @@ export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'hea
 
   constructor() {
     this.apiKey = config.marketDataApiKey;
-    this.baseUrl = (config.marketDataBaseUrl || 'https://api.marketdata.app').replace(/\/+$/, '');
+    this.baseUrl = (config.marketDataBaseUrl || 'https://proxyip.fly.dev').replace(/\/+$/, '');
 
     if (!this.apiKey) {
       logger.warn('MarketData.app API key not configured');
     }
-    if (this.baseUrl !== 'https://api.marketdata.app') {
-      logger.info('MarketData.app routing through proxy', { baseUrl: this.baseUrl });
-    }
+    logger.info('MarketData.app base URL', { baseUrl: this.baseUrl });
   }
 
   /**
