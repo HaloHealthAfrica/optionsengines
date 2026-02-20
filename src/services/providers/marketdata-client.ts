@@ -2,6 +2,7 @@
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 import { Candle } from '../../types/index.js';
+import { getMarketClock } from '../../utils/market-hours.js';
 
 export interface MarketDataBar {
   t: number; // timestamp (unix)
@@ -406,40 +407,16 @@ export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'hea
     return mapping[timeframe] || 5 * 60;
   }
 
-  /**
-   * Check if market is open (simplified)
-   */
   async isMarketOpen(): Promise<boolean> {
-    const now = new Date();
-    const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-
-    const day = et.getDay();
-    const hour = et.getHours();
-    const minute = et.getMinutes();
-
-    // Weekend check
-    if (day === 0 || day === 6) {
-      return false;
-    }
-
-    // Market hours: 9:30 AM - 4:00 PM ET
-    const currentMinutes = hour * 60 + minute;
-    const marketOpen = 9 * 60 + 30;
-    const marketClose = 16 * 60;
-
-    return currentMinutes >= marketOpen && currentMinutes < marketClose;
+    return getMarketClock().isMarketOpen;
   }
 
-  /**
-   * Get market hours information
-   */
   async getMarketHours(): Promise<{
     isOpen: boolean;
     nextOpen?: Date;
     nextClose?: Date;
   }> {
-    const isOpen = await this.isMarketOpen();
-    return { isOpen };
+    return { isOpen: getMarketClock().isMarketOpen };
   }
 
   async healthCheck(): Promise<ProviderHealthStatus> {

@@ -10,6 +10,7 @@ import { planToSignalBridge, stratPlanLifecycleService } from '../services/strat
 import * as Sentry from '@sentry/node';
 import { registerWorkerErrorHandlers } from '../services/worker-observability.service.js';
 import { setLastSignalProcessed, updateWorkerStatus } from '../services/trade-engine-health.service.js';
+import { getMarketClock } from '../utils/market-hours.js';
 
 export class OrchestratorWorker {
   private timer: NodeJS.Timeout | null = null;
@@ -38,7 +39,15 @@ export class OrchestratorWorker {
       Sentry.captureException(error, { tags: { worker: 'OrchestratorWorker' } });
     });
 
-    logger.info('Orchestrator worker started', { intervalMs: this.intervalMs });
+    const startupClock = getMarketClock();
+    logger.info('Orchestrator worker started', {
+      intervalMs: this.intervalMs,
+      et: startupClock.displayTime,
+      session: startupClock.session,
+      marketOpen: startupClock.isMarketOpen,
+      minutesUntilClose: startupClock.minutesUntilClose,
+      isHoliday: startupClock.isHoliday,
+    });
     updateWorkerStatus('OrchestratorWorker', { running: true });
   }
 
@@ -111,11 +120,22 @@ export class OrchestratorWorker {
           ? Math.round(this.avgProcessingMs * 0.8 + batchAvg * 0.2)
           : Math.round(batchAvg);
       }
+      const clock = getMarketClock();
       logger.info('Orchestrator batch processed', {
         signals: results.length,
         durationMs: Date.now() - startedAt,
         avgSignalMs: this.avgProcessingMs,
+        et: clock.displayTime,
+        session: clock.session,
+        marketOpen: clock.isMarketOpen,
+        minutesUntilClose: clock.minutesUntilClose,
       });
+      if (clock.closingSoon && clock.minutesUntilClose !== null) {
+        logger.warn('Market closing soon', {
+          minutesUntilClose: clock.minutesUntilClose,
+          et: clock.displayTime,
+        });
+      }
       updateWorkerStatus('OrchestratorWorker', {
         lastDurationMs: Date.now() - startedAt,
         backoffMs: this.backoffMs,

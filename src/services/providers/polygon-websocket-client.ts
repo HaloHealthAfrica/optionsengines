@@ -62,6 +62,7 @@ export class PolygonWebSocketClient extends EventEmitter {
   private subscribedSymbols: Set<string> = new Set();
   private isAuthenticated: boolean = false;
   private isConnecting: boolean = false;
+  private authFailed: boolean = false;
 
   constructor() {
     super();
@@ -83,6 +84,9 @@ export class PolygonWebSocketClient extends EventEmitter {
    * Connect to Polygon WebSocket
    */
   async connect(): Promise<void> {
+    if (this.authFailed) {
+      return;
+    }
     if (this.isConnecting || (this.ws && this.ws.readyState === WebSocket.OPEN)) {
       logger.debug('WebSocket already connected or connecting');
       return;
@@ -215,7 +219,8 @@ export class PolygonWebSocketClient extends EventEmitter {
         this.resubscribeAll();
       }
     } else if (message.status === 'auth_failed') {
-      logger.error('Polygon WebSocket authentication failed');
+      logger.error('Polygon WebSocket authentication failed — stopping reconnection. Check your Polygon API plan.');
+      this.authFailed = true;
       this.emit('auth_failed');
       this.disconnect();
     }
@@ -406,6 +411,10 @@ export class PolygonWebSocketClient extends EventEmitter {
    * Schedule reconnection attempt
    */
   private scheduleReconnect(): void {
+    if (this.authFailed) {
+      logger.warn('Polygon WebSocket auth permanently failed — not reconnecting');
+      return;
+    }
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       logger.error('Max reconnection attempts reached, giving up');
       this.emit('max_reconnect_attempts');

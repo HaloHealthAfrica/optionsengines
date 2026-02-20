@@ -16,6 +16,7 @@ import { adaptOptionChain, approximateGreeks, estimateIV } from './option-chain-
 import { marketDataStream } from './market-data-stream.service.js';
 import { unusualWhalesOptionsService } from './unusual-whales-options.service.js';
 import * as Sentry from '@sentry/node';
+import { getMarketClock } from '../utils/market-hours.js';
 
 type Provider = 'polygon' | 'marketdata' | 'twelvedata' | 'unusualwhales';
 
@@ -283,9 +284,9 @@ export class MarketDataService {
     }
 
     const bounds: Record<string, { min: number; max: number }> = {
-      SPY: { min: 300, max: 700 },
-      QQQ: { min: 200, max: 600 },
-      IWM: { min: 100, max: 300 },
+      SPY: { min: 300, max: 900 },
+      QQQ: { min: 200, max: 800 },
+      IWM: { min: 100, max: 400 },
     };
     const normalized = symbol.toUpperCase();
     const range = bounds[normalized];
@@ -504,28 +505,11 @@ export class MarketDataService {
   }
 
   /**
-   * Time-based market open check (ET: Mon-Fri 9:30-16:00).
-   * Used as a last-resort fallback when API checks fail.
+   * Time-based market open check using centralized getMarketClock().
+   * Includes holiday awareness. Used as a last-resort fallback when API checks fail.
    */
   private isMarketOpenByTime(): boolean {
-    const now = new Date();
-    const etOffset = this.getETOffset(now);
-    const etHours = (now.getUTCHours() + etOffset + 24) % 24;
-    const etMinutes = now.getUTCMinutes();
-    const etTotalMinutes = etHours * 60 + etMinutes;
-    const day = now.getUTCDay();
-    const isWeekday = day >= 1 && day <= 5;
-    const marketOpen = 9 * 60 + 30;
-    const marketClose = 16 * 60;
-    return isWeekday && etTotalMinutes >= marketOpen && etTotalMinutes < marketClose;
-  }
-
-  private getETOffset(date: Date): number {
-    const jan = new Date(date.getFullYear(), 0, 1);
-    const jul = new Date(date.getFullYear(), 6, 1);
-    const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
-    const isDST = date.getTimezoneOffset() < stdOffset;
-    return isDST ? -4 : -5;
+    return getMarketClock().isMarketOpen;
   }
 
   /**
@@ -538,19 +522,12 @@ export class MarketDataService {
     nextClose?: Date;
   }> {
     const isOpen = await this.isMarketOpen();
+    const clock = getMarketClock();
 
-    let minutesUntilClose: number | undefined;
-    if (isOpen) {
-      const now = new Date();
-      const etOffset = this.getETOffset(now);
-      const etHours = (now.getUTCHours() + etOffset + 24) % 24;
-      const etMinutes = now.getUTCMinutes();
-      const etTotalMinutes = etHours * 60 + etMinutes;
-      const marketClose = 16 * 60;
-      minutesUntilClose = Math.max(0, marketClose - etTotalMinutes);
-    }
-
-    return { isMarketOpen: isOpen, minutesUntilClose };
+    return {
+      isMarketOpen: isOpen,
+      minutesUntilClose: isOpen ? clock.minutesUntilClose ?? undefined : undefined,
+    };
   }
 
   /**

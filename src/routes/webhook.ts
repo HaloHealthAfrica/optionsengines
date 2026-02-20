@@ -132,9 +132,7 @@ export const webhookSchema = z
     symbol: z.string().min(1).max(20).optional(),
     ticker: z.string().min(1).max(20).optional(),
     action: z.enum(['BUY', 'SELL']).optional(),
-    direction: z
-      .enum(['long', 'short', 'LONG', 'SHORT', 'CALL', 'PUT', 'BUY', 'SELL'])
-      .optional(),
+    direction: z.string().max(30).optional(),
     side: z.string().min(1).max(20).optional(),
     trend: z.string().min(1).max(20).optional(),
     bias: z.string().min(1).max(20).optional(),
@@ -143,6 +141,7 @@ export const webhookSchema = z
         type: z.string().min(1).max(20).optional(),
         direction: z.string().min(1).max(20).optional(),
       })
+      .passthrough()
       .optional(),
     timeframe: z.union([z.string().min(1).max(20), z.number()]).optional(),
     tf: z.union([z.string().min(1).max(20), z.number()]).optional(),
@@ -297,7 +296,7 @@ function normalizeTimeframe(payload: WebhookPayload): string | null {
   if (raw === undefined || raw === null) {
     // Fallback: session "OPEN" = daily, "PRE"/"POST" = daily
     const session = String(anyPayload.session ?? '').toUpperCase();
-    if (['OPEN', 'PRE', 'POST', 'REGULAR'].includes(session)) return '1d';
+    if (['OPEN', 'PRE', 'POST', 'REGULAR', 'MIDDAY', 'CLOSE', 'RTH', 'ETH'].includes(session)) return '1d';
     // Fallback: Adaptive Strat / strat_details style payloads → daily
     if (anyPayload.strat_details && typeof anyPayload.strat_details === 'object') return '1d';
     return null;
