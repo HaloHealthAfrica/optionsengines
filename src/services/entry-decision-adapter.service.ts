@@ -41,15 +41,17 @@ function dealerPositionToRegime(dealerPosition: string | undefined): RegimeType 
 
 /**
  * Derive IV percentile for entry engine volatility band check.
- * Uses enrichment.ivPercentile when available; otherwise ATR-derived volatility proxy.
- * Volatility (ATR/price*100) typically 5-25% maps to percentile 0-100.
+ * Uses enrichment.ivPercentile when available (from UW stock volatility endpoint);
+ * otherwise uses ATR-derived daily volatility as a proxy.
+ * Daily ATR/price*100 for major ETFs: SPY ~0.5-2%, QQQ ~0.6-2.5%, IWM ~0.7-3%.
+ * Proxy maps this range to roughly 20-80 IV percentile.
  */
 function deriveIvPercentile(enriched: Record<string, unknown> | undefined, volatility: number): number {
   const fromEnrichment = Number(enriched?.ivPercentile ?? enriched?.iv_percentile);
   if (Number.isFinite(fromEnrichment) && fromEnrichment >= 0 && fromEnrichment <= 100) {
     return Math.round(fromEnrichment);
   }
-  const proxy = Math.min(100, Math.max(0, (volatility - 5) * 5));
+  const proxy = Math.min(100, Math.max(0, ((volatility - 0.4) / 2.6) * 100));
   return Math.round(proxy);
 }
 

@@ -6,6 +6,10 @@ import { confluenceService } from './confluence.service.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { evaluateMarketSession, normalizeMarketSession } from '../utils/market-session.js';
+import { getMarketClock } from '../utils/market-hours.js';
+import { UnusualWhalesOptionsClient } from './providers/unusual-whales-options-client.js';
+
+const uwOptionsClient = new UnusualWhalesOptionsClient();
 
 /** Per-call timeout for external API calls during enrichment (ms) */
 const ENRICHMENT_CALL_TIMEOUT_MS = 8000;
@@ -103,7 +107,16 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     gracePeriodMinutes: config.marketCloseGraceMinutes,
   });
   const isMarketOpen = sessionEvaluation.isOpen;
+  const clock = getMarketClock();
   riskResult.marketOpen = isMarketOpen;
+  riskResult.marketClock = {
+    et: clock.displayTime,
+    session: clock.session,
+    minutesUntilClose: clock.minutesUntilClose,
+    closingSoon: clock.closingSoon,
+    powerHour: clock.powerHour,
+    isHoliday: clock.isHoliday,
+  };
   riskResult.marketSession = {
     session_hint: sessionHint,
     session_by_time: sessionEvaluation.sessionLabel,
@@ -424,6 +437,7 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
 
   let gexData = null;
   let optionsFlow = null;
+  let ivPercentile: number | null = null;
   try {
     gexData = await withTimeout(
       positioningService.getGexSnapshot(signal.symbol),
@@ -441,6 +455,19 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     );
   } catch (error) {
     logger.warn('Options flow data unavailable for signal', { error, symbol: signal.symbol });
+  }
+
+  try {
+    const volData = await withTimeout(
+      uwOptionsClient.getStockVolatility(signal.symbol),
+      ENRICHMENT_CALL_TIMEOUT_MS,
+      `getStockVolatility(${signal.symbol})`
+    );
+    if (volData.ivRank != null) {
+      ivPercentile = volData.ivRank;
+    }
+  } catch (error) {
+    logger.warn('IV percentile data unavailable for signal', { error, symbol: signal.symbol });
   }
 
   // Confluence: netflow + gamma + signal direction
@@ -479,7 +506,7 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     }
   }
 
-  const enrichedData = {
+  const enrichedData: Record<string, any> = {
     symbol: signal.symbol,
     timeframe: signal.timeframe,
     currentPrice,
@@ -488,6 +515,7 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     gex: gexData,
     optionsFlow,
     confluence,
+    ivPercentile,
   };
 
   return { enrichedData, riskResult, rejectionReason, queueUntil, queueReason, decisionOnly };

@@ -434,6 +434,111 @@ export class UnusualWhalesOptionsClient {
     }
   }
 
+  /**
+   * Fetch stock-level IV data from UW volatility endpoint.
+   * GET /stock/:ticker/volatility — returns ATM IV by expiry, from which we derive IV rank.
+   * Falls back to option chain ATM contracts if the dedicated endpoint fails.
+   */
+  async getStockVolatility(ticker: string): Promise<UnusualWhalesStockVolatility> {
+    const empty: UnusualWhalesStockVolatility = { ivRank: null, iv30: null, historicalVolatility: null, atmIv: null };
+    if (!this.apiKey) return empty;
+    if (!(await this.rateLimit())) return empty;
+
+    try {
+      const url = `${BASE_URL}/stock/${encodeURIComponent(ticker)}/volatility`;
+      const response = await fetch(url, { headers: this.headers });
+      if (!response.ok) {
+        logger.debug('UW volatility endpoint unavailable, trying option chain fallback', {
+          ticker, status: response.status,
+        });
+        return this.deriveVolatilityFromChain(ticker);
+      }
+      const payload = (await response.json()) as Record<string, unknown>;
+      const data = (payload?.data ?? payload?.result ?? payload) as Record<string, unknown>;
+
+      const ivRankRaw = this.toNum(
+        data?.iv_rank ?? data?.ivRank ?? data?.iv_percentile ?? data?.implied_volatility_rank
+      );
+      const iv30Raw = this.toNum(data?.iv30 ?? data?.iv_30 ?? data?.implied_volatility_30);
+      const hvRaw = this.toNum(
+        data?.historical_volatility ?? data?.hv ?? data?.hv30 ?? data?.realized_volatility
+      );
+
+      let atmIv: number | null = null;
+      const expiryEntries = data?.data ?? data?.expirations ?? data?.expiries;
+      if (Array.isArray(expiryEntries) && expiryEntries.length > 0) {
+        const ivValues = expiryEntries
+          .map((e: Record<string, unknown>) =>
+            this.toNum(e?.implied_volatility ?? e?.iv ?? e?.avg_iv ?? e?.atm_iv)
+          )
+          .filter((v): v is number => v != null && v > 0 && v < 5);
+        if (ivValues.length > 0) {
+          atmIv = ivValues[0];
+        }
+      }
+
+      const ivRank = ivRankRaw != null && ivRankRaw >= 0 && ivRankRaw <= 100
+        ? ivRankRaw
+        : ivRankRaw != null && ivRankRaw > 0 && ivRankRaw <= 1
+          ? Math.round(ivRankRaw * 100)
+          : null;
+
+      if (ivRank != null || iv30Raw != null || atmIv != null) {
+        logger.debug('UW volatility fetched', { ticker, ivRank, iv30: iv30Raw, atmIv });
+      }
+
+      return { ivRank, iv30: iv30Raw, historicalVolatility: hvRaw, atmIv };
+    } catch (error) {
+      logger.warn('UW volatility fetch failed, trying option chain fallback', { error, ticker });
+      return this.deriveVolatilityFromChain(ticker);
+    }
+  }
+
+  /**
+   * Fallback: derive ATM IV from the option chain when the volatility endpoint is unavailable.
+   */
+  private async deriveVolatilityFromChain(ticker: string): Promise<UnusualWhalesStockVolatility> {
+    const empty: UnusualWhalesStockVolatility = { ivRank: null, iv30: null, historicalVolatility: null, atmIv: null };
+    try {
+      const contracts = await this.getOptionContracts(ticker);
+      if (contracts.length === 0) return empty;
+
+      const withIv = contracts.filter(
+        (c) => c.iv != null && c.iv > 0 && c.iv < 5
+      );
+      if (withIv.length === 0) return empty;
+
+      const now = new Date();
+      const msPerDay = 86400000;
+      const near = withIv.filter((c) => {
+        const exp = new Date(c.expiration);
+        const dte = (exp.getTime() - now.getTime()) / msPerDay;
+        return dte >= 1 && dte <= 45;
+      });
+      const source = near.length >= 4 ? near : withIv;
+
+      const ivValues = source.map((c) => c.iv!).sort((a, b) => a - b);
+      const median = ivValues[Math.floor(ivValues.length / 2)];
+      const annualizedIv = median * 100;
+
+      const SPY_IV_RANGE = { low: 10, high: 35 };
+      const QQQ_IV_RANGE = { low: 12, high: 40 };
+      const DEFAULT_RANGE = { low: 15, high: 50 };
+      const range = ticker === 'SPY' ? SPY_IV_RANGE : ticker === 'QQQ' ? QQQ_IV_RANGE : DEFAULT_RANGE;
+      const ivRank = Math.round(
+        Math.min(100, Math.max(0,
+          ((annualizedIv - range.low) / (range.high - range.low)) * 100
+        ))
+      );
+
+      logger.debug('Derived IV from option chain', { ticker, medianIv: median, annualizedIv, ivRank });
+      return { ivRank, iv30: median, historicalVolatility: null, atmIv: median };
+    } catch (error) {
+      logger.warn('Option chain IV derivation failed', { error, ticker });
+      return empty;
+    }
+  }
+
   private normalizeFlowAlert(r: Record<string, unknown>): UnusualWhalesFlowAlert {
     const typeRaw = r.option_type ?? r.type ?? r.side ?? 'call';
     const type: 'call' | 'put' = String(typeRaw).toLowerCase() === 'put' ? 'put' : 'call';
@@ -479,4 +584,15 @@ export interface UnusualWhalesFlowAlert {
   sentiment: 'bullish' | 'bearish' | 'neutral';
   unusual: boolean;
   timestamp: number;
+}
+
+export interface UnusualWhalesStockVolatility {
+  /** IV rank (0-100) from Unusual Whales */
+  ivRank: number | null;
+  /** 30-day implied volatility */
+  iv30: number | null;
+  /** Historical (realized) volatility */
+  historicalVolatility: number | null;
+  /** ATM IV for nearest expiry */
+  atmIv: number | null;
 }
