@@ -494,8 +494,10 @@ export class OrchestratorService {
   }
 
   async createExperiment(signal: Signal) {
-    // AB_SPLIT_PERCENTAGE = % to Engine B; convert to split for A (1 - B%)
-    const pctB = Math.min(1, Math.max(0, config.abSplitPercentage));
+    // ENABLE_VARIANT_B is the master safety gate; AB_SPLIT_PERCENTAGE controls the ratio
+    const pctB = config.enableVariantB
+      ? Math.min(1, Math.max(0, config.abSplitPercentage))
+      : 0;
     const splitToA = 1 - pctB;
     return this.experimentManager.createExperiment(signal, splitToA, 'v1.0');
   }
@@ -552,16 +554,29 @@ export class OrchestratorService {
     }
     if (variant === 'B' && engineB) {
       const gammaDir = dealerDecision.direction === 'LONG' ? 'long' : 'short';
+      const baseQty = engineB.quantity;
+      const adjustedQty = Math.max(1, Math.floor(baseQty * dealerDecision.position_size_multiplier));
       if (engineB.direction !== gammaDir) {
-        logger.info('Dealer strategy conflict with Engine B - requiring alignment', {
+        if (dealerDecision.confidence_score >= 0.7) {
+          logger.info('Dealer strategy override Engine B direction', {
+            signal_id: signal.signal_id,
+            originalDirection: engineB.direction,
+            gammaDirection: gammaDir,
+            confidence: dealerDecision.confidence_score,
+          });
+          return {
+            engineA,
+            engineB: { ...engineB, direction: gammaDir, quantity: adjustedQty },
+          };
+        }
+        logger.info('Dealer strategy conflict with Engine B - low confidence, keeping Engine B direction', {
           signal_id: signal.signal_id,
           engineBDirection: engineB.direction,
           gammaDirection: gammaDir,
+          confidence: dealerDecision.confidence_score,
         });
-        return { engineA, engineB: null };
+        return { engineA, engineB };
       }
-      const baseQty = engineB.quantity;
-      const adjustedQty = Math.max(1, Math.floor(baseQty * dealerDecision.position_size_multiplier));
       return {
         engineA,
         engineB: { ...engineB, quantity: adjustedQty },

@@ -8,8 +8,19 @@ const DEFAULT_REFRESH_MS = 5000;
 export class FeatureFlagService {
   private cache: Map<string, FeatureFlag> = new Map();
   private refreshTimer: NodeJS.Timeout | null = null;
+  private configDefaults: Map<string, boolean> = new Map();
 
   constructor(private readonly refreshIntervalMs: number = DEFAULT_REFRESH_MS) {}
+
+  /**
+   * Register env-var-based defaults that apply when the DB flag is absent.
+   * DB values always take precedence when present.
+   */
+  registerConfigDefaults(defaults: Record<string, boolean>): void {
+    for (const [name, enabled] of Object.entries(defaults)) {
+      this.configDefaults.set(name, enabled);
+    }
+  }
 
   async init(): Promise<void> {
     await this.refreshCache();
@@ -20,7 +31,10 @@ export class FeatureFlagService {
         });
       }, this.refreshIntervalMs);
     }
-    logger.info('Feature flag service initialized', { refreshIntervalMs: this.refreshIntervalMs });
+    logger.info('Feature flag service initialized', {
+      refreshIntervalMs: this.refreshIntervalMs,
+      configDefaultsRegistered: this.configDefaults.size,
+    });
   }
 
   async refreshCache(): Promise<void> {
@@ -37,7 +51,9 @@ export class FeatureFlagService {
   }
 
   isEnabled(flagName: string): boolean {
-    return this.cache.get(flagName)?.enabled ?? false;
+    const dbFlag = this.cache.get(flagName);
+    if (dbFlag !== undefined) return dbFlag.enabled;
+    return this.configDefaults.get(flagName) ?? false;
   }
 
   async getAllFlags(): Promise<FeatureFlag[]> {

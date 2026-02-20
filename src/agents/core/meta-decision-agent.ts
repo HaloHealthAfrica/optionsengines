@@ -30,26 +30,41 @@ export class MetaDecisionAgent extends BaseAgent {
       };
     }
 
-    const scores: Record<MetaDecision['finalBias'], number> = {
-      bullish: 0,
-      bearish: 0,
-      neutral: 0,
-    };
+    const directionalOutputs = outputs.filter((o) => o.bias !== 'neutral');
 
-    let totalWeight = 0;
-    for (const output of outputs) {
-      const agentType = output.metadata?.agentType ?? 'core';
-      const weight = weights[agentType] ?? weights.core;
-      totalWeight += weight;
-      scores[output.bias] += weight * output.confidence;
+    if (directionalOutputs.length === 0) {
+      return {
+        finalBias: 'neutral',
+        finalConfidence: 0,
+        contributingAgents: outputs.map((o) => o.agent),
+        consensusStrength: 0,
+        decision: 'reject',
+        reasons: ['no_directional_consensus'],
+      };
     }
 
-    const finalBias = (Object.keys(scores) as MetaDecision['finalBias'][]).reduce((best, key) =>
-      scores[key] > scores[best] ? key : best
-    );
+    const scores: Record<'bullish' | 'bearish', number> = { bullish: 0, bearish: 0 };
+    const weightSums: Record<'bullish' | 'bearish', number> = { bullish: 0, bearish: 0 };
 
-    const finalConfidence = totalWeight > 0 ? scores[finalBias] / totalWeight : 0;
-    const consensusStrength = totalWeight > 0 ? (scores[finalBias] / (totalWeight * 100)) * 100 : 0;
+    for (const output of directionalOutputs) {
+      const agentType = output.metadata?.agentType ?? 'core';
+      const weight = weights[agentType] ?? weights.core;
+      const bias = output.bias as 'bullish' | 'bearish';
+      scores[bias] += weight * output.confidence;
+      weightSums[bias] += weight;
+    }
+
+    const finalBias: MetaDecision['finalBias'] =
+      scores.bullish >= scores.bearish ? 'bullish' : 'bearish';
+
+    const finalConfidence =
+      weightSums[finalBias] > 0 ? scores[finalBias] / weightSums[finalBias] : 0;
+
+    const totalDirectionalScore = scores.bullish + scores.bearish;
+    const consensusStrength =
+      totalDirectionalScore > 0
+        ? ((scores[finalBias] - scores[finalBias === 'bullish' ? 'bearish' : 'bullish']) / totalDirectionalScore) * 100
+        : 0;
 
     return {
       finalBias,
@@ -57,7 +72,7 @@ export class MetaDecisionAgent extends BaseAgent {
       contributingAgents: outputs.map((o) => o.agent),
       consensusStrength: Math.round(consensusStrength),
       decision: finalConfidence >= 50 ? 'approve' : 'reject',
-      reasons: ['weighted_consensus'],
+      reasons: ['weighted_directional_consensus'],
     };
   }
 

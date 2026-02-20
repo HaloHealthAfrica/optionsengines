@@ -104,6 +104,12 @@ async function bootstrap(): Promise<void> {
     });
     throw error;
   }
+  featureFlags.registerConfigDefaults({
+    enable_orb_specialist: config.enableOrbSpecialist,
+    enable_strat_specialist: config.enableStratSpecialist,
+    enable_ttm_specialist: config.enableTtmSpecialist,
+    enable_satyland_subagent: config.enableSatylandSubagent,
+  });
   featureFlags.init().catch((err) => {
     logger.error('Feature flag service failed to initialize', err);
     Sentry.captureException(err, {
