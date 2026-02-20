@@ -410,7 +410,7 @@ export class PaperExecutorWorker {
               pnlPercent: number;
               durationMinutes: number;
               realizedPnl: number;
-              existingPosition: { position_id: string; symbol: string; type: string; entry_bias_score?: number; entry_macro_class?: string; entry_regime_type?: string; entry_mode_hint?: string; entry_acceleration_state_strength_delta?: number; exit_reason?: string };
+              existingPosition: { position_id: string; symbol: string; type: string; engine?: string | null; experiment_id?: string | null; entry_price: number; entry_timestamp: string | Date; entry_bias_score?: number; entry_macro_class?: string; entry_regime_type?: string; entry_mode_hint?: string; entry_acceleration_state_strength_delta?: number; exit_reason?: string };
             };
             const existingPosition = cap.existingPosition;
             let stratPlanId: string | null = null;
@@ -433,6 +433,9 @@ export class PaperExecutorWorker {
                 setupType = planRow.setup ?? null;
               }
             }
+            const positionEngine = (existingPosition.engine === 'A' || existingPosition.engine === 'B')
+              ? existingPosition.engine
+              : null;
             captureTradeOutcome({
               positionId: existingPosition.position_id,
               symbol: existingPosition.symbol,
@@ -451,7 +454,28 @@ export class PaperExecutorWorker {
               timestamp: fillTimestamp,
               stratPlanId: stratPlanId ?? undefined,
               setupType: setupType ?? undefined,
+              engine: positionEngine,
             }).catch((err) => logger.warn('Performance capture failed', { err, positionId: closedPositionId }));
+
+            if (positionEngine && existingPosition.experiment_id) {
+              db.query(
+                `INSERT INTO trade_outcomes
+                 (experiment_id, engine, trade_id, entry_price, exit_price, pnl, exit_reason, entry_time, exit_time, is_shadow)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                [
+                  existingPosition.experiment_id,
+                  positionEngine,
+                  existingPosition.position_id,
+                  existingPosition.entry_price,
+                  price,
+                  cap.realizedPnl,
+                  existingPosition.exit_reason ?? 'unknown',
+                  new Date(existingPosition.entry_timestamp),
+                  fillTimestamp,
+                  false,
+                ]
+              ).catch((err) => logger.warn('Trade outcome record failed', { err, positionId: closedPositionId }));
+            }
 
             await publishPositionUpdate(closedPositionId);
             await publishRiskUpdate();

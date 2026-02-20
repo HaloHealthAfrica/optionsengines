@@ -458,9 +458,12 @@ export class OrchestratorService {
             data: { signal_id: signal.signal_id },
           });
         }
+        const shadowRecommendation = experiment.variant === 'A'
+          ? engine_b_recommendation
+          : engine_a_recommendation;
         await this.handleShadowExecution(
           signal,
-          engine_b_recommendation,
+          shadowRecommendation,
           experiment.experiment_id,
           dealerDecision
         );
@@ -507,6 +510,10 @@ export class OrchestratorService {
   }
 
   async distributeSignal(signal: Signal, context: MarketContext, experiment: { variant: 'A' | 'B' }) {
+    if (config.enableShadowExecution) {
+      return this.engineCoordinator.invokeBoth(signal, context);
+    }
+
     if (experiment.variant === 'A') {
       const engineA = await this.engineCoordinator.invokeEngineA(signal, context);
       return { engineA, engineB: null };

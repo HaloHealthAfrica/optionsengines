@@ -30,6 +30,8 @@ export interface TradeOutcomeCapture {
   stratPlanId?: string | null;
   /** Setup type from strat plan (e.g. 2-1-2 Rev) */
   setupType?: string | null;
+  /** Engine that produced this trade (A or B) */
+  engine?: 'A' | 'B' | null;
 }
 
 /**
@@ -63,8 +65,9 @@ export async function captureTradeOutcome(capture: TradeOutcomeCapture): Promise
         source,
         strat_plan_id,
         setup_type,
+        engine,
         created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
       [
         capture.positionId,
         capture.symbol,
@@ -81,6 +84,7 @@ export async function captureTradeOutcome(capture: TradeOutcomeCapture): Promise
         capture.source ?? 'live',
         capture.stratPlanId ?? null,
         capture.setupType ?? null,
+        capture.engine ?? null,
         capture.timestamp,
       ]
     );
