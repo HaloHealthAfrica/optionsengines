@@ -490,7 +490,7 @@ export class PaperExecutorWorker {
                 positionId: existingPosition.position_id,
                 experimentId: existingPosition.experiment_id,
                 tradePnl: cap.realizedPnl,
-              }).catch((err) => logger.warn('Agent attribution failed', { err, positionId: closedPositionId }));
+              }).catch((err: unknown) => logger.warn('Agent attribution failed', { err, positionId: closedPositionId }));
             }
 
             await publishPositionUpdate(closedPositionId);
