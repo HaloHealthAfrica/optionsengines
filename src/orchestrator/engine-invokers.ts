@@ -13,6 +13,7 @@ import { buildEntryExitPlan } from '../services/entry-exit-agent.service.js';
 import { buildSignalEnrichment } from '../services/signal-enrichment.service.js';
 import { buildEntryDecisionInput } from '../services/entry-decision-adapter.service.js';
 import { evaluateEntryDecision } from '../lib/entryEngine/index.js';
+import { deriveSetupType } from '../lib/shared/setup-type.js';
 import { marketData } from '../services/market-data.js';
 import { ContextAgent } from '../agents/core/context-agent.js';
 import { TechnicalAgent } from '../agents/core/technical-agent.js';
@@ -231,7 +232,7 @@ async function buildRecommendation(
             finalConfidence: entryResult.action === 'ENTER' ? 80 : 0,
             contributingAgents: ['engine_a_entry_decision'],
             consensusStrength: entryResult.action === 'ENTER' ? 100 : 0,
-            decision: entryResult.action === 'BLOCK' ? 'reject' : 'approve',
+            decision: entryResult.action === 'ENTER' ? 'approve' : 'reject',
             reasons: entryResult.rationale,
           },
         }).catch((err) => logger.warn('Engine A decision persistence failed', { err, signal_id: signal.signal_id }));
@@ -342,9 +343,10 @@ async function buildRecommendation(
     }
 
     // Fallback: simple strike selection (or test bypass)
+    const signalSetupType = deriveSetupType(signal.timeframe || '5m');
     if (!advancedStrikeUsed) {
       try {
-        ({ strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction));
+        ({ strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction, signalSetupType));
         Sentry.addBreadcrumb({
           category: 'engine',
           message: `Engine ${engine} entry plan creation`,
@@ -921,7 +923,8 @@ async function buildEngineBRecommendation(
     }
 
     if (!advancedStrikeUsedB) {
-      ({ strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction));
+      const setupTypeB = deriveSetupType(signal.timeframe || '5m');
+      ({ strike, expiration, optionType } = await selectStrike(signal.symbol, signal.direction, setupTypeB));
       ({ entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType));
     }
 
