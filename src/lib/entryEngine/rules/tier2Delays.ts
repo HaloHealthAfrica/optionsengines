@@ -17,7 +17,10 @@ function confirmationPendingRule(input: EntryDecisionInput): RuleResult | null {
 function timingWindowRule(input: EntryDecisionInput): RuleResult | null {
   const { session, minutesFromOpen } = input.timingContext;
   const isOpenWindow = session === 'OPEN' && minutesFromOpen <= 15;
-  const isCloseWindow = session === 'CLOSE' && minutesFromOpen >= 15;
+  // RTH is 390 minutes (9:30–16:00). Last 15 min = minutesFromOpen >= 375.
+  const RTH_DURATION_MINUTES = 390;
+  const CLOSE_BUFFER_MINUTES = 15;
+  const isCloseWindow = session === 'CLOSE' && minutesFromOpen >= (RTH_DURATION_MINUTES - CLOSE_BUFFER_MINUTES);
   const isLunchScalp = session === 'LUNCH' && input.setupType === 'SCALP_GUARDED';
 
   if (isOpenWindow || isCloseWindow || isLunchScalp) {

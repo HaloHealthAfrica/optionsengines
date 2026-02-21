@@ -1,6 +1,7 @@
 import { marketData } from './market-data.js';
 import { config } from '../config/index.js';
 import { DTE_POLICY } from '../lib/shared/constants.js';
+import type { SetupType } from '../lib/shared/types.js';
 import * as Sentry from '@sentry/node';
 
 export type StrikeSelection = {
@@ -21,11 +22,11 @@ function nextFriday(from: Date): Date {
 }
 
 /**
- * Calculate expiration using DTE policy (SWING default).
- * Uses DTE_POLICY.SWING preferred [30, 60]; falls back to config.maxHoldDays when set.
+ * Calculate expiration using DTE policy for the given setupType.
+ * Falls back to SWING when setupType is not provided.
  */
-function calculateExpiration(): Date {
-  const policy = DTE_POLICY.SWING;
+export function calculateExpiration(setupType: SetupType = 'SWING'): Date {
+  const policy = DTE_POLICY[setupType] ?? DTE_POLICY.SWING;
   const preferred = policy.preferred ?? [Math.floor((policy.min + policy.max) / 2)];
   let targetDte = config.maxHoldDays > 0
     ? Math.min(policy.max, Math.max(policy.min, config.maxHoldDays))
@@ -42,23 +43,27 @@ function calculateStrike(price: number, direction: 'long' | 'short'): number {
   return direction === 'long' ? Math.ceil(price) : Math.floor(price);
 }
 
-export async function selectStrike(symbol: string, direction: 'long' | 'short'): Promise<StrikeSelection> {
+export async function selectStrike(
+  symbol: string,
+  direction: 'long' | 'short',
+  setupType: SetupType = 'SWING'
+): Promise<StrikeSelection> {
   try {
     Sentry.addBreadcrumb({
       category: 'strike-selection',
       message: 'Strike selection start',
       level: 'info',
-      data: { symbol, direction },
+      data: { symbol, direction, setupType },
     });
     const price = await marketData.getStockPrice(symbol);
     const strike = calculateStrike(price, direction);
-    const expiration = calculateExpiration();
+    const expiration = calculateExpiration(setupType);
     const optionType = direction === 'long' ? 'call' : 'put';
     Sentry.addBreadcrumb({
       category: 'strike-selection',
       message: 'Strike selection complete',
       level: 'info',
-      data: { symbol, strike, expiration, optionType },
+      data: { symbol, strike, expiration, optionType, setupType },
     });
     return { strike, expiration, optionType };
   } catch (error) {

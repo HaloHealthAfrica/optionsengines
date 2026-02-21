@@ -6,10 +6,12 @@
 import type { EntryDecisionInput } from '../lib/entryEngine/types.js';
 import type { Signal } from '../orchestrator/types.js';
 import type { MarketContext } from '../orchestrator/types.js';
-import type { GEXState, RegimeType, SessionType } from '../lib/shared/types.js';
+import type { GEXState, LiquidityState, RegimeType, SessionType } from '../lib/shared/types.js';
 import { deriveSetupType } from '../lib/shared/setup-type.js';
 import { evaluateMarketSession } from '../utils/market-session.js';
 import { config } from '../config/index.js';
+import { getPortfolioGreeks } from './gamma-exposure.service.js';
+import { logger } from '../utils/logger.js';
 
 type EnrichmentLike = {
   enrichedData: Record<string, unknown>;
@@ -56,16 +58,43 @@ function deriveIvPercentile(enriched: Record<string, unknown> | undefined, volat
 }
 
 /**
+ * Classify liquidity state from enrichment data.
+ * Uses bid-ask spread %, open interest, and volume when available.
+ */
+export function classifyLiquidityState(enriched: Record<string, unknown> | undefined): LiquidityState {
+  if (!enriched) return 'NORMAL';
+
+  const gex = enriched.gex as Record<string, unknown> | null | undefined;
+  const optionsFlow = enriched.optionsFlow as { entries?: unknown[] } | null | undefined;
+  const confluence = enriched.confluence as { score?: number } | null | undefined;
+
+  const spreadPct = Number(gex?.spreadPercent ?? gex?.spread_percent ?? NaN);
+  const openInterest = Number(gex?.openInterest ?? gex?.open_interest ?? NaN);
+  const volume = Number(optionsFlow?.entries?.length ?? NaN);
+
+  if (Number.isFinite(spreadPct) && spreadPct > 15) return 'ILLIQUID';
+  if (Number.isFinite(openInterest) && openInterest < 50) return 'ILLIQUID';
+
+  if (Number.isFinite(spreadPct) && spreadPct > 8) return 'LOW';
+  if (Number.isFinite(openInterest) && openInterest < 200) return 'LOW';
+  if (Number.isFinite(volume) && volume < 10) return 'LOW';
+
+  if (confluence && typeof confluence.score === 'number' && confluence.score <= 0) return 'LOW';
+
+  return 'NORMAL';
+}
+
+/**
  * Build EntryDecisionInput from orchestrator signal, context, and enrichment.
  * Uses sensible defaults when data is unavailable.
  * Pass marketState when available for tier rules (intent, space, liquidity, trigger).
  */
-export function buildEntryDecisionInput(
+export async function buildEntryDecisionInput(
   signal: Signal,
   context: MarketContext,
   enrichment: EnrichmentLike,
   marketState?: EntryDecisionInput['marketState']
-): EntryDecisionInput {
+): Promise<EntryDecisionInput> {
   const ts = signal.timestamp instanceof Date ? signal.timestamp : new Date(signal.timestamp);
   const sessionEval = evaluateMarketSession({
     timestamp: ts,
@@ -89,11 +118,21 @@ export function buildEntryDecisionInput(
 
   const openTrades = Number(risk?.openPositions ?? risk?.effectiveOpenPositions ?? 0);
 
+  let portfolioDelta = 0;
+  let portfolioTheta = 0;
+  try {
+    const greeks = await getPortfolioGreeks();
+    portfolioDelta = greeks.netDelta;
+    portfolioTheta = greeks.netTheta;
+  } catch (err) {
+    logger.warn('Entry adapter: portfolio greeks unavailable, using 0', { error: err });
+  }
+
   const riskContext: EntryDecisionInput['riskContext'] = {
     dailyPnL: Number(risk?.dailyPnL ?? 0),
     openTradesCount: openTrades,
-    portfolioDelta: 0,
-    portfolioTheta: 0,
+    portfolioDelta,
+    portfolioTheta,
   };
   if (config.entryEngineManagesRiskGating) {
     riskContext.maxDailyLoss = config.maxDailyLoss;
@@ -104,6 +143,7 @@ export function buildEntryDecisionInput(
 
   const setupType = deriveSetupType(signal.timeframe || '5m');
   const ivPercentile = deriveIvPercentile(enriched, volatility);
+  const liquidityState = classifyLiquidityState(enriched);
 
   return {
     symbol: signal.symbol,
@@ -125,7 +165,7 @@ export function buildEntryDecisionInput(
     timingContext: {
       session: mapSessionToTiming(sessionEval.sessionLabel),
       minutesFromOpen: Math.max(0, sessionEval.minuteOfDay - (9 * 60 + 30)),
-      liquidityState: 'NORMAL',
+      liquidityState,
     },
     riskContext,
     ...(marketState && { marketState }),

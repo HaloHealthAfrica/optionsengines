@@ -17,6 +17,7 @@ import {
   costBasis,
   type PositionSide,
 } from '../lib/pnl/calculate-realized-pnl.js';
+import { writeAgentAttribution } from '../services/agent-attribution.service.js';
 
 interface PendingOrder {
   order_id: string;
@@ -39,17 +40,17 @@ async function fetchOptionPrice(
   symbol: string,
   strike: number,
   expiration: Date,
-  optionType: 'call' | 'put'
+  optionType: 'call' | 'put',
+  side: 'buy' | 'sell' = 'buy'
 ): Promise<number | null> {
   const mid = await marketData.getOptionPrice(symbol, strike, expiration, optionType);
   if (mid === null || mid <= 0) return mid;
 
-  // Apply simulated slippage: assume bid-ask spread is ~2% of mid
-  // For entry (buy) orders, slippage increases cost; for exit (sell) orders, it decreases proceeds.
-  // Since we don't know order side here, apply a small adverse adjustment.
-  const estimatedSpread = mid * 0.02; // 2% of mid price
+  const estimatedSpread = mid * 0.02;
   const slippage = estimatedSpread * PAPER_SLIPPAGE_FRACTION;
-  return Math.max(0.01, mid + slippage); // Slightly worse than mid for realism
+  // Buy: slippage increases cost (pay more). Sell: slippage decreases proceeds (receive less).
+  const adjusted = side === 'sell' ? mid - slippage : mid + slippage;
+  return Math.max(0.01, adjusted);
 }
 
 export class PaperExecutorWorker {
@@ -170,11 +171,14 @@ export class PaperExecutorWorker {
 
       const processOrder = async (order: PendingOrder): Promise<'filled' | 'failed'> => {
         try {
+          const isExitOrder = order.signal_id == null;
+          const orderSide: 'buy' | 'sell' = isExitOrder ? 'sell' : 'buy';
           let price = await fetchOptionPrice(
             order.symbol,
             order.strike,
             new Date(order.expiration),
-            order.type
+            order.type,
+            orderSide
           );
 
           // For test signals, use the engine's entry_price as fallback when market data is unavailable
@@ -260,7 +264,6 @@ export class PaperExecutorWorker {
           } catch { /* optional — bias state not critical for position creation */ }
 
           const orderIsTest = order.is_test ?? false;
-          const isExitOrder = order.signal_id == null;
 
           await db.transaction(async (txClient) => {
             // Idempotency: skip if trade already exists for this order (e.g. retry)
@@ -482,6 +485,12 @@ export class PaperExecutorWorker {
                   false,
                 ]
               ).catch((err) => logger.warn('Trade outcome record failed', { err, positionId: closedPositionId }));
+
+              writeAgentAttribution({
+                positionId: existingPosition.position_id,
+                experimentId: existingPosition.experiment_id,
+                tradePnl: cap.realizedPnl,
+              }).catch((err) => logger.warn('Agent attribution failed', { err, positionId: closedPositionId }));
             }
 
             await publishPositionUpdate(closedPositionId);

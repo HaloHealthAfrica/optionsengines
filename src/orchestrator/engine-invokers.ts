@@ -31,6 +31,7 @@ import { eventLogger } from '../services/event-logger.service.js';
 import { EnrichedSignal, MarketData, Indicators, MultiTimeframeData } from '../types/index.js';
 import { checkDrawdownCircuitBreaker } from '../services/drawdown-circuit-breaker.service.js';
 import { checkGammaExposure } from '../services/gamma-exposure.service.js';
+import { checkDTEConcentration } from '../services/dte-concentration.service.js';
 import { getMTFBiasContext } from '../services/mtf-bias/mtf-bias-state.service.js';
 import {
   evaluateExposure,
@@ -43,6 +44,12 @@ import {
   type DecisionAudit,
 } from '../services/bias-state-aggregator/risk-model-integration.service.js';
 import * as Sentry from '@sentry/node';
+
+export const MAX_CONTRACTS_PER_TRADE = Number(process.env.MAX_CONTRACTS_PER_TRADE) || 10;
+
+function clampQuantity(raw: number): number {
+  return Math.max(1, Math.min(Math.floor(raw), MAX_CONTRACTS_PER_TRADE));
+}
 
 function applyGammaSizingMultiplier(
   baseSize: number,
@@ -150,14 +157,86 @@ async function buildRecommendation(
       }
     }
 
+    // Portfolio safety pre-flight for Engine A (matches Engine B safety posture)
+    if (engine === 'A' && !isTest) {
+      const drawdownStatus = await checkDrawdownCircuitBreaker();
+      if (drawdownStatus.frozen) {
+        logger.info('Engine A HOLD: drawdown circuit breaker active', {
+          signal_id: signal.signal_id,
+          symbol: signal.symbol,
+          freezeUntil: drawdownStatus.freezeUntil?.toISOString(),
+          drawdownPct: drawdownStatus.currentDrawdownPct,
+        });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'Engine A blocked by drawdown circuit breaker',
+          level: 'warning',
+          data: { signal_id: signal.signal_id, drawdownPct: drawdownStatus.currentDrawdownPct },
+        });
+        return null;
+      }
+
+      const gammaCheck = await checkGammaExposure();
+      if (!gammaCheck.allowed) {
+        logger.info('Engine A HOLD: gamma exposure limit', {
+          signal_id: signal.signal_id,
+          symbol: signal.symbol,
+          reasons: gammaCheck.reasons,
+          greeks: gammaCheck.greeks,
+        });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'Engine A blocked by gamma exposure limit',
+          level: 'warning',
+          data: { signal_id: signal.signal_id, reasons: gammaCheck.reasons },
+        });
+        return null;
+      }
+    }
+
     if (engine === 'A' && context?.enrichment && !isTest) {
-      const entryInput = buildEntryDecisionInput(
+      const entryInput = await buildEntryDecisionInput(
         signal,
         context,
         context.enrichment,
         mtfBias?.unifiedState
       );
       const entryResult = evaluateEntryDecision(entryInput);
+
+      // Persist Engine A tier decision for observability (mirrors Engine B's eventLogger.logDecision)
+      if (signal.experiment_id) {
+        eventLogger.logDecision({
+          experimentId: signal.experiment_id,
+          signalId: signal.signal_id,
+          outputs: [{
+            agent: 'engine_a_entry_decision',
+            bias: entryResult.action === 'ENTER' ? (signal.direction === 'long' ? 'bullish' : 'bearish') : 'neutral',
+            confidence: entryResult.action === 'ENTER' ? 80 : 0,
+            reasons: entryResult.rationale,
+            block: entryResult.action === 'BLOCK',
+            metadata: {
+              agentType: 'core',
+              engine: 'A',
+              action: entryResult.action,
+              urgency: entryResult.urgency,
+              triggeredRules: entryResult.triggeredRules,
+              setupType: entryInput.setupType,
+              portfolioDelta: entryInput.riskContext.portfolioDelta,
+              portfolioTheta: entryInput.riskContext.portfolioTheta,
+              liquidityState: entryInput.timingContext.liquidityState,
+            },
+          }],
+          metaDecision: {
+            finalBias: entryResult.action === 'ENTER' ? (signal.direction === 'long' ? 'bullish' : 'bearish') : 'neutral',
+            finalConfidence: entryResult.action === 'ENTER' ? 80 : 0,
+            contributingAgents: ['engine_a_entry_decision'],
+            consensusStrength: entryResult.action === 'ENTER' ? 100 : 0,
+            decision: entryResult.action === 'BLOCK' ? 'reject' : 'approve',
+            reasons: entryResult.rationale,
+          },
+        }).catch((err) => logger.warn('Engine A decision persistence failed', { err, signal_id: signal.signal_id }));
+      }
+
       if (entryResult.action === 'BLOCK') {
         logger.info('Engine A entry decision blocked', {
           signal_id: signal.signal_id,
@@ -296,6 +375,26 @@ async function buildRecommendation(
       }
     }
 
+    // DTE concentration check for Engine A (matches Engine B)
+    if (engine === 'A' && !isTest) {
+      const dteCheck = await checkDTEConcentration(expiration);
+      if (!dteCheck.allowed) {
+        logger.info('Engine A HOLD: DTE concentration limit', {
+          signal_id: signal.signal_id,
+          symbol: signal.symbol,
+          expiration: expiration.toISOString(),
+          reasons: dteCheck.reasons,
+        });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: 'Engine A blocked by DTE concentration limit',
+          level: 'warning',
+          data: { signal_id: signal.signal_id, reasons: dteCheck.reasons },
+        });
+        return null;
+      }
+    }
+
     let baseSize = Math.max(1, Math.floor(config.maxPositionSize));
 
     // Apply confluence sizing multiplier when enabled (Gap 9 fix)
@@ -339,7 +438,7 @@ async function buildRecommendation(
         /* keep adjustedSize */
       }
     }
-    const quantity = Math.max(1, Math.floor(adjustedSize));
+    const quantity = clampQuantity(adjustedSize);
 
     if (decisionAudit) {
       logger.info('Bias decision audit', {
@@ -447,7 +546,7 @@ async function buildEngineBRecommendation(
     }
 
     if (context?.enrichment && !isTestB) {
-      const entryInput = buildEntryDecisionInput(
+      const entryInput = await buildEntryDecisionInput(
         signal,
         context,
         context.enrichment,
@@ -632,13 +731,15 @@ async function buildEngineBRecommendation(
       return null;
     }
 
-    // Fetch multi-timeframe data for MTF Trend Agent
+    // Fetch multi-timeframe data for MTF Trend Agent (all 5 timeframes)
     let multiTimeframe: MultiTimeframeData | undefined;
     try {
-      const [candles5m, candles15m, candles1h] = await Promise.all([
+      const [candles5m, candles15m, candles1h, candles4h, candlesDaily] = await Promise.all([
         marketData.getCandles(signal.symbol, '5min', 50).catch(() => []),
         marketData.getCandles(signal.symbol, '15min', 50).catch(() => []),
         marketData.getCandles(signal.symbol, '1h', 50).catch(() => []),
+        marketData.getCandles(signal.symbol, '4h', 50).catch(() => []),
+        marketData.getCandles(signal.symbol, '1day', 50).catch(() => []),
       ]);
 
       const deriveTrend = (candleArr: any[]): { ema21: number; trend: 'up' | 'down' | 'flat' } | undefined => {
@@ -656,18 +757,23 @@ async function buildEngineBRecommendation(
       const tf5m = deriveTrend(candles5m);
       const tf15m = deriveTrend(candles15m);
       const tf1h = deriveTrend(candles1h);
+      const tf4h = deriveTrend(candles4h);
+      const tfDaily = deriveTrend(candlesDaily);
 
-      const frames = [tf5m, tf15m, tf1h].filter(Boolean);
+      const frames = [tf5m, tf15m, tf1h, tf4h, tfDaily].filter(Boolean);
       let alignScore = 0;
+      const perFrameWeight = frames.length > 0 ? Math.round(100 / frames.length) : 0;
       for (const f of frames) {
-        if (f!.trend === 'up') alignScore += 33;
-        else if (f!.trend === 'down') alignScore -= 33;
+        if (f!.trend === 'up') alignScore += perFrameWeight;
+        else if (f!.trend === 'down') alignScore -= perFrameWeight;
       }
 
       multiTimeframe = {
         tf5m,
         tf15m,
         tf1h,
+        tf4h,
+        tfDaily,
         alignmentScore: Math.max(-100, Math.min(100, alignScore)),
       };
     } catch {
@@ -819,6 +925,16 @@ async function buildEngineBRecommendation(
       ({ entryPrice } = await buildEntryExitPlan(signal.symbol, strike, expiration, optionType));
     }
 
+    const dteCheck = await checkDTEConcentration(expiration);
+    if (!dteCheck.allowed) {
+      logger.info('Engine B HOLD: DTE concentration limit', {
+        symbol: signal.symbol,
+        expiration: expiration.toISOString(),
+        reasons: dteCheck.reasons,
+      });
+      return null;
+    }
+
     let baseSize = Math.max(1, Math.floor(config.maxPositionSize));
 
     // Apply confluence sizing multiplier for Engine B (Gap 9 fix)
@@ -862,7 +978,7 @@ async function buildEngineBRecommendation(
         /* keep adjustedSize */
       }
     }
-    const quantity = Math.max(1, Math.floor(adjustedSize));
+    const quantity = clampQuantity(adjustedSize);
 
     if (decisionAuditB) {
       logger.info('Bias decision audit', {
