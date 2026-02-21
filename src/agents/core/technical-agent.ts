@@ -5,7 +5,6 @@ import {
   computeMACD,
   computeVWAP,
   computeVolumeRatio,
-  computeBBWidthPercentile,
   computeADX,
   last,
 } from '../utils/technical-indicators.js';
@@ -146,7 +145,6 @@ export class TechnicalAgent extends BaseAgent {
     {
       const bbUpper = last(indicators.bollingerBands.upper);
       const bbLower = last(indicators.bollingerBands.lower);
-      const bbMid = last(indicators.bollingerBands.middle);
       let dir: IndicatorScore['direction'] = 'neutral';
       let s = 50;
       if (bbUpper > bbLower && bbUpper > 0) {
@@ -204,7 +202,6 @@ export class TechnicalAgent extends BaseAgent {
     }
 
     let bullishWeight = 0;
-    let bearishWeight = 0;
     let totalWeight = 0;
     let weightedScore = 0;
 

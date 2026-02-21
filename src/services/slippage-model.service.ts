@@ -1,5 +1,3 @@
-import { logger } from '../utils/logger.js';
-
 export interface SlippageEstimate {
   estimatedSlippagePct: number;
   adjustedQuantity: number;
@@ -14,7 +12,7 @@ export function estimateSlippage(params: {
   quantity: number;
   entryPrice: number;
 }): SlippageEstimate {
-  const { bidAskSpreadPct, volume, openInterest, quantity, entryPrice } = params;
+  const { bidAskSpreadPct, volume, openInterest, quantity } = params;
 
   const halfSpread = bidAskSpreadPct / 2;
 

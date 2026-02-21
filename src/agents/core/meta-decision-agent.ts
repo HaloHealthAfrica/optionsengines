@@ -7,7 +7,6 @@ import {
   RegimeContext,
 } from '../../types/index.js';
 import { getAgentWeights, getDefaultWeight } from '../../services/dynamic-weight.service.js';
-import { logger } from '../../utils/logger.js';
 
 const FALLBACK_WEIGHTS: Record<AgentType, number> = {
   specialist: 0.30,
@@ -17,7 +16,6 @@ const FALLBACK_WEIGHTS: Record<AgentType, number> = {
 
 const MIN_DIRECTIONAL_AGENTS = 3;
 const MIN_CORE_AGENTS = 1;
-const MIN_SPECIALIST_AGENTS = 0;
 
 const BASE_THRESHOLD = 50;
 
@@ -34,7 +32,7 @@ function computeDynamicThreshold(
   regime?: RegimeContext | null,
   correlation?: { directionalExposure?: number } | null,
   liquidity?: { liquidityScore?: number } | null,
-  hasBlockingAgent?: boolean
+  _hasBlockingAgent?: boolean
 ): { threshold: number; adjustments: ThresholdAdjustment[] } {
   let threshold = BASE_THRESHOLD;
   const adjustments: ThresholdAdjustment[] = [];
@@ -100,10 +98,6 @@ export class MetaDecisionAgent extends BaseAgent {
     const coreAgents = directionalOutputs.filter(
       (o) => (o.metadata?.agentType ?? 'core') === 'core'
     );
-    const specialistAgents = directionalOutputs.filter(
-      (o) => (o.metadata?.agentType ?? 'core') === 'specialist'
-    );
-
     if (directionalOutputs.length < MIN_DIRECTIONAL_AGENTS) {
       return {
         finalBias: 'neutral',

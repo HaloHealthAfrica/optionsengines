@@ -736,8 +736,9 @@ async function buildEngineBRecommendation(
 
     // Extract regime context from RegimeClassifierAgent output for threshold calibration
     const regimeOutput = outputs.find((o) => o.agent === 'regime_classifier');
-    if (regimeOutput?.metadata?.regimeContext) {
-      marketContextForAgents.regime = regimeOutput.metadata.regimeContext;
+    const regimeMeta = regimeOutput?.metadata as Record<string, unknown> | undefined;
+    if (regimeMeta?.regimeContext) {
+      marketContextForAgents.regime = regimeMeta.regimeContext as MarketData['regime'];
     }
 
     const metaDecision = await metaAgent.aggregateAsync(outputs, marketContextForAgents);
