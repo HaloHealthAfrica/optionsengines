@@ -293,6 +293,11 @@ export interface MarketData {
     positionLimitExceeded?: boolean;
     exposureExceeded?: boolean;
   };
+  regime?: RegimeContext;
+  volatility?: VolatilityContext;
+  liquidity?: LiquidityAssessment;
+  correlation?: CorrelationContext;
+  multiTimeframe?: MultiTimeframeData;
 }
 
 export interface SessionContext {
@@ -319,6 +324,7 @@ export interface EnrichedSignal {
   timeframe: string;
   timestamp: Date;
   sessionType: 'RTH' | 'ETH';
+  setupType?: 'breakout' | 'pullback' | 'mean_revert' | 'momentum' | 'swing';
 }
 
 export interface MetaDecision {
@@ -344,6 +350,58 @@ export interface CacheConfig {
 export interface RateLimiterConfig {
   twelveDataLimit: number;
   polygonLimit: number;
+}
+
+// ─── Engine B Rebuild: Regime, Volatility, Liquidity, Correlation ────────
+
+export interface RegimeContext {
+  regime: 'trend' | 'range' | 'compression' | 'expansion' | 'transitional';
+  volatilityState: 'low' | 'normal' | 'high';
+  trendStrength: number;
+  confidence: number;
+}
+
+export interface VolatilityContext {
+  ivRank?: number;
+  ivPercentile?: number;
+  expectedMove?: number;
+  skew?: number;
+  termStructure?: 'contango' | 'backwardation' | 'flat';
+  hvRatio?: number;
+}
+
+export interface LiquidityAssessment {
+  bidAskSpreadPct?: number;
+  openInterest?: number;
+  volume?: number;
+  dollarVolume?: number;
+  slippageEstimate?: number;
+  liquidityScore: number;
+}
+
+export interface CorrelationContext {
+  portfolioBeta?: number;
+  directionalExposure?: number;
+  correlatedPositionCount?: number;
+  sectorConcentration?: Record<string, number>;
+  maxPairCorrelation?: number;
+}
+
+export interface MultiTimeframeData {
+  tf5m?: { ema21: number; trend: 'up' | 'down' | 'flat' };
+  tf15m?: { ema21: number; trend: 'up' | 'down' | 'flat' };
+  tf1h?: { ema21: number; trend: 'up' | 'down' | 'flat' };
+  tf4h?: { ema21: number; trend: 'up' | 'down' | 'flat' };
+  tfDaily?: { ema21: number; trend: 'up' | 'down' | 'flat' };
+  alignmentScore: number;
+}
+
+export interface AgentWeightConfig {
+  agentName: string;
+  weight: number;
+  rollingSharpe?: number;
+  tradeCount?: number;
+  lastUpdated: Date;
 }
 
 // ─── WebSocket Message Types (Gap 20 fix) ───────────────────────────────

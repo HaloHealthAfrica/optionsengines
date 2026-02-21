@@ -18,13 +18,19 @@ import { ContextAgent } from '../agents/core/context-agent.js';
 import { TechnicalAgent } from '../agents/core/technical-agent.js';
 import { RiskAgent } from '../agents/core/risk-agent.js';
 import { MetaDecisionAgent } from '../agents/core/meta-decision-agent.js';
+import { RegimeClassifierAgent } from '../agents/core/regime-classifier-agent.js';
+import { VolatilityAgent } from '../agents/core/volatility-agent.js';
+import { LiquidityAgent } from '../agents/core/liquidity-agent.js';
+import { CorrelationRiskAgent } from '../agents/core/correlation-risk-agent.js';
+import { MultiTimeframeTrendAgent } from '../agents/core/multi-timeframe-trend-agent.js';
 import { GammaFlowSpecialist } from '../agents/specialists/gamma-flow-specialist.js';
 import { ORBSpecialist } from '../agents/specialists/orb-specialist.js';
 import { StratSpecialist } from '../agents/specialists/strat-specialist.js';
 import { TTMSpecialist } from '../agents/specialists/ttm-specialist.js';
-import { SatylandSubAgent } from '../agents/subagents/satyland-sub-agent.js';
 import { eventLogger } from '../services/event-logger.service.js';
-import { EnrichedSignal, MarketData, Indicators } from '../types/index.js';
+import { EnrichedSignal, MarketData, Indicators, MultiTimeframeData } from '../types/index.js';
+import { checkDrawdownCircuitBreaker } from '../services/drawdown-circuit-breaker.service.js';
+import { checkGammaExposure } from '../services/gamma-exposure.service.js';
 import { getMTFBiasContext } from '../services/mtf-bias/mtf-bias-state.service.js';
 import {
   evaluateExposure,
@@ -584,6 +590,16 @@ async function buildEngineBRecommendation(
       },
     };
 
+    // Infer setup type from MTF bias hint
+    let setupType: EnrichedSignal['setupType'];
+    if (mtfBiasB?.unifiedState?.riskContext?.entryModeHint) {
+      const hint = mtfBiasB.unifiedState.riskContext.entryModeHint;
+      if (hint === 'BREAKOUT') setupType = 'breakout';
+      else if (hint === 'PULLBACK') setupType = 'pullback';
+      else if (hint === 'MEAN_REVERT') setupType = 'mean_revert';
+      else setupType = 'swing';
+    }
+
     const enrichedSignal: EnrichedSignal = {
       signalId: signal.signal_id,
       symbol: signal.symbol,
@@ -591,7 +607,76 @@ async function buildEngineBRecommendation(
       timeframe: signal.timeframe,
       timestamp: signal.timestamp,
       sessionType,
+      setupType,
     };
+
+    // Phase 4: Drawdown circuit breaker check
+    const drawdownStatus = await checkDrawdownCircuitBreaker();
+    if (drawdownStatus.frozen) {
+      logger.info('Engine B HOLD: drawdown circuit breaker active', {
+        symbol: signal.symbol,
+        freezeUntil: drawdownStatus.freezeUntil?.toISOString(),
+        drawdownPct: drawdownStatus.currentDrawdownPct,
+      });
+      return null;
+    }
+
+    // Phase 4: Gamma exposure check
+    const gammaCheck = await checkGammaExposure();
+    if (!gammaCheck.allowed) {
+      logger.info('Engine B HOLD: gamma exposure limit', {
+        symbol: signal.symbol,
+        reasons: gammaCheck.reasons,
+        greeks: gammaCheck.greeks,
+      });
+      return null;
+    }
+
+    // Fetch multi-timeframe data for MTF Trend Agent
+    let multiTimeframe: MultiTimeframeData | undefined;
+    try {
+      const [candles5m, candles15m, candles1h] = await Promise.all([
+        marketData.getCandles(signal.symbol, '5min', 50).catch(() => []),
+        marketData.getCandles(signal.symbol, '15min', 50).catch(() => []),
+        marketData.getCandles(signal.symbol, '1h', 50).catch(() => []),
+      ]);
+
+      const deriveTrend = (candleArr: any[]): { ema21: number; trend: 'up' | 'down' | 'flat' } | undefined => {
+        if (!candleArr || candleArr.length < 21) return undefined;
+        const closes = candleArr.map((c: any) => c.close);
+        const k = 2 / 22;
+        let emaVal = closes[0];
+        for (let i = 1; i < closes.length; i++) emaVal = closes[i] * k + emaVal * (1 - k);
+        const price = closes[closes.length - 1];
+        const pctDiff = ((price - emaVal) / emaVal) * 100;
+        const trend = pctDiff > 0.15 ? 'up' : pctDiff < -0.15 ? 'down' : 'flat';
+        return { ema21: emaVal, trend };
+      };
+
+      const tf5m = deriveTrend(candles5m);
+      const tf15m = deriveTrend(candles15m);
+      const tf1h = deriveTrend(candles1h);
+
+      const frames = [tf5m, tf15m, tf1h].filter(Boolean);
+      let alignScore = 0;
+      for (const f of frames) {
+        if (f!.trend === 'up') alignScore += 33;
+        else if (f!.trend === 'down') alignScore -= 33;
+      }
+
+      multiTimeframe = {
+        tf5m,
+        tf15m,
+        tf1h,
+        alignmentScore: Math.max(-100, Math.min(100, alignScore)),
+      };
+    } catch {
+      logger.debug('Engine B: MTF data fetch failed, proceeding without');
+    }
+
+    if (multiTimeframe) {
+      marketContextForAgents.multiTimeframe = multiTimeframe;
+    }
 
     const metaAgent = new MetaDecisionAgent();
 
@@ -599,11 +684,15 @@ async function buildEngineBRecommendation(
       new ContextAgent(),
       new TechnicalAgent(),
       new RiskAgent(),
+      new RegimeClassifierAgent(),
+      new VolatilityAgent(),
+      new LiquidityAgent(),
+      new CorrelationRiskAgent(),
+      new MultiTimeframeTrendAgent(),
       new GammaFlowSpecialist(),
       new ORBSpecialist(),
       new StratSpecialist(),
       new TTMSpecialist(),
-      new SatylandSubAgent(),
     ];
 
     const activatedAgents = agents.filter((agent) =>
@@ -613,25 +702,57 @@ async function buildEngineBRecommendation(
       category: 'engine',
       message: 'Engine B agents activated',
       level: 'info',
-      data: { agents: activatedAgents.map((agent) => agent.type) },
+      data: {
+        total: agents.length,
+        activated: activatedAgents.length,
+        agents: activatedAgents.map((a) => a.name),
+      },
     });
 
     const outputs = await Promise.all(
       activatedAgents.map(async (agent) => {
-        const output = await agent.analyze(enrichedSignal, marketContextForAgents);
-        return {
-          ...output,
-          metadata: { ...(output.metadata || {}), agentType: agent.type },
-        };
+        try {
+          const output = await agent.analyze(enrichedSignal, marketContextForAgents);
+          return {
+            ...output,
+            metadata: { ...(output.metadata || {}), agentType: agent.type },
+          };
+        } catch (agentErr) {
+          logger.warn('Agent analysis failed, returning neutral', {
+            agent: agent.name,
+            error: agentErr,
+          });
+          return {
+            agent: agent.name,
+            bias: 'neutral' as const,
+            confidence: 0,
+            reasons: ['agent_error'],
+            block: false,
+            metadata: { agentType: agent.type, error: true },
+          };
+        }
       })
     );
 
-    const metaDecision = metaAgent.aggregate(outputs);
+    // Extract regime context from RegimeClassifierAgent output for threshold calibration
+    const regimeOutput = outputs.find((o) => o.agent === 'regime_classifier');
+    if (regimeOutput?.metadata?.regimeContext) {
+      marketContextForAgents.regime = regimeOutput.metadata.regimeContext;
+    }
+
+    const metaDecision = await metaAgent.aggregateAsync(outputs, marketContextForAgents);
+
     Sentry.addBreadcrumb({
       category: 'engine',
       message: 'Engine B meta decision',
       level: 'info',
-      data: { decision: metaDecision.decision, confidence: metaDecision.finalConfidence },
+      data: {
+        decision: metaDecision.decision,
+        confidence: metaDecision.finalConfidence,
+        threshold: metaDecision.dynamicThreshold,
+        consensusStrength: metaDecision.consensusStrength,
+        agentCount: outputs.length,
+      },
     });
 
     if (signal.experiment_id) {
@@ -647,6 +768,10 @@ async function buildEngineBRecommendation(
       logger.info('Engine B meta decision rejected', {
         signal_id: signal.signal_id,
         reasons: metaDecision.reasons,
+        confidence: metaDecision.finalConfidence,
+        dynamicThreshold: metaDecision.dynamicThreshold,
+        thresholdAdjustments: metaDecision.thresholdAdjustments,
+        agentWeights: metaDecision.agentWeightsUsed,
       });
       return null;
     }

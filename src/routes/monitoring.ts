@@ -7,6 +7,7 @@ import { rateLimiter } from '../services/rate-limiter.service.js';
 import { marketDataStream } from '../services/market-data-stream.service.js';
 import { errorTracker } from '../services/error-tracker.service.js';
 import { logger } from '../utils/logger.js';
+import { getMarketClock } from '../utils/market-hours.js';
 
 const router = Router();
 
@@ -363,8 +364,18 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
     .filter(([, status]) => status.state === 'open')
     .map(([provider]) => provider);
 
+  const clock = getMarketClock();
   return res.json({
     timestamp: new Date().toISOString(),
+    marketClock: {
+      et: clock.displayTime,
+      session: clock.session,
+      isMarketOpen: clock.isMarketOpen,
+      minutesUntilClose: clock.minutesUntilClose,
+      closingSoon: clock.closingSoon,
+      powerHour: clock.powerHour,
+      isHoliday: clock.isHoliday,
+    },
     webhooks: {
       recent: recentEvents.rows,
       summary_24h: {
@@ -1073,6 +1084,102 @@ router.get('/engine-comparison', requireAuth, async (_req: Request, res: Respons
   } catch (error) {
     logger.error('Engine comparison query failed', error);
     return res.status(500).json({ error: 'Failed to fetch engine comparison' });
+  }
+});
+
+/**
+ * GET /api/monitoring/engine-b-agents
+ * Engine B agent intelligence dashboard: per-agent votes, weights, regime, threshold
+ */
+router.get('/engine-b-agents', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const hours = Number(req.query.hours) || 24;
+
+    const [recentDecisions, agentWeights, recentRegimes] = await Promise.all([
+      db.query(
+        `SELECT
+           dr.experiment_id,
+           dr.signal_id,
+           dr.engine,
+           dr.symbol,
+           dr.direction,
+           dr.rationale,
+           dr.is_shadow,
+           dr.created_at
+         FROM decision_recommendations dr
+         WHERE dr.engine = 'B'
+           AND dr.created_at > NOW() - ($1::int || ' hours')::interval
+         ORDER BY dr.created_at DESC
+         LIMIT 50`,
+        [hours]
+      ),
+      db.query(
+        `SELECT agent_name, current_weight, rolling_sharpe, trade_count, updated_at
+         FROM agent_weight_config
+         WHERE active = true
+         ORDER BY current_weight DESC`
+      ).catch(() => ({ rows: [] })),
+      db.query(
+        `SELECT
+           ad.experiment_id,
+           ad.agent_name,
+           ad.bias,
+           ad.confidence,
+           ad.reasons,
+           ad.metadata,
+           ad.created_at
+         FROM agent_decisions ad
+         WHERE ad.created_at > NOW() - ($1::int || ' hours')::interval
+         ORDER BY ad.created_at DESC
+         LIMIT 200`,
+        [hours]
+      ).catch(() => ({ rows: [] })),
+    ]);
+
+    const agentVoteSummary: Record<string, { bullish: number; bearish: number; neutral: number; avgConfidence: number; count: number }> = {};
+    for (const row of recentRegimes.rows) {
+      const name = row.agent_name;
+      if (!agentVoteSummary[name]) {
+        agentVoteSummary[name] = { bullish: 0, bearish: 0, neutral: 0, avgConfidence: 0, count: 0 };
+      }
+      const s = agentVoteSummary[name];
+      s.count++;
+      s.avgConfidence += Number(row.confidence ?? 0);
+      if (row.bias === 'bullish') s.bullish++;
+      else if (row.bias === 'bearish') s.bearish++;
+      else s.neutral++;
+    }
+    for (const s of Object.values(agentVoteSummary)) {
+      if (s.count > 0) s.avgConfidence = Math.round(s.avgConfidence / s.count);
+    }
+
+    const regimeDistribution: Record<string, number> = {};
+    for (const row of recentDecisions.rows) {
+      try {
+        const rationale = typeof row.rationale === 'string' ? JSON.parse(row.rationale) : row.rationale;
+        const regime = rationale?.entry_metadata?.regimeContext?.regime;
+        if (regime) {
+          regimeDistribution[regime] = (regimeDistribution[regime] || 0) + 1;
+        }
+      } catch { /* skip */ }
+    }
+
+    return res.json({
+      period_hours: hours,
+      agent_weights: agentWeights.rows.map((r: any) => ({
+        agent: r.agent_name,
+        weight: Number(r.current_weight),
+        sharpe: r.rolling_sharpe != null ? Number(r.rolling_sharpe) : null,
+        trades: r.trade_count != null ? Number(r.trade_count) : null,
+        lastUpdated: r.updated_at,
+      })),
+      agent_vote_summary: agentVoteSummary,
+      recent_decisions: recentDecisions.rows.length,
+      regime_distribution: regimeDistribution,
+    });
+  } catch (error) {
+    logger.error('Engine B agents query failed', error);
+    return res.status(500).json({ error: 'Failed to fetch Engine B agent data' });
   }
 });
 
