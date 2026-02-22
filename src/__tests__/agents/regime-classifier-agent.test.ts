@@ -91,9 +91,6 @@ describe('RegimeClassifierAgent', () => {
       makeSignal({ setupType: 'breakout' }),
       makeMarketData(candles)
     );
-    const hasBreakoutPenalty = output.reasons.some((r: string) =>
-      r.includes('breakout_penalized')
-    );
     expect(output.metadata?.regimeContext).toBeDefined();
   });
 

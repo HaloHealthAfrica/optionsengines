@@ -21,7 +21,7 @@ describe('Property 26: Risk Agent absolute veto', () => {
         const decision = agent.aggregate(outputs as any);
         if (block) {
           expect(decision.decision).toBe('reject');
-          expect(decision.reasons).toContain('risk_agent_blocked');
+          expect(decision.reasons).toContain('risk_blocked');
         } else {
           expect(decision.decision).toBeDefined();
         }

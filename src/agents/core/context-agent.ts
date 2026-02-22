@@ -8,7 +8,7 @@ export class ContextAgent extends BaseAgent {
     super('context', 'core');
   }
 
-  async analyze(signal: EnrichedSignal, marketData: MarketData): Promise<AgentOutput> {
+  async analyze(_signal: EnrichedSignal, marketData: MarketData): Promise<AgentOutput> {
     const { sessionContext, indicators, currentPrice } = marketData;
     const atr = indicators.atr[indicators.atr.length - 1] ?? 0;
     const reasons: string[] = [];
@@ -37,6 +37,11 @@ export class ContextAgent extends BaseAgent {
     let gammaRegime: GammaRegimeExpectation = 'neutral';
     let distanceToZeroGamma = 0;
 
+    const ema8 = indicators.ema8[indicators.ema8.length - 1] ?? currentPrice;
+    const ema21 = indicators.ema21[indicators.ema21.length - 1] ?? currentPrice;
+    const priceAboveEma21 = currentPrice > ema21;
+    const emaTrendUp = ema8 > ema21;
+
     const gex = marketData.gex;
     if (gex) {
       const { zeroGammaLevel, volatilityExpectation, netGex, dealerPosition } = gex;
@@ -59,41 +64,34 @@ export class ContextAgent extends BaseAgent {
       if (netGex != null && Number.isFinite(netGex)) {
         reasons.push(`netGex_${netGex > 0 ? 'positive' : netGex < 0 ? 'negative' : 'neutral'}`);
 
-        const setupType = signal.setupType ?? 'momentum';
-        const isBreakout = setupType === 'breakout' || setupType === 'momentum';
-        const isPullback = setupType === 'pullback' || setupType === 'mean_revert';
-
         if (dealerPosition === 'long_gamma') {
           gammaRegime = 'mean_reversion';
           reasons.push('dealer_long_gamma_mean_revert_regime');
 
-          bias = signal.direction === 'long' ? 'bullish' : 'bearish';
-
-          if (isPullback) {
-            confidence = Math.min(confidence + 10, 65);
-            reasons.push('gamma_supports_pullback');
-          } else if (isBreakout) {
-            confidence = Math.max(confidence - 10, 25);
-            reasons.push('gamma_resists_breakout');
+          // Long gamma = mean reversion: fade the current price direction
+          if (priceAboveEma21) {
+            bias = 'bearish';
+            reasons.push('gamma_fade_above_ema21');
+          } else {
+            bias = 'bullish';
+            reasons.push('gamma_fade_below_ema21');
           }
           confidence = Math.min(confidence, 65);
         } else if (dealerPosition === 'short_gamma') {
           gammaRegime = 'vol_expansion';
           reasons.push('dealer_short_gamma_expansion_regime');
 
-          bias = signal.direction === 'long' ? 'bullish' : 'bearish';
-
-          if (isBreakout) {
-            confidence = Math.min(confidence + 15, 85);
-            reasons.push('gamma_supports_breakout');
-          } else if (isPullback) {
-            confidence = Math.max(confidence - 5, 30);
-            reasons.push('gamma_fades_pullback');
+          // Short gamma = expansion: follow the EMA trend direction
+          if (emaTrendUp) {
+            bias = 'bullish';
+            reasons.push('gamma_expansion_trend_up');
+          } else {
+            bias = 'bearish';
+            reasons.push('gamma_expansion_trend_down');
           }
           confidence = Math.min(confidence, 85);
         } else {
           gammaRegime = 'neutral';
-          bias = signal.direction === 'long' ? 'bullish' : 'bearish';
         }
       }
     }

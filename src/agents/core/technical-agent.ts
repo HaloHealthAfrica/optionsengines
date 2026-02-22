@@ -32,7 +32,7 @@ export class TechnicalAgent extends BaseAgent {
     super('technical', 'core');
   }
 
-  async analyze(signal: EnrichedSignal, marketData: MarketData): Promise<AgentOutput> {
+  async analyze(_signal: EnrichedSignal, marketData: MarketData): Promise<AgentOutput> {
     const { candles, indicators, currentPrice } = marketData;
     const closes = candles.map((c) => c.close);
     const highs = candles.map((c) => c.high);
@@ -129,14 +129,16 @@ export class TechnicalAgent extends BaseAgent {
 
     {
       const volRatio = computeVolumeRatio(volumes);
-      let dir: IndicatorScore['direction'] = 'neutral';
+      const dir: IndicatorScore['direction'] = 'neutral';
       let s = 50;
       if (volRatio > 1.5) {
-        s = 70;
-        dir = signal.direction === 'long' ? 'bullish' : 'bearish';
-        reasons.push('volume_confirmation');
+        s = 75;
+        reasons.push('volume_surge_confirmation');
+      } else if (volRatio > 1.0) {
+        s = 60;
+        reasons.push('volume_above_average');
       } else if (volRatio < 0.5) {
-        s = 35;
+        s = 30;
         reasons.push('low_volume_caution');
       }
       scores.push({ name: 'volume', score: s, weight: WEIGHTS.volume, direction: dir });
@@ -166,14 +168,20 @@ export class TechnicalAgent extends BaseAgent {
     }
 
     {
-      const adxArr = computeADX(highs, lows, closes, 14);
-      const adx = adxArr.length > 0 ? adxArr[adxArr.length - 1] : 20;
+      const adxResult = computeADX(highs, lows, closes, 14);
+      const adx = adxResult.adx.length > 0 ? adxResult.adx[adxResult.adx.length - 1] : 20;
+      const pdi = adxResult.plusDI.length > 0 ? adxResult.plusDI[adxResult.plusDI.length - 1] : 0;
+      const mdi = adxResult.minusDI.length > 0 ? adxResult.minusDI[adxResult.minusDI.length - 1] : 0;
       let s = 50;
       let dir: IndicatorScore['direction'] = 'neutral';
       if (adx > 30) {
         s = 75;
-        dir = signal.direction === 'long' ? 'bullish' : 'bearish';
-        reasons.push('strong_trend_adx');
+        dir = pdi > mdi ? 'bullish' : 'bearish';
+        reasons.push(`strong_trend_adx_${dir}`);
+      } else if (adx > 20 && Math.abs(pdi - mdi) > 10) {
+        s = 60;
+        dir = pdi > mdi ? 'bullish' : 'bearish';
+        reasons.push(`moderate_trend_adx_${dir}`);
       } else if (adx < 15) {
         s = 30;
         reasons.push('weak_trend_adx');

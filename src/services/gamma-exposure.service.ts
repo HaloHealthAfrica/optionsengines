@@ -13,31 +13,66 @@ const MAX_ABS_DELTA = 500;
 const MAX_ABS_GAMMA = 200;
 const MAX_ABS_VEGA = 1000;
 
+const STALE_GREEKS_SAFETY_MULTIPLIER = 1.5;
+
 export async function getPortfolioGreeks(): Promise<PortfolioGreeks> {
   try {
     const result = await db.query(
       `SELECT
-         COALESCE(SUM(delta_at_entry * quantity), 0) AS net_delta,
-         COALESCE(SUM(gamma_at_entry * quantity), 0) AS net_gamma,
-         COALESCE(SUM(vega_at_entry * quantity), 0) AS net_vega,
-         COALESCE(SUM(theta_at_entry * quantity), 0) AS net_theta,
-         COUNT(*) AS position_count
+         delta_at_entry,
+         gamma_at_entry,
+         vega_at_entry,
+         theta_at_entry,
+         quantity,
+         expiration,
+         entry_timestamp
        FROM refactored_positions
        WHERE status IN ('open', 'closing')
          AND COALESCE(is_test, false) = false`
     );
 
-    const row = result.rows[0];
+    let netDelta = 0;
+    let netGamma = 0;
+    let netVega = 0;
+    let netTheta = 0;
+    const now = new Date();
+
+    for (const row of result.rows) {
+      const qty = Number(row.quantity ?? 0);
+      const deltaEntry = Number(row.delta_at_entry ?? 0);
+      const gammaEntry = Number(row.gamma_at_entry ?? 0);
+      const vegaEntry = Number(row.vega_at_entry ?? 0);
+      const thetaEntry = Number(row.theta_at_entry ?? 0);
+
+      const expiration = row.expiration ? new Date(row.expiration) : null;
+      const entryTime = row.entry_timestamp ? new Date(row.entry_timestamp) : null;
+
+      let decayFactor = STALE_GREEKS_SAFETY_MULTIPLIER;
+      if (expiration && entryTime) {
+        const dteAtEntry = Math.max(1, (expiration.getTime() - entryTime.getTime()) / 86_400_000);
+        const dteNow = Math.max(0.5, (expiration.getTime() - now.getTime()) / 86_400_000);
+        decayFactor = Math.pow(dteNow / dteAtEntry, 0.3);
+        if (dteNow < 1) {
+          decayFactor = STALE_GREEKS_SAFETY_MULTIPLIER;
+        }
+      }
+
+      netDelta += deltaEntry * qty * decayFactor;
+      netGamma += gammaEntry * qty * decayFactor;
+      netVega += vegaEntry * qty * decayFactor;
+      netTheta += thetaEntry * qty * (1 / Math.max(0.3, decayFactor));
+    }
+
     return {
-      netDelta: Number(row?.net_delta ?? 0),
-      netGamma: Number(row?.net_gamma ?? 0),
-      netVega: Number(row?.net_vega ?? 0),
-      netTheta: Number(row?.net_theta ?? 0),
-      positionCount: Number(row?.position_count ?? 0),
+      netDelta: Math.round(netDelta * 100) / 100,
+      netGamma: Math.round(netGamma * 100) / 100,
+      netVega: Math.round(netVega * 100) / 100,
+      netTheta: Math.round(netTheta * 100) / 100,
+      positionCount: result.rows.length,
     };
   } catch (err) {
-    logger.warn('Failed to fetch portfolio greeks', { error: err });
-    return { netDelta: 0, netGamma: 0, netVega: 0, netTheta: 0, positionCount: 0 };
+    logger.warn('Failed to fetch portfolio greeks — fail-closed', { error: err });
+    throw err;
   }
 }
 
@@ -48,7 +83,18 @@ export interface GammaExposureCheck {
 }
 
 export async function checkGammaExposure(): Promise<GammaExposureCheck> {
-  const greeks = await getPortfolioGreeks();
+  let greeks: PortfolioGreeks;
+  try {
+    greeks = await getPortfolioGreeks();
+  } catch (err) {
+    logger.warn('Gamma exposure check — DB unavailable, blocking', { error: err });
+    return {
+      allowed: false,
+      reasons: ['db_unavailable_fail_closed'],
+      greeks: { netDelta: 0, netGamma: 0, netVega: 0, netTheta: 0, positionCount: 0 },
+    };
+  }
+
   const reasons: string[] = [];
   let allowed = true;
 

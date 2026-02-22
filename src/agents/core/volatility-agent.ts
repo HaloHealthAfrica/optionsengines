@@ -67,23 +67,27 @@ export class VolatilityAgent extends BaseAgent {
       }
     }
 
+    let skewBias: 'bullish' | 'bearish' | 'neutral' = 'neutral';
     if (skew != null && Number.isFinite(skew)) {
       if (skew > 5) {
         reasons.push('call_skew_elevated');
-        if (signal.direction === 'long') {
-          confidence = Math.max(confidence - 5, 25);
-        }
+        skewBias = 'bullish';
+        confidence = Math.min(confidence + 5, 80);
       } else if (skew < -5) {
         reasons.push('put_skew_elevated');
-        if (signal.direction === 'short') {
-          confidence = Math.max(confidence - 5, 25);
-        }
+        skewBias = 'bearish';
+        confidence = Math.min(confidence + 5, 80);
       }
     }
 
+    let termBias: 'bullish' | 'bearish' | 'neutral' = 'neutral';
     if (termStructure === 'backwardation') {
       reasons.push('term_structure_backwardation');
+      termBias = 'bearish';
       confidence = Math.max(confidence - 5, 25);
+    } else if (termStructure === 'contango') {
+      reasons.push('term_structure_contango');
+      termBias = 'bullish';
     }
 
     if (bbWidthPct < 10) {
@@ -106,7 +110,23 @@ export class VolatilityAgent extends BaseAgent {
       reasons.push('iv_data_unavailable_using_realized');
     }
 
-    bias = signal.direction === 'long' ? 'bullish' : 'bearish';
+    let bullishSignals = 0;
+    let bearishSignals = 0;
+    for (const b of [skewBias, termBias]) {
+      if (b === 'bullish') bullishSignals++;
+      else if (b === 'bearish') bearishSignals++;
+    }
+    if (ivRank != null && ivRank < 20) bullishSignals++;
+    if (ivRank != null && ivRank > 80) bearishSignals++;
+    if (hvRatio != null && hvRatio < 0.7) bullishSignals++;
+    if (hvRatio != null && hvRatio > 1.3) bearishSignals++;
+
+    if (bullishSignals > bearishSignals) {
+      bias = 'bullish';
+    } else if (bearishSignals > bullishSignals) {
+      bias = 'bearish';
+    }
+
     confidence = Math.max(15, Math.min(85, confidence));
 
     return this.buildOutput(bias, Math.round(confidence), reasons, blockTrade, {

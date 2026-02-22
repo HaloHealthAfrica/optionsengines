@@ -33,8 +33,8 @@ export class RegimeClassifierAgent extends BaseAgent {
     const closes = candles.map((c) => c.close);
     const volumes = candles.map((c) => c.volume);
 
-    const adxValues = computeADX(highs, lows, closes, 14);
-    const adx = adxValues.length > 0 ? adxValues[adxValues.length - 1] : 20;
+    const adxResult = computeADX(highs, lows, closes, 14);
+    const adx = adxResult.adx.length > 0 ? adxResult.adx[adxResult.adx.length - 1] : 20;
 
     const atrPercentile = computeATRPercentile(indicators.atr);
     const volatilityState = classifyVolatility(atrPercentile);

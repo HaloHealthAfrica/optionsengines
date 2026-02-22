@@ -16,6 +16,7 @@ const FALLBACK_WEIGHTS: Record<AgentType, number> = {
 
 const MIN_DIRECTIONAL_AGENTS = 3;
 const MIN_CORE_AGENTS = 1;
+const MIN_CONSENSUS_STRENGTH = 20;
 
 const BASE_THRESHOLD = 50;
 
@@ -155,8 +156,22 @@ export class MetaDecisionAgent extends BaseAgent {
       weightSums[bias] += weight;
     }
 
+    if (scores.bullish === scores.bearish) {
+      return {
+        finalBias: 'neutral',
+        finalConfidence: 0,
+        contributingAgents: outputs.map((o) => o.agent),
+        consensusStrength: 0,
+        decision: 'reject',
+        reasons: ['directional_tie'],
+        dynamicThreshold: BASE_THRESHOLD,
+        thresholdAdjustments: [],
+        agentWeightsUsed,
+      };
+    }
+
     const finalBias: MetaDecision['finalBias'] =
-      scores.bullish >= scores.bearish ? 'bullish' : 'bearish';
+      scores.bullish > scores.bearish ? 'bullish' : 'bearish';
     const oppositeBias = finalBias === 'bullish' ? 'bearish' : 'bullish';
 
     const finalConfidence =
@@ -176,12 +191,18 @@ export class MetaDecisionAgent extends BaseAgent {
         riskBlocked
       );
 
-    const decision: MetaDecision['decision'] =
+    let decision: MetaDecision['decision'] =
       finalConfidence >= dynamicThreshold ? 'approve' : 'reject';
 
     const reasons: string[] = ['weighted_consensus'];
+    if (decision === 'approve' && consensusStrength < MIN_CONSENSUS_STRENGTH) {
+      decision = 'reject';
+      reasons.push(`weak_consensus_strength_${Math.round(consensusStrength)}`);
+    }
     if (decision === 'reject') {
-      reasons.push(`confidence_${Math.round(finalConfidence)}_below_threshold_${dynamicThreshold}`);
+      if (finalConfidence < dynamicThreshold) {
+        reasons.push(`confidence_${Math.round(finalConfidence)}_below_threshold_${dynamicThreshold}`);
+      }
     }
     if (thresholdAdjustments.length > 0) {
       reasons.push(`threshold_adjusted_by_${thresholdAdjustments.map((a) => a.source).join(',')}`);
@@ -238,8 +259,19 @@ export class MetaDecisionAgent extends BaseAgent {
       weightSums[bias] += weight;
     }
 
+    if (scores.bullish === scores.bearish) {
+      return {
+        finalBias: 'neutral',
+        finalConfidence: 0,
+        contributingAgents: outputs.map((o) => o.agent),
+        consensusStrength: 0,
+        decision: 'reject',
+        reasons: ['directional_tie'],
+      };
+    }
+
     const finalBias: MetaDecision['finalBias'] =
-      scores.bullish >= scores.bearish ? 'bullish' : 'bearish';
+      scores.bullish > scores.bearish ? 'bullish' : 'bearish';
     const oppositeBias = finalBias === 'bullish' ? 'bearish' : 'bullish';
 
     const finalConfidence =
@@ -251,13 +283,22 @@ export class MetaDecisionAgent extends BaseAgent {
         ? ((scores[finalBias] - scores[oppositeBias]) / totalDirectionalScore) * 100
         : 0;
 
+    const reasons: string[] = ['weighted_consensus'];
+    let decision: MetaDecision['decision'] =
+      finalConfidence >= BASE_THRESHOLD ? 'approve' : 'reject';
+
+    if (decision === 'approve' && consensusStrength < MIN_CONSENSUS_STRENGTH) {
+      decision = 'reject';
+      reasons.push(`weak_consensus_strength_${Math.round(consensusStrength)}`);
+    }
+
     return {
       finalBias,
       finalConfidence: Math.round(finalConfidence),
       contributingAgents: outputs.map((o) => o.agent),
       consensusStrength: Math.round(consensusStrength),
-      decision: finalConfidence >= BASE_THRESHOLD ? 'approve' : 'reject',
-      reasons: ['weighted_consensus'],
+      decision,
+      reasons,
     };
   }
 

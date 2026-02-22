@@ -59,14 +59,20 @@ export function computeMACD(
   return { macdLine, signalLine, histogram };
 }
 
+export interface ADXResult {
+  adx: number[];
+  plusDI: number[];
+  minusDI: number[];
+}
+
 export function computeADX(
   highs: number[],
   lows: number[],
   closes: number[],
   period = 14
-): number[] {
+): ADXResult {
   const len = highs.length;
-  if (len < period * 2) return [];
+  if (len < period * 2) return { adx: [], plusDI: [], minusDI: [] };
 
   const tr: number[] = [];
   const plusDM: number[] = [];
@@ -99,20 +105,35 @@ export function computeADX(
   const smoothMinusDM = smooth(minusDM);
 
   const dx: number[] = [];
+  const plusDIArr: number[] = [];
+  const minusDIArr: number[] = [];
   for (let i = 0; i < smoothTR.length; i++) {
-    if (smoothTR[i] === 0) { dx.push(0); continue; }
+    if (smoothTR[i] === 0) {
+      dx.push(0);
+      plusDIArr.push(0);
+      minusDIArr.push(0);
+      continue;
+    }
     const pdi = (smoothPlusDM[i] / smoothTR[i]) * 100;
     const mdi = (smoothMinusDM[i] / smoothTR[i]) * 100;
+    plusDIArr.push(pdi);
+    minusDIArr.push(mdi);
     const sum = pdi + mdi;
     dx.push(sum === 0 ? 0 : (Math.abs(pdi - mdi) / sum) * 100);
   }
 
-  if (dx.length < period) return [];
+  if (dx.length < period) return { adx: [], plusDI: [], minusDI: [] };
   const adx: number[] = [dx.slice(0, period).reduce((a, b) => a + b, 0) / period];
   for (let i = period; i < dx.length; i++) {
     adx.push((adx[adx.length - 1] * (period - 1) + dx[i]) / period);
   }
-  return adx;
+
+  const diOffset = plusDIArr.length - adx.length;
+  return {
+    adx,
+    plusDI: plusDIArr.slice(diOffset),
+    minusDI: minusDIArr.slice(diOffset),
+  };
 }
 
 export function computeVWAP(candles: Candle[]): number {

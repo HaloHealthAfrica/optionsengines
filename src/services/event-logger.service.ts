@@ -43,6 +43,20 @@ export class EventLogger {
       );
     }
 
+    const metaMetadata: Record<string, unknown> = {
+      contributingAgents: input.metaDecision.contributingAgents,
+      consensusStrength: input.metaDecision.consensusStrength,
+    };
+    if ('dynamicThreshold' in input.metaDecision) {
+      metaMetadata.dynamicThreshold = (input.metaDecision as any).dynamicThreshold;
+    }
+    if ('thresholdAdjustments' in input.metaDecision) {
+      metaMetadata.thresholdAdjustments = (input.metaDecision as any).thresholdAdjustments;
+    }
+    if ('agentWeightsUsed' in input.metaDecision) {
+      metaMetadata.agentWeightsUsed = (input.metaDecision as any).agentWeightsUsed;
+    }
+
     await db.query(
       `INSERT INTO agent_decisions (
         experiment_id,
@@ -64,10 +78,7 @@ export class EventLogger {
         input.metaDecision.finalConfidence,
         JSON.stringify(input.metaDecision.reasons),
         input.metaDecision.decision === 'reject',
-        JSON.stringify({
-          contributingAgents: input.metaDecision.contributingAgents,
-          consensusStrength: input.metaDecision.consensusStrength,
-        }),
+        JSON.stringify(metaMetadata),
       ]
     );
   }

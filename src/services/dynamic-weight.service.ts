@@ -18,7 +18,7 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
 };
 
 const MIN_WEIGHT = 0.05;
-const MAX_WEIGHT = 0.35;
+const MAX_WEIGHT = 0.30;
 const MAX_DAILY_CHANGE = 0.10;
 const MIN_TRADES_FOR_SHARPE = 10;
 

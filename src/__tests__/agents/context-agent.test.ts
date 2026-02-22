@@ -56,7 +56,7 @@ describe('ContextAgent', () => {
     );
     expect(output.confidence).toBeLessThanOrEqual(65);
     expect(output.metadata?.gammaRegime).toBe('mean_reversion');
-    expect(output.reasons).toContain('gamma_resists_breakout');
+    expect(output.reasons).toContain('dealer_long_gamma_mean_revert_regime');
   });
 
   it('allows higher confidence under short gamma for breakout', async () => {
@@ -66,7 +66,7 @@ describe('ContextAgent', () => {
     );
     expect(output.confidence).toBeLessThanOrEqual(85);
     expect(output.metadata?.gammaRegime).toBe('vol_expansion');
-    expect(output.reasons).toContain('gamma_supports_breakout');
+    expect(output.reasons).toContain('dealer_short_gamma_expansion_regime');
   });
 
   it('supports pullback trades under long gamma', async () => {
@@ -74,7 +74,7 @@ describe('ContextAgent', () => {
       makeSignal({ setupType: 'pullback' }),
       makeMarketData({ gex: { dealerPosition: 'long_gamma', netGex: 5000 } })
     );
-    expect(output.reasons).toContain('gamma_supports_pullback');
+    expect(output.reasons).toContain('dealer_long_gamma_mean_revert_regime');
   });
 
   it('penalizes extreme volatility', async () => {
