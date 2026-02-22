@@ -18,6 +18,8 @@ export interface ExitIntelligenceOpenPosition {
   quantity: number;
   entryPrice: number;
   entryTimestamp: Date;
+  /** Contract multiplier (defaults to 100 for standard equity options) */
+  multiplier?: number;
   /** Optional: stateStrengthDelta at entry for decay detection */
   entryStateStrengthDelta?: number;
   /** Optional: regime at entry for flip detection */
@@ -167,7 +169,8 @@ export function evaluateExitAdjustments(
   }
 
   // Partial exit only if > 1R in profit (configurable)
-  const costBasis = input.openPosition.entryPrice * input.openPosition.quantity * 100;
+  const multiplier = input.openPosition.multiplier ?? 100;
+  const costBasis = input.openPosition.entryPrice * input.openPosition.quantity * multiplier;
   const rMultiple = costBasis > 0 ? input.unrealizedPnL / (costBasis * 0.01) : 0;
   if (forcePartialExit !== undefined && rMultiple < MIN_PROFIT_R_FOR_PARTIAL) {
     forcePartialExit = undefined;

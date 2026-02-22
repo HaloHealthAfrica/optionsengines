@@ -116,23 +116,32 @@ export class PositionRefresherWorker {
           const costBasis = position.entry_price * position.quantity * (position.multiplier ?? 100);
           const positionPnlPercent = costBasis > 0 ? (unrealizedPnl / costBasis) * 100 : 0;
 
-          // Update high water mark and trailing stop price
+          const isShort = (position.position_side ?? 'LONG') === 'SHORT';
           const prevHwm = Number(position.high_water_mark) || position.entry_price;
-          const newHwm = Math.max(prevHwm, currentPrice);
+          const newHwm = isShort
+            ? Math.min(prevHwm, currentPrice)
+            : Math.max(prevHwm, currentPrice);
           const gainPercent = position.entry_price > 0
-            ? ((newHwm - position.entry_price) / position.entry_price) * 100
+            ? (isShort
+                ? ((position.entry_price - newHwm) / position.entry_price) * 100
+                : ((newHwm - position.entry_price) / position.entry_price) * 100)
             : 0;
 
-          // Trailing stop activates once gain exceeds activation threshold
-          // Then trails at trailing_stop_percent below the high water mark
           let trailingStopPrice = position.trailing_stop_price;
           const activationPct = config.trailingStopActivationPercent;
           const trailPct = config.trailingStopPercent;
           if (activationPct > 0 && trailPct > 0 && gainPercent >= activationPct) {
-            const newTrailingStop = newHwm * (1 - trailPct / 100);
-            // Only move trailing stop up, never down
-            if (trailingStopPrice === null || newTrailingStop > trailingStopPrice) {
-              trailingStopPrice = newTrailingStop;
+            const newTrailingStop = isShort
+              ? newHwm * (1 + trailPct / 100)
+              : newHwm * (1 - trailPct / 100);
+            if (isShort) {
+              if (trailingStopPrice === null || newTrailingStop < trailingStopPrice) {
+                trailingStopPrice = newTrailingStop;
+              }
+            } else {
+              if (trailingStopPrice === null || newTrailingStop > trailingStopPrice) {
+                trailingStopPrice = newTrailingStop;
+              }
             }
           }
 

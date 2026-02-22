@@ -56,8 +56,15 @@ async function getDailyPnlSeries(days: number): Promise<{ date: string; value: n
   }));
 }
 
-function calculatePnlPercent(entryPrice: number, currentPrice: number): number {
+function calculatePnlPercent(
+  entryPrice: number,
+  currentPrice: number,
+  positionSide: 'LONG' | 'SHORT' = 'LONG'
+): number {
   if (!entryPrice) return 0;
+  if (positionSide === 'SHORT') {
+    return ((entryPrice - currentPrice) / entryPrice) * 100;
+  }
   return ((currentPrice - entryPrice) / entryPrice) * 100;
 }
 
@@ -69,7 +76,7 @@ async function getExitSignals() {
   if (!rule) return [];
 
   const positionsResult = await db.query(
-    `SELECT position_id, symbol, entry_price, current_price, entry_timestamp, expiration
+    `SELECT position_id, symbol, entry_price, current_price, entry_timestamp, expiration, position_side
      FROM refactored_positions WHERE status IN ('open', 'closing')`
   );
 
@@ -79,7 +86,11 @@ async function getExitSignals() {
   for (const row of positionsResult.rows) {
     if (!row.current_price || !row.entry_price) continue;
 
-    const pnlPercent = calculatePnlPercent(Number(row.entry_price), Number(row.current_price));
+    const pnlPercent = calculatePnlPercent(
+      Number(row.entry_price),
+      Number(row.current_price),
+      row.position_side ?? 'LONG'
+    );
     const timeInHours = row.entry_timestamp
       ? (now - new Date(row.entry_timestamp).getTime()) / 3600000
       : 0;

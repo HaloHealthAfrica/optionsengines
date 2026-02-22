@@ -13,6 +13,11 @@ import {
   shouldBlockSameStrike,
   extractWebhookSource,
 } from '../services/same-strike-cooldown.service.js';
+import {
+  calculateExpiration,
+  calculateStrike,
+  buildOptionSymbol,
+} from '../lib/shared/option-utils.js';
 
 interface ApprovedSignal {
   signal_id: string;
@@ -22,37 +27,6 @@ interface ApprovedSignal {
   timestamp: Date;
   experiment_id?: string | null;
   engine?: 'A' | 'B' | null;
-}
-
-function calculateExpiration(dteDays: number): Date {
-  const base = new Date();
-  base.setUTCDate(base.getUTCDate() + dteDays);
-
-  const day = base.getUTCDay();
-  const daysUntilFriday = (5 - day + 7) % 7;
-  base.setUTCDate(base.getUTCDate() + daysUntilFriday);
-  base.setUTCHours(0, 0, 0, 0);
-
-  return base;
-}
-
-function calculateStrike(price: number, direction: 'long' | 'short'): number {
-  if (direction === 'long') {
-    return Math.ceil(price);
-  }
-  return Math.floor(price);
-}
-
-function buildOptionSymbol(
-  symbol: string,
-  expiration: Date,
-  type: 'call' | 'put',
-  strike: number
-): string {
-  const yyyy = expiration.getUTCFullYear().toString();
-  const mm = String(expiration.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(expiration.getUTCDate()).padStart(2, '0');
-  return `${symbol}-${yyyy}${mm}${dd}-${type.toUpperCase()}-${strike.toFixed(2)}`;
 }
 
 export class OrderCreatorWorker {

@@ -4,33 +4,13 @@ import { marketData } from './market-data.js';
 import { logger } from '../utils/logger.js';
 import { MetaDecision, EnrichedSignal } from '../types/index.js';
 import { config } from '../config/index.js';
+import { calculateUnrealizedPnL } from '../lib/pnl/calculate-realized-pnl.js';
+import {
+  calculateExpiration,
+  calculateStrike,
+  buildOptionSymbol,
+} from '../lib/shared/option-utils.js';
 import * as Sentry from '@sentry/node';
-
-function calculateExpiration(dteDays: number): Date {
-  const base = new Date();
-  base.setUTCDate(base.getUTCDate() + dteDays);
-  const day = base.getUTCDay();
-  const daysUntilFriday = (5 - day + 7) % 7;
-  base.setUTCDate(base.getUTCDate() + daysUntilFriday);
-  base.setUTCHours(0, 0, 0, 0);
-  return base;
-}
-
-function calculateStrike(price: number, direction: 'long' | 'short'): number {
-  return direction === 'long' ? Math.ceil(price) : Math.floor(price);
-}
-
-function buildOptionSymbol(
-  symbol: string,
-  expiration: Date,
-  type: 'call' | 'put',
-  strike: number
-): string {
-  const yyyy = expiration.getUTCFullYear().toString();
-  const mm = String(expiration.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(expiration.getUTCDate()).padStart(2, '0');
-  return `${symbol}-${yyyy}${mm}${dd}-${type.toUpperCase()}-${strike.toFixed(2)}`;
-}
 
 /** Optional Engine B recommendation for strike/expiration (Phase 3 shadow comparison) */
 export interface ShadowRecommendation {
@@ -189,8 +169,13 @@ export class ShadowExecutor {
       if (currentPrice == null || !Number.isFinite(currentPrice)) {
         continue;
       }
-      const unrealizedPnl =
-        (currentPrice - position.entry_price) * position.quantity * 100;
+      const unrealizedPnl = calculateUnrealizedPnL({
+        entry_price: position.entry_price,
+        current_price: currentPrice,
+        quantity: position.quantity,
+        multiplier: Number(position.multiplier ?? 100),
+        position_side: position.position_side ?? 'LONG',
+      });
       await db.query(
         `UPDATE shadow_positions
          SET current_price = $1,
@@ -224,9 +209,14 @@ export class ShadowExecutor {
       if (currentPrice == null || !Number.isFinite(currentPrice)) {
         continue;
       }
-      const unrealizedPnl =
-        (currentPrice - position.entry_price) * position.quantity * 100;
-      const costBasis = position.entry_price * position.quantity * 100;
+      const unrealizedPnl = calculateUnrealizedPnL({
+        entry_price: position.entry_price,
+        current_price: currentPrice,
+        quantity: position.quantity,
+        multiplier: Number(position.multiplier ?? 100),
+        position_side: position.position_side ?? 'LONG',
+      });
+      const costBasis = position.entry_price * position.quantity * Number(position.multiplier ?? 100);
       const pnlPercent = costBasis > 0 ? (unrealizedPnl / costBasis) * 100 : 0;
       const now = new Date();
       const hoursInPosition =

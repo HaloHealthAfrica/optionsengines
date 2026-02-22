@@ -21,6 +21,7 @@ export interface PositionRow {
   entry_price: number;
   entry_timestamp: Date;
   engine?: 'A' | 'B' | null;
+  position_side?: string | null;
   greeks_at_entry?: Record<string, number> | null;
   iv_at_entry?: number | null;
 }
@@ -112,6 +113,7 @@ export function buildExitDecisionInput(
       symbol: position.symbol,
       direction: position.type === 'call' ? 'CALL' : 'PUT',
       setupType,
+      positionSide: (position.position_side as 'LONG' | 'SHORT') ?? 'LONG',
     },
     entryData: {
       timestamp: entryTs.getTime(),

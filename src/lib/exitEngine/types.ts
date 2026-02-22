@@ -6,6 +6,7 @@ export interface ExitDecisionInput {
     symbol: string;
     direction: 'CALL' | 'PUT';
     setupType: SetupType;
+    positionSide?: 'LONG' | 'SHORT';
   };
   entryData: {
     timestamp: number;

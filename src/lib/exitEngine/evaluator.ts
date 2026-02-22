@@ -9,9 +9,13 @@ import { analyzeGreeks } from './greeksAnalyzer.js';
 
 function calculateMetrics(input: ExitDecisionInput): ExitDecisionOutput['metrics'] {
   const timeInTradeMinutes = Math.max(0, (input.liveMarket.timestamp - input.entryData.timestamp) / 60000);
+  const isShort = input.tradePosition.positionSide === 'SHORT';
+  const priceDiff = isShort
+    ? input.entryData.optionEntryPrice - input.liveMarket.optionMid
+    : input.liveMarket.optionMid - input.entryData.optionEntryPrice;
   const optionPnLPercent =
     input.entryData.optionEntryPrice > 0
-      ? ((input.liveMarket.optionMid - input.entryData.optionEntryPrice) / input.entryData.optionEntryPrice) * 100
+      ? (priceDiff / input.entryData.optionEntryPrice) * 100
       : 0;
   const underlyingMovePercent =
     input.entryData.underlyingEntryPrice > 0

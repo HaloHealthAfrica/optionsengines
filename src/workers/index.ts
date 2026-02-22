@@ -16,6 +16,7 @@ import { GammaMetricsWorker } from './gamma-metrics.worker.js';
 import { PlanTriggerWorker } from './plan-trigger-worker.js';
 import { AlertTriggerMonitorWorker } from './alert-trigger-monitor.worker.js';
 import { AlertOutcomeTrackerWorker } from './alert-outcome-tracker.worker.js';
+import { PnLReconciliationWorker } from './pnl-reconciliation.worker.js';
 import { startTradeEngineHeartbeat, stopTradeEngineHeartbeat } from '../services/trade-engine-health.service.js';
 
 const signalProcessor = new SignalProcessorWorker();
@@ -37,6 +38,7 @@ const gammaMetricsWorker = new GammaMetricsWorker();
 const planTriggerWorker = new PlanTriggerWorker(30_000);
 const alertTriggerMonitorWorker = new AlertTriggerMonitorWorker(60_000);
 const alertOutcomeTrackerWorker = new AlertOutcomeTrackerWorker(60_000);
+const pnlReconciliation = new PnLReconciliationWorker();
 
 let workersStarted = false;
 
@@ -79,6 +81,7 @@ export function startWorkers(): void {
   paperExecutor.start(config.paperExecutorInterval);
   positionRefresher.start(config.positionRefresherInterval);
   exitMonitor.start(config.exitMonitorInterval);
+  pnlReconciliation.start(300_000);
 
   workersStarted = true;
   logger.info('All workers started');
@@ -113,6 +116,7 @@ export async function stopWorkers(timeoutMs: number = 30000): Promise<void> {
     paperExecutor.stopAndDrain(timeoutMs),
     positionRefresher.stopAndDrain(timeoutMs),
     exitMonitor.stopAndDrain(timeoutMs),
+    pnlReconciliation.stop(),
   ]);
 
   workersStarted = false;

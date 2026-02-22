@@ -2,6 +2,10 @@ import { marketData } from './market-data.js';
 import { config } from '../config/index.js';
 import { DTE_POLICY } from '../lib/shared/constants.js';
 import type { SetupType } from '../lib/shared/types.js';
+import {
+  nextFriday,
+  calculateStrike,
+} from '../lib/shared/option-utils.js';
 import * as Sentry from '@sentry/node';
 
 export type StrikeSelection = {
@@ -9,17 +13,6 @@ export type StrikeSelection = {
   expiration: Date;
   optionType: 'call' | 'put';
 };
-
-/** Align date to next Friday (weekly options expiry) */
-function nextFriday(from: Date): Date {
-  const d = new Date(from);
-  const day = d.getUTCDay();
-  const daysUntilFriday = (5 - day + 7) % 7;
-  const addDays = daysUntilFriday === 0 ? 7 : daysUntilFriday;
-  d.setUTCDate(d.getUTCDate() + addDays);
-  d.setUTCHours(0, 0, 0, 0);
-  return d;
-}
 
 /**
  * Calculate expiration using DTE policy for the given setupType.
@@ -37,10 +30,6 @@ export function calculateExpiration(setupType: SetupType = 'SWING'): Date {
   const base = new Date();
   base.setUTCDate(base.getUTCDate() + targetDte);
   return nextFriday(base);
-}
-
-function calculateStrike(price: number, direction: 'long' | 'short'): number {
-  return direction === 'long' ? Math.ceil(price) : Math.floor(price);
 }
 
 export async function selectStrike(

@@ -31,6 +31,7 @@ import {
   shouldBlockSameStrike,
   extractWebhookSource,
 } from '../services/same-strike-cooldown.service.js';
+import { buildOptionSymbol } from '../lib/shared/option-utils.js';
 import * as Sentry from '@sentry/node';
 
 export class OrchestratorService {
@@ -861,7 +862,7 @@ export class OrchestratorService {
       }
 
       const optionType = rec.direction === 'long' ? 'call' : 'put';
-      const optionSymbol = this.buildOptionSymbol(
+      const optionSymbol = buildOptionSymbol(
         rec.symbol,
         rec.expiration,
         optionType,
@@ -923,17 +924,7 @@ export class OrchestratorService {
     }
   }
 
-  private buildOptionSymbol(
-    symbol: string,
-    expiration: Date,
-    type: 'call' | 'put',
-    strike: number
-  ): string {
-    const yyyy = expiration.getUTCFullYear().toString();
-    const mm = String(expiration.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(expiration.getUTCDate()).padStart(2, '0');
-    return `${symbol}-${yyyy}${mm}${dd}-${type.toUpperCase()}-${strike.toFixed(2)}`;
-  }
+  // buildOptionSymbol moved to src/lib/shared/option-utils.ts
 
   private applyPolicyToRecommendation(
     experiment_id: string,

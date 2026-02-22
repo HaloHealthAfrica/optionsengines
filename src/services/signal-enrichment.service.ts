@@ -310,45 +310,51 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
           ? 'capacity_near_target'
           : 'capacity_aged';
 
-      await db.query(
-        `UPDATE refactored_positions
-         SET status = $1,
-             exit_reason = $2,
-             last_updated = $3
-         WHERE position_id = $4`,
-        ['closing', exitReason, now, position.position_id]
-      );
+      let closed = false;
+      await db.transaction(async (tx) => {
+        const updateResult = await tx.query(
+          `UPDATE refactored_positions
+           SET status = $1,
+               exit_reason = $2,
+               last_updated = $3
+           WHERE position_id = $4 AND status = 'open'
+           RETURNING position_id`,
+          ['closing', exitReason, now, position.position_id]
+        );
+        if (updateResult.rows.length === 0) return;
 
-      await db.query(
-        `INSERT INTO orders (
-          signal_id,
-          symbol,
-          option_symbol,
-          strike,
-          expiration,
-          type,
-          quantity,
-          engine,
-          experiment_id,
-          order_type,
-          status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [
-          null,
-          position.symbol,
-          position.option_symbol,
-          position.strike,
-          position.expiration,
-          position.type,
-          position.quantity,
-          position.engine ?? null,
-          position.experiment_id ?? null,
-          'paper',
-          'pending_execution',
-        ]
-      );
+        await tx.query(
+          `INSERT INTO orders (
+            signal_id,
+            symbol,
+            option_symbol,
+            strike,
+            expiration,
+            type,
+            quantity,
+            engine,
+            experiment_id,
+            order_type,
+            status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            null,
+            position.symbol,
+            position.option_symbol,
+            position.strike,
+            position.expiration,
+            position.type,
+            position.quantity,
+            position.engine ?? null,
+            position.experiment_id ?? null,
+            'paper',
+            'pending_execution',
+          ]
+        );
+        closed = true;
+      });
 
-      freedSlots += 1;
+      if (closed) freedSlots += 1;
     }
   }
 

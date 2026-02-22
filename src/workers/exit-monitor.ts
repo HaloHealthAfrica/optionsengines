@@ -155,6 +155,17 @@ export class ExitMonitorWorker {
           let exitQuantity = position.quantity;
           let exitIntelligenceAudit: { reasonCodes: string[]; finalExitAction: string } | null = null;
 
+          if (daysToExpiration <= 0) {
+            exitReason = '0dte_force_close';
+            exitQuantity = position.quantity;
+            logger.warn('0DTE force-close triggered', {
+              positionId: position.position_id,
+              symbol: position.symbol,
+              expiration: position.expiration,
+              daysToExpiration,
+            });
+          }
+
           // Exit Intelligence: bias-aware adjustments (runs before stop/target evaluation)
           if (config.enableExitIntelligence && !exitReason) {
             const marketState = await getCurrentState(position.symbol);
@@ -195,8 +206,11 @@ export class ExitMonitorWorker {
             }
           }
 
-          // Trailing stop check: if trailing stop is active and price breached it
-          if (!exitReason && position.trailing_stop_price && currentPrice <= position.trailing_stop_price) {
+          const isShortPosition = (position.position_side ?? 'LONG') === 'SHORT';
+          const trailingStopBreached = isShortPosition
+            ? currentPrice >= position.trailing_stop_price!
+            : currentPrice <= position.trailing_stop_price!;
+          if (!exitReason && position.trailing_stop_price && trailingStopBreached) {
             exitReason = 'trailing_stop';
             exitQuantity = position.quantity;
             logger.info('Trailing stop triggered', {
@@ -255,9 +269,11 @@ export class ExitMonitorWorker {
                 exitQuantity = position.quantity;
               }
             } else if (result.action === 'TIGHTEN_STOP' && result.newStopLevel) {
-              // Tighten the trailing stop to the level suggested by the exit engine
               const currentStop = Number(position.trailing_stop_price) || 0;
-              if (result.newStopLevel > currentStop) {
+              const isTighter = isShortPosition
+                ? (currentStop === 0 || result.newStopLevel < currentStop)
+                : result.newStopLevel > currentStop;
+              if (isTighter) {
                 await db.query(
                   `UPDATE refactored_positions SET trailing_stop_price = $1, last_updated = $2 WHERE position_id = $3`,
                   [result.newStopLevel, now, position.position_id]

@@ -134,7 +134,7 @@ export async function checkDrawdownCircuitBreaker(opts?: {
          COALESCE(SUM(
            CASE WHEN unrealized_pnl < 0 THEN ABS(unrealized_pnl) ELSE 0 END
          ), 0) AS total_loss,
-         COALESCE(SUM(entry_price * quantity), 1) AS total_exposure
+         COALESCE(SUM(entry_price * quantity * COALESCE(multiplier, 100)), 1) AS total_exposure
        FROM refactored_positions
        WHERE status IN ('open', 'closing')
          AND COALESCE(is_test, false) = false`

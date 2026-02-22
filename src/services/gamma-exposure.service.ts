@@ -25,7 +25,8 @@ export async function getPortfolioGreeks(): Promise<PortfolioGreeks> {
          theta_at_entry,
          quantity,
          expiration,
-         entry_timestamp
+         entry_timestamp,
+         position_side
        FROM refactored_positions
        WHERE status IN ('open', 'closing')
          AND COALESCE(is_test, false) = false`
@@ -57,10 +58,11 @@ export async function getPortfolioGreeks(): Promise<PortfolioGreeks> {
         }
       }
 
-      netDelta += deltaEntry * qty * decayFactor;
-      netGamma += gammaEntry * qty * decayFactor;
-      netVega += vegaEntry * qty * decayFactor;
-      netTheta += thetaEntry * qty * (1 / Math.max(0.3, decayFactor));
+      const sideSign = row.position_side === 'SHORT' ? -1 : 1;
+      netDelta += deltaEntry * qty * decayFactor * sideSign;
+      netGamma += gammaEntry * qty * decayFactor * sideSign;
+      netVega += vegaEntry * qty * decayFactor * sideSign;
+      netTheta += thetaEntry * qty * (1 / Math.max(0.3, decayFactor)) * sideSign;
     }
 
     return {
