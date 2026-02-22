@@ -18,6 +18,7 @@ import { publishStratScoresUpdated } from '../../services/realtime-updates.servi
 import { isMarketOpen, isPreMarket } from '../../utils/market-hours.js';
 import { logger } from '../../utils/logger.js';
 import type { StratAlertRow } from './types.js';
+import * as Sentry from '@sentry/node';
 
 export interface Tier1Result {
   alertCount: number;
@@ -70,6 +71,7 @@ export async function runTier1PriceCheck(): Promise<Tier1Result> {
     integrityBroken: 0,
   };
 
+  try {
   if (!isMarketOpen() && !isPreMarket()) {
     logger.debug('Tier 1: outside trading window, skipping');
     return result;
@@ -150,4 +152,9 @@ export async function runTier1PriceCheck(): Promise<Tier1Result> {
 
   logger.info('Tier 1 price check complete', result);
   return result;
+  } catch (err) {
+    logger.error('Tier 1 price check failed', err);
+    Sentry.captureException(err, { tags: { worker: 'strat-cron', tier: 'tier1' } });
+    return result;
+  }
 }

@@ -10,6 +10,7 @@ import { config } from '../config/index.js';
 import { marketData } from '../services/market-data.js';
 import { getStratMarketSession } from '../utils/market-session.js';
 import { publishStratOutcomeRecorded } from '../services/realtime-updates.service.js';
+import * as Sentry from '@sentry/node';
 
 type AlertRow = {
   alert_id: string;
@@ -162,10 +163,16 @@ export class AlertOutcomeTrackerWorker {
     }
 
     this.timer = setInterval(() => {
-      this.run().catch((err) => logger.error('AlertOutcomeTrackerWorker error', err));
+      this.run().catch((err) => {
+        logger.error('AlertOutcomeTrackerWorker error', err);
+        Sentry.captureException(err, { tags: { worker: 'alert-outcome-tracker' } });
+      });
     }, this.intervalMs);
 
-    this.run().catch((err) => logger.error('AlertOutcomeTrackerWorker startup error', err));
+    this.run().catch((err) => {
+      logger.error('AlertOutcomeTrackerWorker startup error', err);
+      Sentry.captureException(err, { tags: { worker: 'alert-outcome-tracker' } });
+    });
     logger.info('AlertOutcomeTrackerWorker started', { intervalMs: this.intervalMs });
   }
 
@@ -284,6 +291,7 @@ export class AlertOutcomeTrackerWorker {
         logger.debug('AlertOutcomeTrackerWorker: alert_outcomes table not yet migrated');
       } else {
         logger.error('AlertOutcomeTrackerWorker run failed', { error: err });
+        Sentry.captureException(err as Error, { tags: { worker: 'alert-outcome-tracker' } });
       }
     } finally {
       this.isRunning = false;

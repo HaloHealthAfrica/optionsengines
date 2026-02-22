@@ -10,6 +10,7 @@ import { logger } from '../../utils/logger.js';
 import { config } from '../../config/index.js';
 import { stratPlanLifecycleService } from './strat-plan-lifecycle.service.js';
 import type { StratPlan } from './types.js';
+import * as Sentry from '@sentry/node';
 
 function generateSignalHash(
   symbol: string,
@@ -92,6 +93,10 @@ export class PlanToSignalBridge {
       logger.error('Plan-to-signal bridge failed', {
         plan_id: plan.plan_id,
         error: err,
+      });
+      Sentry.captureException(err, {
+        tags: { service: 'plan-to-signal-bridge' },
+        extra: { plan_id: plan.plan_id, symbol: plan.symbol },
       });
       return { ok: false, reason: 'Database error' };
     }

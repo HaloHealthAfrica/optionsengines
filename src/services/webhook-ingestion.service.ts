@@ -1,6 +1,7 @@
 import Redis from 'ioredis';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import * as Sentry from '@sentry/node';
 
 type FlowWebhookRecord = {
   symbol: string;
@@ -60,6 +61,7 @@ class WebhookIngestionService {
     this.client.on('error', (error: Error) => {
       this.isConnected = false;
       logger.error('Webhook ingestion Redis error', error);
+      Sentry.captureException(error, { tags: { service: 'webhook-ingestion', op: 'redis_error' } });
     });
 
     this.client.on('close', () => {

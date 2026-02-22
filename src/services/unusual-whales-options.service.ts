@@ -10,6 +10,7 @@ import {
 } from './providers/unusual-whales-options-client.js';
 import type { MarketDataOptionRow } from './providers/marketdata-client.js';
 import type { OptionsFlowSummary, OptionsFlowEntry } from '../types/index.js';
+import * as Sentry from '@sentry/node';
 
 const CHAIN_CACHE_TTL = 60;
 const PRICE_CACHE_TTL = 30;
@@ -217,6 +218,10 @@ export class UnusualWhalesOptionsService {
       }
     } catch (err) {
       logger.warn('UW net-prem-ticks failed, trying flow-per-strike-intraday', { ticker, error: err });
+      Sentry.captureException(err, {
+        tags: { service: 'unusual-whales', op: 'net-prem-ticks' },
+        extra: { ticker },
+      });
     }
 
     // Fallback 2: flow-per-strike-intraday - flow by strike for the day
@@ -270,6 +275,10 @@ export class UnusualWhalesOptionsService {
       }
     } catch (err) {
       logger.warn('UW flow-per-strike-intraday failed, trying option chain', { ticker, error: err });
+      Sentry.captureException(err, {
+        tags: { service: 'unusual-whales', op: 'flow-per-strike-intraday' },
+        extra: { ticker },
+      });
     }
 
     // Fallback 3: option chain (volume * premium) - chain often has volume=0 for all contracts

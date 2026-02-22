@@ -6,6 +6,7 @@ import pg from 'pg';
 import { PerformanceMetrics, TradeOutcome } from './types.js';
 import { TradeOutcomeSchema } from './schemas.js';
 import { logger } from '../utils/logger.js';
+import * as Sentry from '@sentry/node';
 
 export class OutcomeTracker {
   constructor(private pool: pg.Pool) {}
@@ -34,6 +35,12 @@ export class OutcomeTracker {
       );
 
       const stored = result.rows[0];
+      Sentry.addBreadcrumb({
+        category: 'orchestrator',
+        message: `Trade outcome recorded: ${stored.engine} engine`,
+        level: 'info',
+        data: { outcome_id: stored.outcome_id, pnl: stored.pnl, engine: stored.engine },
+      });
       logger.info('Recorded trade outcome', {
         outcome_id: stored.outcome_id,
         experiment_id: stored.experiment_id,

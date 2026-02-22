@@ -18,6 +18,7 @@ import { marketData } from '../services/market-data.js';
 import { indicators as indicatorService } from '../services/indicators.js';
 import { marketIntelService } from '../services/market-intel/market-intel.service.js';
 import { stratPlanLifecycleService } from '../services/strat-plan/index.js';
+import * as Sentry from '@sentry/node';
 
 export class SignalProcessor {
   private pool: pg.Pool;
@@ -123,6 +124,9 @@ export class SignalProcessor {
       return orderedSignals;
     } catch (error) {
       await client.query('ROLLBACK');
+      Sentry.captureException(error, {
+        tags: { orchestrator: 'signal-processor', op: 'getUnprocessedSignals' },
+      });
       throw error;
     } finally {
       client.release();
@@ -257,6 +261,12 @@ export class SignalProcessor {
         created_at: result.rows[0].created_at,
       };
 
+      Sentry.addBreadcrumb({
+        category: 'orchestrator',
+        message: `Market context created for ${signal.symbol}`,
+        level: 'info',
+        data: { signal_id: signal.signal_id, context_id: contextWithId.context_id },
+      });
       logger.info('Created market context', {
         signal_id: signal.signal_id,
         context_id: contextWithId.context_id,

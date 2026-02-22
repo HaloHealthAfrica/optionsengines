@@ -7,6 +7,7 @@ import { ExecutionMode, ExecutionPolicy } from './types.js';
 import { ExecutionPolicySchema } from './schemas.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import * as Sentry from '@sentry/node';
 
 export type EngineAvailability = {
   engineA: boolean;
@@ -83,6 +84,12 @@ export class PolicyEngine {
 
       const policy = ExecutionPolicySchema.parse(result.rows[0]);
 
+      Sentry.addBreadcrumb({
+        category: 'orchestrator',
+        message: `Policy: ${policy.execution_mode}`,
+        level: 'info',
+        data: { experiment_id: policy.experiment_id, executed_engine: policy.executed_engine },
+      });
       logger.info('Execution policy recorded', {
         experiment_id: policy.experiment_id,
         execution_mode: policy.execution_mode,

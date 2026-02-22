@@ -6,19 +6,45 @@ import * as Sentry from '@sentry/node';
 
 const { Pool } = pg;
 
+const TRANSIENT_ERROR_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EPIPE',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'CONNECTION_ENDED',
+]);
+
+function isTransientError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message ?? '';
+  const code = (err as any).code as string | undefined;
+  if (code && TRANSIENT_ERROR_CODES.has(code)) return true;
+  if (msg.includes('Connection terminated unexpectedly')) return true;
+  if (msg.includes('connection timeout')) return true;
+  if (msg.includes('Connection terminated due to connection timeout')) return true;
+  if (msg.includes('Client has encountered a connection error')) return true;
+  return false;
+}
+
 export class DatabaseService {
   private pool: pg.Pool;
   private isConnected: boolean = false;
   private reconnectAttempts: number = 0;
   private readonly maxReconnectAttempts: number = 10;
-  private readonly reconnectInterval: number = 5000; // 5 seconds
+  private readonly reconnectInterval: number = 5000;
+  private readonly queryRetryAttempts: number = 3;
+  private readonly queryRetryBaseDelayMs: number = 500;
 
   constructor() {
     this.pool = new Pool({
       connectionString: config.databaseUrl,
       max: config.dbPoolMax,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 10000,
+      connectionTimeoutMillis: 30000,
+      allowExitOnIdle: true,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     });
 
     this.setupEventHandlers();
@@ -80,36 +106,58 @@ export class DatabaseService {
   }
 
   async query<T extends pg.QueryResultRow = any>(text: string, params?: any[]): Promise<pg.QueryResult<T>> {
-    const start = Date.now();
-    try {
-      const result = await this.pool.query<T>(text, params);
-      const duration = Date.now() - start;
+    let lastError: unknown;
 
-      if (duration > config.slowRequestMs) {
-        logger.warn('Slow query detected', {
-          duration,
+    for (let attempt = 1; attempt <= this.queryRetryAttempts; attempt++) {
+      const start = Date.now();
+      try {
+        const result = await this.pool.query<T>(text, params);
+        const duration = Date.now() - start;
+
+        if (duration > config.slowRequestMs) {
+          logger.warn('Slow query detected', {
+            duration,
+            query: text.substring(0, 100),
+          });
+          Sentry.addBreadcrumb({
+            category: 'db',
+            message: 'Slow query',
+            level: 'warning',
+            data: { durationMs: duration, query: text.substring(0, 200) },
+          });
+        }
+
+        return result;
+      } catch (error) {
+        lastError = error;
+
+        if (attempt < this.queryRetryAttempts && isTransientError(error)) {
+          const delay = this.queryRetryBaseDelayMs * Math.pow(2, attempt - 1);
+          logger.warn('Transient DB error, retrying', {
+            attempt,
+            maxAttempts: this.queryRetryAttempts,
+            delayMs: delay,
+            error: (error as Error).message,
+            query: text.substring(0, 100),
+          });
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        logger.error('Query execution failed', error, {
           query: text.substring(0, 100),
+          params: params?.slice(0, 5),
+          attempt,
         });
-        Sentry.addBreadcrumb({
-          category: 'db',
-          message: 'Slow query',
-          level: 'warning',
-          data: { durationMs: duration, query: text.substring(0, 200) },
+        Sentry.captureException(error, {
+          tags: { stage: 'db', op: 'query' },
+          extra: { query: text.substring(0, 200), attempt },
         });
+        throw error;
       }
-
-      return result;
-    } catch (error) {
-      logger.error('Query execution failed', error, {
-        query: text.substring(0, 100),
-        params: params?.slice(0, 5),
-      });
-      Sentry.captureException(error, {
-        tags: { stage: 'db', op: 'query' },
-        extra: { query: text.substring(0, 200) },
-      });
-      throw error;
     }
+
+    throw lastError;
   }
 
   async transaction<T>(callback: (client: pg.PoolClient) => Promise<T>): Promise<T> {

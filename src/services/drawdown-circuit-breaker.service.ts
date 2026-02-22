@@ -1,5 +1,6 @@
 import { db } from './database.service.js';
 import { logger } from '../utils/logger.js';
+import * as Sentry from '@sentry/node';
 
 const DEFAULT_MAX_DRAWDOWN_PCT = 3;
 const DEFAULT_FREEZE_MINUTES = 30;
@@ -152,6 +153,15 @@ export async function checkDrawdownCircuitBreaker(opts?: {
         maxPct,
         freezeUntil: cachedFreezeUntil.toISOString(),
       });
+      Sentry.captureMessage('Drawdown circuit breaker TRIGGERED', {
+        level: 'warning',
+        tags: { service: 'drawdown-circuit-breaker' },
+        extra: {
+          drawdownPct: Math.round(drawdownPct * 100) / 100,
+          maxPct,
+          freezeUntil: cachedFreezeUntil!.toISOString(),
+        },
+      });
 
       return {
         frozen: true,
@@ -169,6 +179,7 @@ export async function checkDrawdownCircuitBreaker(opts?: {
     };
   } catch (err) {
     logger.warn('Drawdown circuit breaker check failed — fail-closed', { error: err });
+    Sentry.captureException(err, { tags: { service: 'drawdown-circuit-breaker' } });
     return { frozen: true, freezeUntil: null, currentDrawdownPct: 0, maxAllowedPct: maxPct };
   }
 }

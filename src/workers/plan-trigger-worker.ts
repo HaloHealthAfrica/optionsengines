@@ -10,6 +10,7 @@ import { config } from '../config/index.js';
 import { marketData } from '../services/market-data.js';
 import { planToSignalBridge } from '../services/strat-plan/plan-to-signal-bridge.service.js';
 import type { StratPlan } from '../services/strat-plan/types.js';
+import * as Sentry from '@sentry/node';
 
 export class PlanTriggerWorker {
   private timer: NodeJS.Timeout | null = null;
@@ -26,10 +27,16 @@ export class PlanTriggerWorker {
     }
 
     this.timer = setInterval(() => {
-      this.run().catch((err) => logger.error('PlanTriggerWorker error', err));
+      this.run().catch((err) => {
+        logger.error('PlanTriggerWorker error', err);
+        Sentry.captureException(err, { tags: { worker: 'plan-trigger' } });
+      });
     }, this.intervalMs);
 
-    this.run().catch((err) => logger.error('PlanTriggerWorker startup error', err));
+    this.run().catch((err) => {
+      logger.error('PlanTriggerWorker startup error', err);
+      Sentry.captureException(err, { tags: { worker: 'plan-trigger' } });
+    });
     logger.info('PlanTriggerWorker started', { intervalMs: this.intervalMs });
   }
 
@@ -144,8 +151,17 @@ export class PlanTriggerWorker {
             symbol: plan.symbol,
             price,
           });
+          Sentry.addBreadcrumb({
+            category: 'strat-plan',
+            message: `Plan triggered: ${plan.symbol} ${plan.direction}`,
+            level: 'info',
+            data: { plan_id: plan.plan_id, signal_id: bridgeResult.signalId },
+          });
         }
       }
+    } catch (err) {
+      logger.error('PlanTriggerWorker run failed', err);
+      Sentry.captureException(err, { tags: { worker: 'plan-trigger' } });
     } finally {
       this.isRunning = false;
     }

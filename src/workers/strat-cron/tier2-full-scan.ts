@@ -12,6 +12,7 @@ import { publishStratScanComplete } from '../../services/realtime-updates.servic
 import { classifyCandle, classifyCandleShape } from '../../services/strat-scanner/strat-patterns.js';
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
+import * as Sentry from '@sentry/node';
 import type { Candle } from '../../types/index.js';
 
 export type ScanReason =
@@ -174,6 +175,10 @@ export async function runTier2FullScan(options: Tier2Options = {}): Promise<{
         alert_id: row.alert_id,
         symbol: row.symbol,
         error: err,
+      });
+      Sentry.captureException(err, {
+        tags: { worker: 'strat-cron', tier: 'tier2' },
+        extra: { alert_id: row.alert_id, symbol: row.symbol },
       });
     }
   }

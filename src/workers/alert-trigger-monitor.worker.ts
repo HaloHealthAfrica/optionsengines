@@ -15,6 +15,7 @@ import {
   publishStratAlertInvalidated,
 } from '../services/realtime-updates.service.js';
 import type { StratPlan } from '../services/strat-plan/types.js';
+import * as Sentry from '@sentry/node';
 
 export class AlertTriggerMonitorWorker {
   private timer: NodeJS.Timeout | null = null;
@@ -31,10 +32,16 @@ export class AlertTriggerMonitorWorker {
     }
 
     this.timer = setInterval(() => {
-      this.run().catch((err) => logger.error('AlertTriggerMonitorWorker error', err));
+      this.run().catch((err) => {
+        logger.error('AlertTriggerMonitorWorker error', err);
+        Sentry.captureException(err, { tags: { worker: 'alert-trigger-monitor' } });
+      });
     }, this.intervalMs);
 
-    this.run().catch((err) => logger.error('AlertTriggerMonitorWorker startup error', err));
+    this.run().catch((err) => {
+      logger.error('AlertTriggerMonitorWorker startup error', err);
+      Sentry.captureException(err, { tags: { worker: 'alert-trigger-monitor' } });
+    });
     logger.info('AlertTriggerMonitorWorker started', { intervalMs: this.intervalMs });
   }
 
@@ -145,6 +152,12 @@ export class AlertTriggerMonitorWorker {
             triggeredAt: new Date().toISOString(),
           };
           publishStratAlertTriggered(alertPayload);
+          Sentry.addBreadcrumb({
+            category: 'strat-alert',
+            message: `Alert triggered: ${alert.symbol} ${alert.direction}`,
+            level: 'info',
+            data: { alert_id: alert.alert_id, symbol: alert.symbol },
+          });
 
           const linkedPlans = await db.query(
             `SELECT plan_id, symbol, direction, timeframe, entry_price, target_price, stop_price,
@@ -185,8 +198,17 @@ export class AlertTriggerMonitorWorker {
             status: 'invalidated',
           };
           publishStratAlertInvalidated(alertPayload);
+          Sentry.addBreadcrumb({
+            category: 'strat-alert',
+            message: `Alert invalidated: ${alert.symbol}`,
+            level: 'warning',
+            data: { alert_id: alert.alert_id, symbol: alert.symbol },
+          });
         }
       }
+    } catch (err) {
+      logger.error('AlertTriggerMonitorWorker run failed', err);
+      Sentry.captureException(err, { tags: { worker: 'alert-trigger-monitor' } });
     } finally {
       this.isRunning = false;
     }

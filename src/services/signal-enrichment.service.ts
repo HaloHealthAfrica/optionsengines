@@ -8,6 +8,7 @@ import { logger } from '../utils/logger.js';
 import { evaluateMarketSession, normalizeMarketSession } from '../utils/market-session.js';
 import { getMarketClock } from '../utils/market-hours.js';
 import { UnusualWhalesOptionsClient } from './providers/unusual-whales-options-client.js';
+import * as Sentry from '@sentry/node';
 
 const uwOptionsClient = new UnusualWhalesOptionsClient();
 
@@ -60,6 +61,13 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
   const signalTimestamp =
     signal.timestamp instanceof Date ? signal.timestamp : new Date(signal.timestamp);
   const payload = signal.raw_payload && typeof signal.raw_payload === 'object' ? signal.raw_payload : {};
+
+  Sentry.addBreadcrumb({
+    category: 'enrichment',
+    message: `Enriching signal ${signal.signal_id} for ${signal.symbol}`,
+    level: 'info',
+    data: { signal_id: signal.signal_id, symbol: signal.symbol, direction: signal.direction },
+  });
 
   const toNumber = (value: unknown): number | null => {
     const num = Number(value);
@@ -517,6 +525,15 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
     confluence,
     ivPercentile,
   };
+
+  if (rejectionReason) {
+    Sentry.addBreadcrumb({
+      category: 'enrichment',
+      message: `Signal rejected: ${rejectionReason}`,
+      level: 'warning',
+      data: { signal_id: signal.signal_id, symbol: signal.symbol, reason: rejectionReason },
+    });
+  }
 
   return { enrichedData, riskResult, rejectionReason, queueUntil, queueReason, decisionOnly };
 }

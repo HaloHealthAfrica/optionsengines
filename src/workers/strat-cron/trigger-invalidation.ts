@@ -12,6 +12,7 @@ import {
 } from '../../services/realtime-updates.service.js';
 import { logger } from '../../utils/logger.js';
 import type { StratAlertRow } from './types.js';
+import * as Sentry from '@sentry/node';
 import type { StratPlan } from '../../services/strat-plan/types.js';
 
 function rowToPlan(row: Record<string, unknown>): StratPlan {
@@ -89,6 +90,12 @@ export async function checkTriggerAndInvalidation(
       trendAtTrigger: scoreTrend,
       scoreHistory: history,
     });
+    Sentry.addBreadcrumb({
+      category: 'strat-cron',
+      message: `Alert triggered: ${alert.symbol}`,
+      level: 'info',
+      data: { alert_id: alert.alert_id },
+    });
 
     const linkedPlans = await db.query(
       `SELECT plan_id, symbol, direction, timeframe, entry_price, target_price, stop_price,
@@ -132,6 +139,12 @@ export async function checkTriggerAndInvalidation(
       alertId: alert.alert_id,
       symbol: alert.symbol,
       reason: 'Price hit stop level before trigger',
+    });
+    Sentry.addBreadcrumb({
+      category: 'strat-cron',
+      message: `Alert invalidated: ${alert.symbol}`,
+      level: 'warning',
+      data: { alert_id: alert.alert_id },
     });
     result.invalidated = 1;
     return result;

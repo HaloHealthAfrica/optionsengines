@@ -21,6 +21,11 @@ export function createOrchestratorService(invokers: {
   const pool = new Pool({
     connectionString: config.databaseUrl,
     max: config.dbPoolMax,
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 30000,
+    allowExitOnIdle: true,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10000,
   });
 
   const signalProcessor = new SignalProcessor(pool);

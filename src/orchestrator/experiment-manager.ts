@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import { Experiment, Signal } from './types.js';
 import { ExperimentSchema } from './schemas.js';
 import { logger } from '../utils/logger.js';
+import * as Sentry from '@sentry/node';
 
 export class ExperimentManager {
   private pool: pg.Pool;
@@ -88,6 +89,12 @@ export class ExperimentManager {
 
       const experiment = this.normalizeExperiment(result.rows[0]);
 
+      Sentry.addBreadcrumb({
+        category: 'orchestrator',
+        message: `Experiment created: variant ${experiment.variant}`,
+        level: 'info',
+        data: { experiment_id: experiment.experiment_id, signal_id: experiment.signal_id },
+      });
       logger.info('Created experiment', {
         experiment_id: experiment.experiment_id,
         signal_id: experiment.signal_id,
@@ -103,6 +110,10 @@ export class ExperimentManager {
           return retry;
         }
       }
+      Sentry.captureException(error, {
+        tags: { orchestrator: 'experiment-manager', op: 'createExperiment' },
+        extra: { signal_id: signal.signal_id },
+      });
       throw error;
     } finally {
       client.release();

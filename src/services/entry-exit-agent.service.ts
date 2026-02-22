@@ -1,4 +1,5 @@
 import { marketData } from './market-data.js';
+import * as Sentry from '@sentry/node';
 
 export type EntryExitPlan = {
   entryPrice: number;
@@ -12,7 +13,12 @@ export async function buildEntryExitPlan(
 ): Promise<EntryExitPlan> {
   const entryPrice = await marketData.getOptionPrice(symbol, strike, expiration, optionType);
   if (entryPrice == null || !Number.isFinite(entryPrice)) {
-    throw new Error('Option price unavailable');
+    const err = new Error('Option price unavailable');
+    Sentry.captureException(err, {
+      tags: { service: 'entry-exit-agent' },
+      extra: { symbol, strike, expiration: expiration.toISOString(), optionType },
+    });
+    throw err;
   }
   return { entryPrice };
 }
