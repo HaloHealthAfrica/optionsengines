@@ -133,11 +133,14 @@ async function sendWebhookWithTracing(webhook: TestWebhook): Promise<TestResult>
       const traceId = span.spanContext().traceId;
 
       try {
+        const traceHeader = Sentry.spanToTraceHeader(span);
+        const baggageHeader = Sentry.spanToBaggageHeader(span);
         const response = await fetch(PRODUCTION_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'sentry-trace': span.toTraceparent(),
+            ...(traceHeader ? { 'sentry-trace': traceHeader } : {}),
+            ...(baggageHeader ? { 'baggage': baggageHeader } : {}),
           },
           body: JSON.stringify({
             symbol: webhook.symbol,
