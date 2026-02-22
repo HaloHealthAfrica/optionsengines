@@ -213,24 +213,37 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
   );
   const riskLimit = riskLimits.rows[0] || {};
 
-  const openPositionsResult = await db.query(
-    `SELECT COUNT(*)::int AS count FROM refactored_positions WHERE status IN ('open', 'closing') AND COALESCE(is_test, false) = false`
-  );
-  const openPositions = openPositionsResult.rows[0]?.count || 0;
+  // P0: fail-closed — DB error rejects signal instead of defaulting to 0
+  let openPositions = 0;
+  let openSymbolPositions = 0;
+  try {
+    const openPositionsResult = await db.query(
+      `SELECT COUNT(*)::int AS count FROM refactored_positions WHERE status IN ('open', 'closing') AND COALESCE(is_test, false) = false`
+    );
+    const parsed = openPositionsResult.rows[0]?.count;
+    if (parsed == null || !Number.isFinite(Number(parsed))) {
+      throw new Error(`Position count returned non-finite: ${parsed}`);
+    }
+    openPositions = Number(parsed);
 
-  const openSymbolPositionsResult = await db.query(
-    `SELECT COUNT(*)::int AS count FROM refactored_positions 
-     WHERE status IN ('open', 'closing') AND symbol = $1 AND COALESCE(is_test, false) = false`,
-    [signal.symbol]
-  );
-  const openSymbolPositions = openSymbolPositionsResult.rows[0]?.count || 0;
+    const openSymbolPositionsResult = await db.query(
+      `SELECT COUNT(*)::int AS count FROM refactored_positions 
+       WHERE status IN ('open', 'closing') AND symbol = $1 AND COALESCE(is_test, false) = false`,
+      [signal.symbol]
+    );
+    openSymbolPositions = Number(openSymbolPositionsResult.rows[0]?.count ?? 0);
+  } catch (err) {
+    logger.error('Failed to query position counts — fail-closed, rejecting signal', { error: err });
+    Sentry.captureException(err, { tags: { stage: 'enrichment', failMode: 'fail-closed' } });
+    if (!testBypass) rejectionReason = rejectionReason || 'risk_query_failed';
+  }
 
   riskResult.openPositions = openPositions;
   riskResult.openSymbolPositions = openSymbolPositions;
   riskResult.maxOpenPositions = config.maxOpenPositions;
   riskResult.maxPositionsPerSymbol = riskLimit.max_positions_per_symbol || 0;
 
-  // --- Daily loss cap enforcement ---
+  // --- Daily loss cap enforcement (P0: fail-closed — DB error rejects signal) ---
   let dailyPnL = 0;
   if (config.maxDailyLoss > 0) {
     try {
@@ -241,9 +254,18 @@ export async function buildSignalEnrichment(signal: SignalLike): Promise<SignalE
           COALESCE((SELECT SUM(unrealized_pnl) FROM refactored_positions WHERE status IN ('open', 'closing') AND COALESCE(is_test, false) = false), 0)
           AS total_daily_pnl`
       );
-      dailyPnL = Number(dailyPnLResult.rows[0]?.total_daily_pnl) || 0;
+      const rawPnL = dailyPnLResult.rows[0]?.total_daily_pnl;
+      const parsed = Number(rawPnL);
+      if (!Number.isFinite(parsed)) {
+        logger.error('Daily PnL query returned non-finite value — fail-closed', { rawPnL });
+        if (!testBypass) rejectionReason = rejectionReason || 'risk_query_failed';
+      } else {
+        dailyPnL = parsed;
+      }
     } catch (err) {
-      logger.warn('Failed to query daily PnL for loss cap', { error: err });
+      logger.error('Failed to query daily PnL for loss cap — fail-closed, rejecting signal', { error: err });
+      Sentry.captureException(err, { tags: { stage: 'enrichment', failMode: 'fail-closed' } });
+      if (!testBypass) rejectionReason = rejectionReason || 'risk_query_failed';
     }
     riskResult.dailyPnL = dailyPnL;
     riskResult.maxDailyLoss = config.maxDailyLoss;

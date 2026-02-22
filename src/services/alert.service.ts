@@ -5,6 +5,7 @@ import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { getFlowConfigSync } from './flow-config.service.js';
 import { db } from './database.service.js';
+import * as Sentry from '@sentry/node';
 
 const lastAlertBySymbol = new Map<string, number>();
 const MAX_RETRIES = 2;
@@ -248,8 +249,76 @@ export async function sendEnrichmentAlert(params: {
   logger.info('Enrichment alert sent', { missingCount: params.missingCount, missingPct: params.missingPct });
 }
 
+/**
+ * P0: Send critical risk alert for system-level events.
+ * Used for: stuck positions, stale data, all-providers-down, emergency kill switch.
+ */
+const riskAlertCooldowns = new Map<string, number>();
+const RISK_ALERT_COOLDOWN_MS = 5 * 60 * 1000;
+
+export async function sendRiskAlert(params: {
+  type: 'STUCK_POSITIONS' | 'STALE_PRICE_FORCE_CLOSE' | 'ALL_PROVIDERS_DOWN' | 'EMERGENCY_RISK_OFF';
+  symbol: string;
+  details: string;
+}): Promise<void> {
+  if (!config.alertsEnabled && params.type !== 'EMERGENCY_RISK_OFF') return;
+
+  const cooldownKey = `${params.type}:${params.symbol}`;
+  const now = Date.now();
+  const last = riskAlertCooldowns.get(cooldownKey) ?? 0;
+  if (params.type !== 'EMERGENCY_RISK_OFF' && now - last < RISK_ALERT_COOLDOWN_MS) return;
+
+  const colorMap: Record<string, number> = {
+    STUCK_POSITIONS: 0xf59e0b,
+    STALE_PRICE_FORCE_CLOSE: 0xef4444,
+    ALL_PROVIDERS_DOWN: 0xef4444,
+    EMERGENCY_RISK_OFF: 0x7f1d1d,
+  };
+
+  const discordPayload = {
+    content: `**RISK ALERT: ${params.type}** — ${params.details}`,
+    embeds: [
+      {
+        title: `Risk Alert: ${params.type}`,
+        description: params.details,
+        color: colorMap[params.type] ?? 0xef4444,
+        fields: [
+          { name: 'Type', value: params.type, inline: true },
+          { name: 'Symbol', value: params.symbol, inline: true },
+        ],
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+
+  const slackPayload = {
+    text: `RISK ALERT: ${params.type} — ${params.details}`,
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*RISK ALERT: ${params.type}*\n${params.details}`,
+        },
+      },
+    ],
+  };
+
+  await Promise.all([sendDiscord(discordPayload), sendSlack(slackPayload)]);
+  riskAlertCooldowns.set(cooldownKey, now);
+
+  Sentry.captureMessage(`Risk Alert: ${params.type}`, {
+    level: params.type === 'EMERGENCY_RISK_OFF' ? 'fatal' : 'error',
+    tags: { riskAlertType: params.type, symbol: params.symbol },
+    extra: { details: params.details },
+  });
+
+  logger.warn('Risk alert sent', { type: params.type, symbol: params.symbol, details: params.details });
+}
+
 export const alertService = {
   sendConfluenceAlert,
   sendTestAlert,
   sendEnrichmentAlert,
+  sendRiskAlert,
 };

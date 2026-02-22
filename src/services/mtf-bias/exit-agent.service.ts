@@ -5,9 +5,7 @@
  * Enhanced with Exit Intelligence (UnifiedBiasState) when full position context is provided.
  */
 
-import { db } from '../database.service.js';
 import { getSymbolMarketState } from './mtf-bias-state.service.js';
-import { logger } from '../../utils/logger.js';
 import { evaluateExitAdjustments } from '../exit-intelligence/index.js';
 import { getCurrentState } from '../bias-state-aggregator/bias-state-aggregator.service.js';
 
@@ -122,24 +120,4 @@ export async function evaluateExitConditionsWithIntelligence(params: {
     };
   }
   return null;
-}
-
-export async function updatePositionExit(
-  positionId: string,
-  exitType: string,
-  rMultiple?: number
-): Promise<void> {
-  try {
-    await db.query(
-      `UPDATE refactored_positions SET
-        exit_type = $1,
-        r_multiple = $2,
-        status = 'closing',
-        last_updated = NOW()
-       WHERE position_id = $3`,
-      [exitType, rMultiple ?? null, positionId]
-    );
-  } catch (error) {
-    logger.error('Exit agent update failed', error, { positionId });
-  }
 }

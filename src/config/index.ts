@@ -179,6 +179,12 @@ interface Config {
   stratPlanMaxInForce: number;
   stratPlanWebhookAutoAdd: boolean;
   stratPlanKillSwitchFailures: number;
+
+  // P0 Risk Hardening
+  emergencyRiskOff: boolean;
+  staleDataMaxAgeMs: number;
+  stuckPositionTimeoutMinutes: number;
+  marketDataRequestTimeoutMs: number;
 }
 
 function getEnvVar(key: string, defaultValue?: string): string {
@@ -191,7 +197,12 @@ function getEnvVar(key: string, defaultValue?: string): string {
 
 function getEnvVarNumber(key: string, defaultValue: number): number {
   const value = process.env[key];
-  return value ? parseFloat(value) : defaultValue;
+  if (!value) return defaultValue;
+  const parsed = parseFloat(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Invalid numeric environment variable: ${key}="${value}" (parsed as NaN/Infinity)`);
+  }
+  return parsed;
 }
 
 function getEnvVarBoolean(key: string, defaultValue: boolean): boolean {
@@ -216,7 +227,12 @@ function getEnvVarNumberWithFallback(
   defaultValue: number
 ): number {
   const v = process.env[primary] ?? process.env[fallback];
-  return v ? parseFloat(v) : defaultValue;
+  if (!v) return defaultValue;
+  const parsed = parseFloat(v);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Invalid numeric environment variable: ${primary}/${fallback}="${v}" (parsed as NaN/Infinity)`);
+  }
+  return parsed;
 }
 
 const nodeEnv = getEnvVar('NODE_ENV', 'development');
@@ -277,7 +293,7 @@ export const config: Config = {
   paperExecutorInterval: getEnvVarNumber('PAPER_EXECUTOR_INTERVAL', 10000),
   paperExecutorBatchSize: getEnvVarNumber('PAPER_EXECUTOR_BATCH_SIZE', 10),
   positionRefresherInterval: getEnvVarNumber('POSITION_REFRESHER_INTERVAL', 60000),
-  exitMonitorInterval: getEnvVarNumber('EXIT_MONITOR_INTERVAL', 60000),
+  exitMonitorInterval: getEnvVarNumber('EXIT_MONITOR_INTERVAL', 15000),
   orchestratorIntervalMs: getEnvVarNumber('ORCHESTRATOR_INTERVAL_MS', 30000),
   orchestratorBatchSize: getEnvVarNumber('ORCHESTRATOR_BATCH_SIZE', 20),
   orchestratorConcurrency: getEnvVarNumber('ORCHESTRATOR_CONCURRENCY', 5),
@@ -434,6 +450,12 @@ export const config: Config = {
   stratPlanMaxInForce: getEnvVarNumber('STRAT_PLAN_MAX_IN_FORCE', 3),
   stratPlanWebhookAutoAdd: getEnvVarBoolean('STRAT_PLAN_WEBHOOK_AUTO_ADD', false),
   stratPlanKillSwitchFailures: getEnvVarNumber('STRAT_PLAN_KILL_SWITCH_FAILURES', 3),
+
+  // P0 Risk Hardening
+  emergencyRiskOff: getEnvVarBoolean('EMERGENCY_RISK_OFF', false),
+  staleDataMaxAgeMs: getEnvVarNumber('STALE_DATA_MAX_AGE_MS', 120_000),
+  stuckPositionTimeoutMinutes: getEnvVarNumber('STUCK_POSITION_TIMEOUT_MINUTES', 15),
+  marketDataRequestTimeoutMs: getEnvVarNumber('MARKET_DATA_REQUEST_TIMEOUT_MS', 8_000),
 };
 
 // Validate critical configuration
@@ -454,6 +476,26 @@ export function validateConfig(): void {
 
   if (config.appMode !== 'PAPER' && config.appMode !== 'LIVE') {
     errors.push('APP_MODE must be either PAPER or LIVE');
+  }
+
+  // P0: Validate risk-critical numeric values are finite and sane
+  const riskNumbers: Array<{ key: string; value: number; minAllowed?: number }> = [
+    { key: 'maxDailyLoss', value: config.maxDailyLoss, minAllowed: 0 },
+    { key: 'maxOpenPositions', value: config.maxOpenPositions, minAllowed: 1 },
+    { key: 'maxPositionSize', value: config.maxPositionSize, minAllowed: 1 },
+    { key: 'stopLossPct', value: config.stopLossPct, minAllowed: 1 },
+    { key: 'profitTargetPct', value: config.profitTargetPct, minAllowed: 1 },
+    { key: 'exitMonitorInterval', value: config.exitMonitorInterval, minAllowed: 1000 },
+    { key: 'paperExecutorInterval', value: config.paperExecutorInterval, minAllowed: 1000 },
+    { key: 'staleDataMaxAgeMs', value: config.staleDataMaxAgeMs, minAllowed: 10_000 },
+    { key: 'marketDataRequestTimeoutMs', value: config.marketDataRequestTimeoutMs, minAllowed: 1000 },
+  ];
+  for (const { key, value, minAllowed } of riskNumbers) {
+    if (!Number.isFinite(value)) {
+      errors.push(`${key} must be a finite number (got ${value})`);
+    } else if (minAllowed !== undefined && value < minAllowed) {
+      errors.push(`${key} must be >= ${minAllowed} (got ${value})`);
+    }
   }
 
   if (errors.length > 0) {

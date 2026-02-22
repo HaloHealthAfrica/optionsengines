@@ -20,16 +20,26 @@ import { getMarketClock } from '../utils/market-hours.js';
 
 type Provider = 'polygon' | 'marketdata' | 'twelvedata' | 'unusualwhales';
 
+export interface PriceWithStaleness {
+  price: number | null;
+  stale: boolean;
+  ageMs: number;
+}
+
 export class MarketDataService {
   private polygon: PolygonClient;
   private marketData: MarketDataClient;
   private twelveData: TwelveDataClient;
   private circuitBreakers: Map<Provider, CircuitBreaker> = new Map();
   private readonly maxFailures: number = 5;
-  private readonly resetTimeout: number = 60000; // 60 seconds
+  private readonly resetTimeout: number = 60000;
   private readonly maxRetries: number = 2;
   private providerPriority: Provider[] = [];
   private readonly streamEnabled: boolean = config.polygonWsEnabled;
+
+  // P0: Last-known price fallback for when all providers fail
+  private lastKnownStockPrices = new Map<string, { price: number; fetchedAt: number }>();
+  private lastKnownOptionPrices = new Map<string, { price: number; fetchedAt: number }>();
 
   constructor() {
     this.polygon = new PolygonClient();
@@ -76,6 +86,21 @@ export class MarketDataService {
       marketDataStream.start();
       logger.info('Market data WebSocket streaming enabled');
     }
+  }
+
+  /** P0: Wrap a provider call with a hard timeout via AbortSignal */
+  private withRequestTimeout<T>(fn: () => Promise<T>, label: string): Promise<T> {
+    const timeoutMs = config.marketDataRequestTimeoutMs;
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`Request timeout: ${label} exceeded ${timeoutMs}ms`)),
+        timeoutMs
+      );
+      fn().then(
+        (val) => { clearTimeout(timer); resolve(val); },
+        (err) => { clearTimeout(timer); reject(err); },
+      );
+    });
   }
 
   /**
@@ -258,6 +283,7 @@ export class MarketDataService {
 
         this.recordSuccess(providerName);
         cache.set(cacheKey, price, 30);
+        this.lastKnownStockPrices.set(symbol, { price, fetchedAt: Date.now() });
         logger.info(`Price fetched from ${providerName}`, { symbol, price });
         Sentry.addBreadcrumb({
           category: 'market-data',
@@ -275,7 +301,24 @@ export class MarketDataService {
       }
     }
 
-    throw new Error('All market data providers failed');
+    // P0: Fall back to last known price if within staleness threshold
+    const lastKnown = this.lastKnownStockPrices.get(symbol);
+    if (lastKnown && (Date.now() - lastKnown.fetchedAt) < config.staleDataMaxAgeMs) {
+      logger.warn('All providers failed — using STALE last-known stock price', {
+        symbol,
+        price: lastKnown.price,
+        ageMs: Date.now() - lastKnown.fetchedAt,
+      });
+      Sentry.addBreadcrumb({
+        category: 'market-data',
+        message: 'Using stale stock price fallback',
+        level: 'warning',
+        data: { symbol, price: lastKnown.price, ageMs: Date.now() - lastKnown.fetchedAt },
+      });
+      return lastKnown.price;
+    }
+
+    throw new Error(`All market data providers failed for ${symbol}`);
   }
 
   private isValidPrice(symbol: string, price: number): boolean {
@@ -380,6 +423,7 @@ export class MarketDataService {
         if (price != null && Number.isFinite(price)) {
           this.recordSuccess(providerName);
           cache.set(cacheKey, price, 30);
+          this.lastKnownOptionPrices.set(cacheKey, { price, fetchedAt: Date.now() });
           logger.info(`Option price fetched from ${providerName}`, { symbol, strike, optionType, price });
           Sentry.addBreadcrumb({
             category: 'market-data',
@@ -399,7 +443,18 @@ export class MarketDataService {
       }
     }
 
-    logger.warn('All option data providers failed or returned no price', { symbol, strike, optionType });
+    // P0: Fall back to last known option price if within staleness threshold
+    const lastKnown = this.lastKnownOptionPrices.get(cacheKey);
+    if (lastKnown && (Date.now() - lastKnown.fetchedAt) < config.staleDataMaxAgeMs) {
+      logger.warn('All option providers failed — using STALE last-known option price', {
+        symbol, strike, optionType,
+        price: lastKnown.price,
+        ageMs: Date.now() - lastKnown.fetchedAt,
+      });
+      return lastKnown.price;
+    }
+
+    logger.warn('All option data providers failed, no last-known fallback', { symbol, strike, optionType });
     return null;
   }
 
@@ -831,6 +886,55 @@ export class MarketDataService {
     };
     cache.set(cacheKey, emptySummary, 15);
     return emptySummary;
+  }
+
+  /**
+   * P0: Staleness-aware option price fetch for exit monitor.
+   * Returns price, staleness flag, and age in ms. Never throws.
+   */
+  async getOptionPriceWithStaleness(
+    symbol: string,
+    strike: number,
+    expiration: Date,
+    optionType: 'call' | 'put'
+  ): Promise<PriceWithStaleness> {
+    try {
+      const price = await this.withRequestTimeout(
+        () => this.getOptionPrice(symbol, strike, expiration, optionType),
+        `getOptionPrice(${symbol} ${strike} ${optionType})`
+      );
+      if (price != null) {
+        return { price, stale: false, ageMs: 0 };
+      }
+    } catch (error) {
+      logger.warn('getOptionPriceWithStaleness: provider fetch failed', { symbol, strike, optionType, error });
+    }
+
+    const cacheKey = `option:${symbol}:${strike}:${expiration.toISOString()}:${optionType}`;
+    const lastKnown = this.lastKnownOptionPrices.get(cacheKey);
+    if (lastKnown) {
+      return { price: lastKnown.price, stale: true, ageMs: Date.now() - lastKnown.fetchedAt };
+    }
+    return { price: null, stale: true, ageMs: Infinity };
+  }
+
+  /**
+   * P0: Staleness-aware stock price fetch. Never throws.
+   */
+  async getStockPriceWithStaleness(symbol: string): Promise<PriceWithStaleness> {
+    try {
+      const price = await this.withRequestTimeout(
+        () => this.getStockPrice(symbol),
+        `getStockPrice(${symbol})`
+      );
+      return { price, stale: false, ageMs: 0 };
+    } catch {
+      const lastKnown = this.lastKnownStockPrices.get(symbol);
+      if (lastKnown) {
+        return { price: lastKnown.price, stale: true, ageMs: Date.now() - lastKnown.fetchedAt };
+      }
+      return { price: null, stale: true, ageMs: Infinity };
+    }
   }
 
   /**

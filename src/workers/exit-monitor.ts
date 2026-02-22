@@ -1,4 +1,6 @@
 // Exit Monitor Worker - Creates exit orders when positions meet exit rules
+// P0 Hardened: staleness-aware pricing, stuck position cleanup, idempotent exits,
+// emergency kill switch, transactional exit orders, risk alerts
 import { db } from '../services/database.service.js';
 import { marketData } from '../services/market-data.js';
 import { logger } from '../utils/logger.js';
@@ -15,6 +17,7 @@ import { positioningService } from '../services/positioning.service.js';
 import { evaluateExitAdjustments } from '../services/exit-intelligence/index.js';
 import { getCurrentState } from '../services/bias-state-aggregator/bias-state-aggregator.service.js';
 import { shadowExecutor } from '../services/shadow-executor.service.js';
+import { sendRiskAlert } from '../services/alert.service.js';
 
 interface OpenPosition {
   position_id: string;
@@ -46,9 +49,15 @@ interface ExitRule {
   trailing_stop_activation_percent?: number;
 }
 
+/** P0: Stale-price stop tightening factor — when using stale data, stops are tightened by this multiplier */
+const STALE_PRICE_STOP_TIGHTENING = 0.5;
+/** P0: If stale price age exceeds this, force-close losing positions */
+const STALE_FORCE_CLOSE_AGE_MS = 180_000;
+
 export class ExitMonitorWorker {
   private timer: NodeJS.Timeout | null = null;
   private isRunning = false;
+  private consecutiveStaleCount = 0;
 
   start(intervalMs: number): void {
     registerWorkerErrorHandlers('ExitMonitorWorker');
@@ -102,6 +111,12 @@ export class ExitMonitorWorker {
     updateWorkerStatus('ExitMonitorWorker', { lastRunAt: new Date() });
 
     try {
+      // P0: Emergency kill switch — force-close everything
+      if (config.emergencyRiskOff) {
+        await this.emergencyCloseAll();
+        return;
+      }
+
       const ruleResult = await db.query<ExitRule>(
         `SELECT * FROM exit_rules WHERE enabled = true ORDER BY created_at DESC LIMIT 1`
       );
@@ -112,27 +127,65 @@ export class ExitMonitorWorker {
       );
 
       let exitsCreated = 0;
+      let staleSkips = 0;
       if (rule && positions.rows.length > 0) {
       for (const position of positions.rows) {
         try {
           const now = new Date();
-          const [currentPrice, underlyingPrice] = await Promise.all([
-            marketData.getOptionPrice(
+
+          // P0: Use staleness-aware price fetching
+          const [optionResult, underlyingResult] = await Promise.all([
+            marketData.getOptionPriceWithStaleness(
               position.symbol,
               position.strike,
               new Date(position.expiration),
               position.type
             ),
-            marketData.getStockPrice(position.symbol),
+            marketData.getStockPriceWithStaleness(position.symbol),
           ]);
 
+          const currentPrice = optionResult.price;
+          const underlyingPrice = underlyingResult.price;
+          const priceIsStale = optionResult.stale;
+
           if (currentPrice == null || !Number.isFinite(currentPrice)) {
-            logger.debug('Exit monitor skipped - no option price available', {
+            logger.warn('Exit monitor: no price available (fresh or stale)', {
               positionId: position.position_id,
               symbol: position.symbol,
               optionSymbol: position.option_symbol,
             });
+            staleSkips++;
             continue;
+          }
+
+          // P0: If price is stale and very old, force-close losing positions
+          if (priceIsStale && optionResult.ageMs > STALE_FORCE_CLOSE_AGE_MS) {
+            const costBasis = position.entry_price * position.quantity * (position.multiplier ?? 100);
+            const roughPnl = calculateUnrealizedPnL({
+              entry_price: position.entry_price,
+              current_price: currentPrice,
+              quantity: position.quantity,
+              multiplier: position.multiplier ?? 100,
+              position_side: position.position_side ?? 'LONG',
+            });
+            const roughPnlPct = costBasis > 0 ? (roughPnl / costBasis) * 100 : 0;
+
+            if (roughPnlPct < -10) {
+              logger.error('STALE PRICE + LOSING POSITION — force closing', {
+                positionId: position.position_id,
+                symbol: position.symbol,
+                staleAgeMs: optionResult.ageMs,
+                roughPnlPct,
+              });
+              await this.createExitOrder(position, 'stale_data_force_close', position.quantity, now);
+              exitsCreated++;
+              await sendRiskAlert({
+                type: 'STALE_PRICE_FORCE_CLOSE',
+                symbol: position.symbol,
+                details: `Position ${position.position_id} force-closed: stale price (${Math.round(optionResult.ageMs / 1000)}s old), P&L ${roughPnlPct.toFixed(1)}%`,
+              }).catch(() => {});
+              continue;
+            }
           }
 
           const unrealizedPnl = calculateUnrealizedPnL({
@@ -212,24 +265,45 @@ export class ExitMonitorWorker {
           }
 
           const isShortPosition = (position.position_side ?? 'LONG') === 'SHORT';
-          const trailingStopBreached = isShortPosition
-            ? currentPrice >= position.trailing_stop_price!
-            : currentPrice <= position.trailing_stop_price!;
-          if (!exitReason && position.trailing_stop_price && trailingStopBreached) {
-            exitReason = 'trailing_stop';
-            exitQuantity = position.quantity;
-            logger.info('Trailing stop triggered', {
-              positionId: position.position_id,
-              symbol: position.symbol,
-              currentPrice,
-              trailingStopPrice: position.trailing_stop_price,
-              highWaterMark: position.high_water_mark,
-              entryPrice: position.entry_price,
-            });
+
+          // P0: Trailing stop with stale-data tightening
+          if (!exitReason && position.trailing_stop_price) {
+            let effectiveTrailingStop = position.trailing_stop_price;
+            if (priceIsStale) {
+              // When data is stale, tighten the trailing stop toward entry price
+              const tightenAmount = Math.abs(position.entry_price - position.trailing_stop_price) * STALE_PRICE_STOP_TIGHTENING;
+              effectiveTrailingStop = isShortPosition
+                ? position.trailing_stop_price - tightenAmount
+                : position.trailing_stop_price + tightenAmount;
+              logger.info('Stale data: tightened trailing stop', {
+                positionId: position.position_id,
+                originalStop: position.trailing_stop_price,
+                effectiveStop: effectiveTrailingStop,
+                staleAgeMs: optionResult.ageMs,
+              });
+            }
+
+            const trailingStopBreached = isShortPosition
+              ? currentPrice >= effectiveTrailingStop
+              : currentPrice <= effectiveTrailingStop;
+            if (trailingStopBreached) {
+              exitReason = priceIsStale ? 'trailing_stop_stale' : 'trailing_stop';
+              exitQuantity = position.quantity;
+              logger.info('Trailing stop triggered', {
+                positionId: position.position_id,
+                symbol: position.symbol,
+                currentPrice,
+                trailingStopPrice: position.trailing_stop_price,
+                effectiveStop: effectiveTrailingStop,
+                highWaterMark: position.high_water_mark,
+                entryPrice: position.entry_price,
+                stale: priceIsStale,
+              });
+            }
           }
 
           if (!exitReason && config.enableExitDecisionEngine) {
-            const underlying = Number.isFinite(underlyingPrice) ? underlyingPrice : position.entry_price * 100;
+            const underlying = Number.isFinite(underlyingPrice) ? underlyingPrice! : position.entry_price * 100;
             const [optionSnapshot, marketState, gexData] = await Promise.all([
               marketData.getOptionSnapshot(
                 position.symbol,
@@ -322,84 +396,22 @@ export class ExitMonitorWorker {
             continue;
           }
 
-          // Atomic position update + exit order creation to prevent double-close race
-          const isPartialExit = exitQuantity < position.quantity;
-          let updateResult;
-          if (isPartialExit) {
-            updateResult = await db.query(
-              `UPDATE refactored_positions
-               SET quantity = quantity - $1,
-                   last_updated = $2
-               WHERE position_id = $3 AND status = 'open' AND quantity >= $1
-               RETURNING position_id`,
-              [exitQuantity, now, position.position_id]
-            );
-          } else {
-            updateResult = await db.query(
-              `UPDATE refactored_positions
-               SET status = $1,
-                   exit_reason = $2,
-                   last_updated = $3
-               WHERE position_id = $4 AND status = 'open'
-               RETURNING position_id`,
-              ['closing', exitReason, now, position.position_id]
-            );
+          // P0: Idempotent exit order creation via transaction
+          const created = await this.createExitOrder(position, exitReason, exitQuantity, now);
+          if (created) {
+            exitsCreated++;
+
+            if (exitIntelligenceAudit) {
+              logger.info('Exit intelligence applied', {
+                positionId: position.position_id,
+                reasonCodes: exitIntelligenceAudit.reasonCodes,
+                finalExitAction: exitIntelligenceAudit.finalExitAction,
+                exitQuantity,
+                isPartial: exitQuantity < position.quantity,
+              });
+            }
           }
-
-          // Guard: if no rows updated, another process already closed/is closing this position
-          if (!updateResult.rows.length) {
-            logger.info('Position already closing/closed, skipping exit order', {
-              positionId: position.position_id,
-              exitReason,
-            });
-            continue;
-          }
-
-          await publishPositionUpdate(position.position_id);
-          await publishRiskUpdate();
-
-          await db.query(
-            `INSERT INTO orders (
-              signal_id,
-              symbol,
-              option_symbol,
-              strike,
-              expiration,
-              type,
-              quantity,
-              engine,
-              experiment_id,
-              order_type,
-              status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-            [
-              null,
-              position.symbol,
-              position.option_symbol,
-              position.strike,
-              position.expiration,
-              position.type,
-              exitQuantity,
-              position.engine ?? null,
-              position.experiment_id ?? null,
-              'paper',
-              'pending_execution',
-            ]
-          );
-
-          if (exitIntelligenceAudit) {
-            logger.info('Exit intelligence applied', {
-              positionId: position.position_id,
-              reasonCodes: exitIntelligenceAudit.reasonCodes,
-              finalExitAction: exitIntelligenceAudit.finalExitAction,
-              exitQuantity,
-              isPartial: isPartialExit,
-            });
-          }
-
-          exitsCreated += 1;
         } catch (error) {
-          // Skip position if market data unavailable (missing API keys)
           logger.debug('Exit monitor skipped - market data unavailable', {
             positionId: position.position_id,
             symbol: position.symbol
@@ -407,10 +419,26 @@ export class ExitMonitorWorker {
           Sentry.captureException(error, {
             tags: { worker: 'ExitMonitorWorker', positionId: position.position_id },
           });
-          // Don't track as error if it's just missing API keys
         }
       }
       }
+
+      // P0: Track consecutive stale cycles for alerting
+      if (staleSkips > 0 && positions.rows.length > 0 && staleSkips === positions.rows.length) {
+        this.consecutiveStaleCount++;
+        if (this.consecutiveStaleCount >= 3) {
+          await sendRiskAlert({
+            type: 'ALL_PROVIDERS_DOWN',
+            symbol: 'SYSTEM',
+            details: `Exit monitor unable to fetch prices for ${this.consecutiveStaleCount} consecutive cycles. ${positions.rows.length} positions unmonitored.`,
+          }).catch(() => {});
+        }
+      } else {
+        this.consecutiveStaleCount = 0;
+      }
+
+      // P0: Stuck closing position cleanup
+      await this.cleanupStuckClosingPositions();
 
       if (config.enableShadowExecution) {
         try {
@@ -423,6 +451,7 @@ export class ExitMonitorWorker {
 
       logger.info('Exit monitor completed', {
         exitsCreated,
+        staleSkips,
         durationMs: Date.now() - startTime,
       });
     } finally {
@@ -430,6 +459,244 @@ export class ExitMonitorWorker {
         lastDurationMs: Date.now() - startTime,
       });
       this.isRunning = false;
+    }
+  }
+
+  /**
+   * P0: Transactional, idempotent exit order creation.
+   * Atomically updates position status and creates exit order.
+   * Checks for existing pending exit orders to prevent duplicates.
+   */
+  private async createExitOrder(
+    position: OpenPosition,
+    exitReason: string,
+    exitQuantity: number,
+    now: Date
+  ): Promise<boolean> {
+    const isPartialExit = exitQuantity < position.quantity;
+
+    try {
+      return await db.transaction(async (tx) => {
+        // P0: Check for existing pending exit order (idempotency guard)
+        const existingExit = await tx.query(
+          `SELECT order_id FROM orders
+           WHERE option_symbol = $1 AND status = 'pending_execution'
+           AND quantity > 0
+           LIMIT 1`,
+          [position.option_symbol]
+        );
+        if (existingExit.rows.length > 0) {
+          logger.info('Exit order already exists, skipping duplicate', {
+            positionId: position.position_id,
+            existingOrderId: existingExit.rows[0].order_id,
+            exitReason,
+          });
+          return false;
+        }
+
+        // Atomic position status update
+        let updateResult;
+        if (isPartialExit) {
+          updateResult = await tx.query(
+            `UPDATE refactored_positions
+             SET quantity = quantity - $1,
+                 last_updated = $2
+             WHERE position_id = $3 AND status = 'open' AND quantity >= $1
+             RETURNING position_id`,
+            [exitQuantity, now, position.position_id]
+          );
+        } else {
+          updateResult = await tx.query(
+            `UPDATE refactored_positions
+             SET status = $1,
+                 exit_reason = $2,
+                 last_updated = $3
+             WHERE position_id = $4 AND status = 'open'
+             RETURNING position_id`,
+            ['closing', exitReason, now, position.position_id]
+          );
+        }
+
+        if (!updateResult.rows.length) {
+          logger.info('Position already closing/closed, skipping exit order', {
+            positionId: position.position_id,
+            exitReason,
+          });
+          return false;
+        }
+
+        // Create exit order within same transaction
+        await tx.query(
+          `INSERT INTO orders (
+            signal_id,
+            symbol,
+            option_symbol,
+            strike,
+            expiration,
+            type,
+            quantity,
+            engine,
+            experiment_id,
+            order_type,
+            status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            null,
+            position.symbol,
+            position.option_symbol,
+            position.strike,
+            position.expiration,
+            position.type,
+            exitQuantity,
+            position.engine ?? null,
+            position.experiment_id ?? null,
+            'paper',
+            'pending_execution',
+          ]
+        );
+
+        return true;
+      });
+    } catch (error) {
+      logger.error('Failed to create exit order (transaction rolled back)', {
+        positionId: position.position_id,
+        exitReason,
+        error,
+      });
+      Sentry.captureException(error, {
+        tags: { worker: 'ExitMonitorWorker', op: 'createExitOrder' },
+      });
+      return false;
+    } finally {
+      // Publish updates outside transaction (best-effort)
+      publishPositionUpdate(position.position_id).catch(() => {});
+      publishRiskUpdate().catch(() => {});
+    }
+  }
+
+  /**
+   * P0: Emergency kill switch — force-close all open positions immediately.
+   */
+  private async emergencyCloseAll(): Promise<void> {
+    logger.error('EMERGENCY RISK-OFF: Force-closing all open positions');
+    Sentry.captureMessage('EMERGENCY RISK-OFF activated', { level: 'fatal' });
+
+    await sendRiskAlert({
+      type: 'EMERGENCY_RISK_OFF',
+      symbol: 'SYSTEM',
+      details: 'Emergency kill switch activated. Force-closing all open positions.',
+    }).catch(() => {});
+
+    const positions = await db.query<OpenPosition>(
+      `SELECT * FROM refactored_positions WHERE status = 'open' ORDER BY entry_timestamp ASC LIMIT 200`
+    );
+
+    let closed = 0;
+    for (const position of positions.rows) {
+      const created = await this.createExitOrder(
+        position,
+        'emergency_risk_off',
+        position.quantity,
+        new Date()
+      );
+      if (created) closed++;
+    }
+
+    logger.error('EMERGENCY RISK-OFF complete', {
+      totalOpen: positions.rows.length,
+      exitOrdersCreated: closed,
+    });
+  }
+
+  /**
+   * P0: Detect and repair positions stuck in 'closing' status.
+   * If a position has been in 'closing' for longer than the timeout with no pending exit order,
+   * create a new exit order and alert.
+   */
+  private async cleanupStuckClosingPositions(): Promise<void> {
+    try {
+      const timeoutMinutes = config.stuckPositionTimeoutMinutes;
+      const stuckPositions = await db.query<OpenPosition>(
+        `SELECT p.*
+         FROM refactored_positions p
+         WHERE p.status = 'closing'
+           AND p.last_updated < NOW() - INTERVAL '1 minute' * $1
+           AND NOT EXISTS (
+             SELECT 1 FROM orders o
+             WHERE o.option_symbol = p.option_symbol
+               AND o.status IN ('pending_execution', 'submitted')
+           )
+         ORDER BY p.last_updated ASC
+         LIMIT 20`,
+        [timeoutMinutes]
+      );
+
+      if (stuckPositions.rows.length === 0) return;
+
+      logger.warn('Found stuck closing positions without exit orders', {
+        count: stuckPositions.rows.length,
+        timeoutMinutes,
+      });
+
+      for (const position of stuckPositions.rows) {
+        try {
+          // Create a replacement exit order
+          await db.transaction(async (tx) => {
+            const existingExit = await tx.query(
+              `SELECT order_id FROM orders
+               WHERE option_symbol = $1 AND status IN ('pending_execution', 'submitted')
+               LIMIT 1`,
+              [position.option_symbol]
+            );
+            if (existingExit.rows.length > 0) return;
+
+            await tx.query(
+              `INSERT INTO orders (
+                signal_id, symbol, option_symbol, strike, expiration, type,
+                quantity, engine, experiment_id, order_type, status
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+              [
+                null,
+                position.symbol,
+                position.option_symbol,
+                position.strike,
+                position.expiration,
+                position.type,
+                position.quantity,
+                position.engine ?? null,
+                position.experiment_id ?? null,
+                'paper',
+                'pending_execution',
+              ]
+            );
+
+            // Update last_updated to reset the timeout
+            await tx.query(
+              `UPDATE refactored_positions SET last_updated = NOW() WHERE position_id = $1`,
+              [position.position_id]
+            );
+          });
+
+          logger.warn('Created replacement exit order for stuck position', {
+            positionId: position.position_id,
+            symbol: position.symbol,
+            optionSymbol: position.option_symbol,
+          });
+        } catch (err) {
+          logger.error('Failed to repair stuck position', {
+            positionId: position.position_id,
+            error: err,
+          });
+        }
+      }
+
+      await sendRiskAlert({
+        type: 'STUCK_POSITIONS',
+        symbol: 'SYSTEM',
+        details: `${stuckPositions.rows.length} position(s) stuck in 'closing' > ${timeoutMinutes}min. Replacement exit orders created. Symbols: ${stuckPositions.rows.map(p => p.symbol).join(', ')}`,
+      }).catch(() => {});
+    } catch (error) {
+      logger.error('Stuck position cleanup failed', { error });
     }
   }
 }
