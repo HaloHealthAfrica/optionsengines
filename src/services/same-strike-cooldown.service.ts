@@ -66,21 +66,37 @@ export async function shouldBlockSameStrike(params: SameStrikeCooldownParams): P
   const cutoff = new Date(Date.now() - cooldownMinutes * 60 * 1000);
 
   try {
-    const result = await db.query<{ engine: string; raw_payload: unknown }>(
-      `SELECT o.engine, s.raw_payload
-       FROM orders o
-       JOIN signals s ON s.signal_id = o.signal_id
-       JOIN trades t ON t.order_id = o.order_id
-       WHERE o.option_symbol = $1
-         AND o.status = 'filled'
-         AND t.fill_timestamp > $2
-         AND COALESCE(o.is_test, false) = $3
-       ORDER BY t.fill_timestamp DESC
-       LIMIT 20`,
-      [optionSymbol, cutoff, isTest]
-    );
+    // Check both filled trades AND pending/unfilled orders to prevent burst duplicates
+    const [filledResult, pendingResult] = await Promise.all([
+      db.query<{ engine: string; raw_payload: unknown }>(
+        `SELECT o.engine, s.raw_payload
+         FROM orders o
+         JOIN signals s ON s.signal_id = o.signal_id
+         JOIN trades t ON t.order_id = o.order_id
+         WHERE o.option_symbol = $1
+           AND o.status = 'filled'
+           AND t.fill_timestamp > $2
+           AND COALESCE(o.is_test, false) = $3
+         ORDER BY t.fill_timestamp DESC
+         LIMIT 20`,
+        [optionSymbol, cutoff, isTest]
+      ),
+      db.query<{ engine: string; raw_payload: unknown }>(
+        `SELECT o.engine, s.raw_payload
+         FROM orders o
+         JOIN signals s ON s.signal_id = o.signal_id
+         WHERE o.option_symbol = $1
+           AND o.status IN ('pending_execution', 'pending')
+           AND o.created_at > $2
+           AND COALESCE(o.is_test, false) = $3
+         ORDER BY o.created_at DESC
+         LIMIT 20`,
+        [optionSymbol, cutoff, isTest]
+      ),
+    ]);
 
-    for (const row of result.rows) {
+    const allRows = [...filledResult.rows, ...pendingResult.rows];
+    for (const row of allRows) {
       const prevEngine = (row.engine ?? 'A') as 'A' | 'B';
       const prevPayload =
         typeof row.raw_payload === 'object' && row.raw_payload != null

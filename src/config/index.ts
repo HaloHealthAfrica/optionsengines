@@ -95,6 +95,8 @@ interface Config {
   enableExitIntelligence: boolean;
   trailingStopPercent: number;
   trailingStopActivationPercent: number;
+  /** Grace period after entry before any exit logic runs (default 5 min). Prevents instant open-then-close. */
+  minHoldMinutesBeforeExit: number;
 
   // Capacity Management
   minHoldMinutesForCapacityClose: number;
@@ -324,6 +326,7 @@ export const config: Config = {
   enableExitIntelligence: getEnvVarBoolean('ENABLE_EXIT_INTELLIGENCE', true),
   trailingStopPercent: getEnvVarNumber('TRAILING_STOP_PERCENT', 15),
   trailingStopActivationPercent: getEnvVarNumber('TRAILING_STOP_ACTIVATION_PERCENT', 20),
+  minHoldMinutesBeforeExit: getEnvVarNumber('MIN_HOLD_MINUTES_BEFORE_EXIT', 5),
 
   // Capacity Management
   minHoldMinutesForCapacityClose: getEnvVarNumber('MIN_HOLD_MINUTES_FOR_CAPACITY_CLOSE', 15),

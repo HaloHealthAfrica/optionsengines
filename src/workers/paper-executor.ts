@@ -367,6 +367,26 @@ export class PaperExecutorWorker {
               );
               return;
             } else {
+              // DTE floor guard: reject entry if option expires too soon
+              const dteAtEntry = order.expiration
+                ? (new Date(order.expiration).getTime() - fillTimestamp.getTime()) / 86_400_000
+                : Infinity;
+              const minDteFloor = config.minDteEntry > 0 ? config.minDteEntry : 2;
+              if (dteAtEntry < minDteFloor) {
+                logger.warn('Paper executor: rejecting entry — DTE below floor', {
+                  order_id: order.order_id,
+                  symbol: order.symbol,
+                  expiration: order.expiration,
+                  dteAtEntry: Math.round(dteAtEntry * 10) / 10,
+                  minDteFloor,
+                });
+                await txClient.query(
+                  `UPDATE orders SET status = $1 WHERE order_id = $2`,
+                  ['rejected_dte', order.order_id]
+                );
+                return;
+              }
+
               // New position (entry order)
               await txClient.query(
                 `INSERT INTO trades (order_id, fill_price, fill_quantity, fill_timestamp, commission, engine, experiment_id, is_test)

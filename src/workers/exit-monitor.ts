@@ -166,6 +166,11 @@ export class ExitMonitorWorker {
             });
           }
 
+          // Grace period: skip all exit logic (except 0DTE) if position was just opened
+          if (!exitReason && timeInTradeMinutes < config.minHoldMinutesBeforeExit) {
+            continue;
+          }
+
           // Exit Intelligence: bias-aware adjustments (runs before stop/target evaluation)
           if (config.enableExitIntelligence && !exitReason) {
             const marketState = await getCurrentState(position.symbol);
