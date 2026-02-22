@@ -8,6 +8,8 @@ let cachedFreezeUntil: Date | null = null;
 let lastCheckMs = 0;
 const CHECK_INTERVAL_MS = 15_000;
 
+let tableReady = false;
+
 export interface DrawdownStatus {
   frozen: boolean;
   freezeUntil: Date | null;
@@ -15,7 +17,33 @@ export interface DrawdownStatus {
   maxAllowedPct: number;
 }
 
+async function ensureTable(): Promise<boolean> {
+  if (tableReady) return true;
+  try {
+    await db.query(
+      `CREATE TABLE IF NOT EXISTS circuit_breaker_state (
+         id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+         freeze_until TIMESTAMPTZ,
+         triggered_at TIMESTAMPTZ,
+         drawdown_pct DECIMAL(6, 2),
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+       )`
+    );
+    await db.query(
+      `INSERT INTO circuit_breaker_state (id, updated_at)
+       VALUES (1, NOW())
+       ON CONFLICT (id) DO NOTHING`
+    );
+    tableReady = true;
+    return true;
+  } catch (err) {
+    logger.warn('circuit_breaker_state table unavailable, using in-memory only', { error: err });
+    return false;
+  }
+}
+
 async function loadFreezeState(): Promise<Date | null> {
+  if (!(await ensureTable())) return cachedFreezeUntil;
   try {
     const r = await db.query(
       `SELECT freeze_until FROM circuit_breaker_state WHERE id = 1`
@@ -32,6 +60,7 @@ async function loadFreezeState(): Promise<Date | null> {
 }
 
 async function persistFreeze(freezeUntil: Date, drawdownPct: number): Promise<void> {
+  if (!(await ensureTable())) return;
   try {
     await db.query(
       `INSERT INTO circuit_breaker_state (id, freeze_until, triggered_at, drawdown_pct, updated_at)
@@ -49,6 +78,7 @@ async function persistFreeze(freezeUntil: Date, drawdownPct: number): Promise<vo
 }
 
 async function clearFreeze(): Promise<void> {
+  if (!(await ensureTable())) return;
   try {
     await db.query(
       `UPDATE circuit_breaker_state SET freeze_until = NULL, updated_at = NOW() WHERE id = 1`
@@ -82,11 +112,6 @@ export async function checkDrawdownCircuitBreaker(opts?: {
   }
 
   if (now - lastCheckMs < CHECK_INTERVAL_MS) {
-    const dbFreeze = await loadFreezeState();
-    if (dbFreeze) {
-      cachedFreezeUntil = dbFreeze;
-      return { frozen: true, freezeUntil: dbFreeze, currentDrawdownPct: 0, maxAllowedPct: maxPct };
-    }
     return { frozen: false, freezeUntil: null, currentDrawdownPct: 0, maxAllowedPct: maxPct };
   }
   lastCheckMs = now;
@@ -97,7 +122,11 @@ export async function checkDrawdownCircuitBreaker(opts?: {
       cachedFreezeUntil = dbFreeze;
       return { frozen: true, freezeUntil: dbFreeze, currentDrawdownPct: 0, maxAllowedPct: maxPct };
     }
+  } catch {
+    // Persistence layer failure — continue with drawdown calculation
+  }
 
+  try {
     const result = await db.query(
       `SELECT
          COALESCE(SUM(unrealized_pnl), 0) AS total_unrealized,
