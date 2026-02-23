@@ -4,7 +4,7 @@ import { logger } from '../../utils/logger.js';
 import * as Sentry from '@sentry/node';
 import { LatencyMode, SystemState } from '../types/enums.js';
 import type { DecisionTrace, LatencyBudgetResult } from '../types/index.js';
-import { getEngineConfig } from '../config/loader.js';
+
 
 export class DecisionTraceService {
   /**
