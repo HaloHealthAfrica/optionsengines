@@ -618,6 +618,25 @@ export async function backendGetHistoryStats(token) {
   return response.json();
 }
 
+// Research Dashboard (Module 5)
+export async function backendGetResearchOverview(token) {
+  const response = await backendFetch('/api/research/overview', {
+    headers: { Authorization: `Bearer ${token}` },
+    timeoutMs: 60000,
+  });
+  if (!response.ok) throw new Error('Failed to fetch research overview');
+  return response.json();
+}
+
+export async function backendResolveDrift(token, driftId) {
+  const response = await backendFetch(`/api/research/drift/${driftId}/resolve`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to resolve drift');
+  return response.json();
+}
+
 // Bias / Adaptive Feedback Tuner
 export async function backendGetBiasAdaptiveStatus(token) {
   const response = await backendFetch('/api/bias/adaptive-status', {

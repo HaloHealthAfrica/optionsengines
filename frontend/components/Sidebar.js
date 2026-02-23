@@ -4,6 +4,7 @@ import Image from 'next/image';
 import {
   Activity,
   BarChart3,
+  FlaskConical,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -24,6 +25,7 @@ const iconMap = {
   'e2e-monitor': Activity,
   'intel-console': RadioTower,
   'decision-engines': BarChart3,
+  research: FlaskConical,
   'feedback-tuner': Sliders,
   testing: Activity,
   settings: SettingsIcon,

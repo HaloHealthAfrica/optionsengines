@@ -14,6 +14,7 @@ import TestingConsole from './TestingConsole';
 import IntelConsole from './IntelConsole';
 import AdaptiveControlPanel from './AdaptiveControlPanel';
 import E2EMonitor from './E2EMonitor';
+import ResearchDashboard from './ResearchDashboard';
 
 const StratCommandCenter = dynamic(() => import('./StratCommandCenter'), { ssr: false });
 
@@ -27,6 +28,7 @@ const tabs = [
   { id: 'e2e-monitor', label: 'E2E Monitor' },
   { id: 'intel-console', label: 'Intel Console' },
   { id: 'decision-engines', label: 'Decision Engines' },
+  { id: 'research', label: 'Research' },
   { id: 'feedback-tuner', label: 'Feedback Tuner' },
   { id: 'testing', label: 'Testing' },
   { id: 'settings', label: 'Settings' },
@@ -71,6 +73,8 @@ export default function ClientShell() {
         return <IntelConsole />;
       case 'decision-engines':
         return <DecisionEnginePage />;
+      case 'research':
+        return <ResearchDashboard />;
       case 'feedback-tuner':
         return <AdaptiveControlPanel />;
       case 'testing':
