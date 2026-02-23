@@ -11,9 +11,11 @@ CREATE TABLE IF NOT EXISTS oe_correlation_matrix (
   method TEXT NOT NULL DEFAULT 'PEARSON',
   sample_count INT NOT NULL,
   source TEXT NOT NULL DEFAULT 'MASSIVE_AGGS',
-  confidence DECIMAL(5,4) NOT NULL,
-  UNIQUE(window_days, (computed_at::date))
+  confidence DECIMAL(5,4) NOT NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_oe_corr_matrix_window_date
+  ON oe_correlation_matrix(window_days, (computed_at::date));
 
 CREATE INDEX IF NOT EXISTS idx_oe_corr_matrix_date
   ON oe_correlation_matrix(computed_at DESC);
