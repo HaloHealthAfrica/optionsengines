@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS oe_trade_plan_legs (
   option_ticker TEXT NOT NULL,
   expiration DATE NOT NULL,
   strike DECIMAL(10,2) NOT NULL,
-  right TEXT NOT NULL CHECK (right IN ('C', 'P')),
+  "right" TEXT NOT NULL CHECK ("right" IN ('C', 'P')),
   dte INT NOT NULL,
   delta DECIMAL(8,5),
   gamma DECIMAL(8,5),
