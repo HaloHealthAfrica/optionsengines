@@ -1,0 +1,126 @@
+latency:
+  maxTotalDecisionCycleMs_cached: 700
+  maxTotalDecisionCycleMs_cold: 2000
+  maxConstructionLatencyMs: 400
+  maxGovernorLatencyMs: 150
+  maxLedgerLatencyMs: 100
+  maxSessionGuardLatencyMs: 50
+
+liquidity:
+  minOI: 200
+  minVolume: 50
+  maxSpreadWidthPct: 0.15
+  minLiquidityScore: 0.55
+  minCreditRatio: 0.33
+  volumeMaxRefDefault: 5000
+  oiMaxRefDefault: 20000
+
+sanity:
+  maxGreekMismatch: 0.15
+  maxSpreadWidthSanity: 1.0
+  maxDelta: 1.05
+  maxIV: 5.0
+  maxUnderlyingMovePct: 0.20
+  minOptionPremium: 0.01
+  gammaNegativeEpsilon: 0.0001
+
+slippage:
+  repriceAttempts: 3
+  repriceIntervalSeconds: 10
+  repriceSpreadImprovement:
+    - 0.10
+    - 0.20
+  fillTimeoutSeconds: 30
+  maxMidMovement15s: 0.10
+  maxUnderlyingMovement15s: 0.005
+
+exits:
+  creditSpread:
+    profitTargetPct: 0.50
+    stopLossPct: 1.00
+
+portfolio:
+  maxNetDeltaPct: 0.15
+  maxShockLossPct: 0.75
+  maxUnderlyingRiskPct: 0.25
+  maxDTEConcentrationPct: 0.60
+  underlyingLiquidityFloorPct: 0.50
+  underlyingLiquidityRejectPct: 0.30
+  maxCorrelationBucketRiskPct: 0.40
+
+buckets:
+  ORB: 0.30
+  GEX: 0.30
+  Spread: 0.30
+  Experimental: 0.10
+
+tapering:
+  level1DrawdownPct: 0.50
+  level1SizeMultiplier: 0.50
+  level2DrawdownPct: 0.80
+  level2FreezeEntries: true
+
+pause:
+  losingStreakCount: 3
+  pauseDurationMinutes: 30
+  ivSpikeThresholdPct: 0.10
+  ivSpikeSizeReduction: 0.25
+
+regime:
+  ivLowThreshold: 0.33
+  ivHighThreshold: 0.66
+  minIVSampleDays: 63
+  hysteresisCount: 3
+  blockTradesOnUnknownIV: false
+
+metaLearner:
+  minSampleCount: 50
+  degradationThreshold: 0.10
+  adjustmentFactor: 0.80
+  cooldownTrades: 10
+  weightFloor: 0.50
+  weightCeiling: 1.50
+
+cache:
+  chainTTLSeconds: 300
+  snapshotTTLSeconds: 2
+  snapshotMaxAgeAtUseSeconds: 30
+  underlyingPriceTTLSeconds: 5
+
+timeouts:
+  massiveHTTPSeconds: 3
+  lockAcquisitionMs: 500
+  lockTTLSeconds: 5
+  streamDisconnectPauseSecs: 30
+
+session:
+  openBufferMinutes: 5
+  closeBufferMinutes: 15
+  haltResumeBufferMinutes: 2
+  dayCloseTimeET: "15:45"
+  timezone: "America/New_York"
+
+brokerSync:
+  intervalMinutes: 5
+  warningThresholdPct: 0.01
+  freezeThresholdPct: 0.05
+
+volSurface:
+  termEpsilon: 0.02
+  frontDTERange: [7, 14]
+  midDTE: 21
+  backDTERange: [45, 60]
+  backFallbackRange: [30, 45]
+  redisTTLMarketHours: 600
+  redisTTLAfterHours: 3600
+
+correlation:
+  windowDays: 30
+  calendarDaysToFetch: 45
+  threshold: 0.85
+  coreTickers:
+    - SPY
+    - QQQ
+    - IWM
+    - DIA
+  method: PEARSON
