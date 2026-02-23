@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -119,6 +120,12 @@ export class CorrelationBucketService {
       notes: `${buckets.length} buckets from ${tickers.length} tickers`,
     };
 
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: `Correlation buckets computed: ${buckets.length} buckets from ${tickers.length} tickers`,
+      level: 'info',
+      data: { bucketCount: buckets.length, tickerCount: tickers.length, version: newVersion, threshold },
+    });
     logger.info('Correlation buckets built', {
       bucketCount: buckets.length,
       tickerCount: tickers.length,

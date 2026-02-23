@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { redisCache } from '../../services/redis-cache.service.js';
 import { LedgerLockTimeoutError } from '../types/errors.js';
@@ -38,7 +39,9 @@ export class DistributedLock {
     }
 
     logger.warn('Distributed lock acquisition timeout', { accountId, key, timeoutMs });
-    throw new LedgerLockTimeoutError(accountId, timeoutMs);
+    const err = new LedgerLockTimeoutError(accountId, timeoutMs);
+    Sentry.captureException(err, { tags: { service: 'DistributedLock', op: 'acquire' } });
+    throw err;
   }
 
   private async tryAcquire(key: string, token: string, ttlSeconds: number): Promise<boolean> {
@@ -56,6 +59,7 @@ export class DistributedLock {
       return result === 'OK';
     } catch (error) {
       logger.error('Distributed lock acquire error', error as Error, { key });
+      Sentry.captureException(error, { tags: { service: 'DistributedLock', op: 'tryAcquire' } });
       return false;
     }
   }
@@ -89,6 +93,7 @@ export class DistributedLock {
       return released;
     } catch (error) {
       logger.error('Distributed lock release error', error as Error, { key });
+      Sentry.captureException(error, { tags: { service: 'DistributedLock', op: 'release' } });
       return false;
     }
   }

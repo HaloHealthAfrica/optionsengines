@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 
@@ -58,6 +59,13 @@ export class ContextPerformanceService {
       logger.info('No trades for context performance', { accountId, strategyTag });
       return [];
     }
+
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: 'Context performance computation started',
+      level: 'info',
+      data: { accountId, strategyTag, tradeCount: rows.length },
+    });
 
     const breakdowns: ContextBreakdown[] = [];
 

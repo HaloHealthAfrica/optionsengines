@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -120,6 +121,13 @@ export class RegimePolicyEngine {
       denyStrategies: merged.denyStrategies ?? [],
       confidence: this.computeConfidence(context),
       notes: `${matchedRules.length} rule(s) matched for ${regimeTag}`,
+    });
+
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: `Policy evaluation: ${matchedRules.length} rule(s) matched for ${regimeTag}`,
+      level: 'info',
+      data: { accountId, regimeTag, matchedRules: matchedRules.length, denyStrategies: merged.denyStrategies ?? [] },
     });
 
     logger.info('Regime allocation computed', {

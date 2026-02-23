@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { LatencyMode } from '../types/enums.js';
 import { LatencyBudgetExceededError } from '../types/errors.js';
 import type { LatencyBudgetResult } from '../types/index.js';
@@ -57,6 +58,12 @@ export class LatencyBudget {
     const budget = this.getBudgetMs();
 
     if (elapsed > budget) {
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Latency budget exceeded: ${elapsed}ms > ${budget}ms`,
+        level: 'warning',
+        data: { elapsed, budget, mode: this.mode, stageDurations: this.stageDurations },
+      });
       throw new LatencyBudgetExceededError(elapsed, budget, this.mode);
     }
   }
@@ -67,6 +74,12 @@ export class LatencyBudget {
   checkStageBudget(stageName: string, maxMs: number): void {
     const duration = this.stageDurations[stageName];
     if (duration !== undefined && duration > maxMs) {
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Stage budget exceeded: ${stageName} took ${duration}ms > ${maxMs}ms`,
+        level: 'warning',
+        data: { stageName, duration, maxMs, mode: this.mode },
+      });
       throw new LatencyBudgetExceededError(duration, maxMs, `${this.mode}:${stageName}`);
     }
   }

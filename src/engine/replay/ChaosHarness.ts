@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 
 export type ChaosScenario =
@@ -81,6 +82,12 @@ export class ChaosHarness {
 
     if (triggered) {
       logger.warn('Chaos scenario triggered', { scenario });
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Chaos injection triggered: ${scenario}`,
+        level: 'warning',
+        data: { scenario, probability: this.config.failureProbability },
+      });
     }
 
     return { scenario, triggered, details };
@@ -95,6 +102,12 @@ export class ChaosHarness {
     }
 
     logger.warn('Chaos scenario force-triggered', { scenario });
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: `Chaos force-injection triggered: ${scenario}`,
+      level: 'warning',
+      data: { scenario, forced: true },
+    });
     return { scenario, triggered: true, details: `Forced chaos injection: ${scenario}` };
   }
 

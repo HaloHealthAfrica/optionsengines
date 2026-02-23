@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { db } from '../../services/database.service.js';
 import type { PositionState } from '../types/enums.js';
 
@@ -112,6 +113,13 @@ export class DashboardQueryService {
       this.getActiveRegimes(accountId),
       this.getRecentTraces(accountId, 20),
     ]);
+
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: 'Dashboard overview queried',
+      level: 'info',
+      data: { accountId, positionCount: positions.length, regimeCount: regimes.length },
+    });
 
     return { account, positions, pnl, risk, regimes, recentTraces: traces };
   }

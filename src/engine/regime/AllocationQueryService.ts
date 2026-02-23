@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { db } from '../../services/database.service.js';
 import { regimePolicyEngine } from './RegimePolicyEngine.js';
 import type { AllocationSnapshot, RegimeContext, AllocationPolicy } from './RegimePolicyEngine.js';
@@ -55,6 +56,12 @@ export class AllocationQueryService {
 
     // If no snapshot or stale (> 1 hour), recompute
     if (!snapshot || this.isSnapshotStale(snapshot)) {
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Stale allocation snapshot — recomputing for account ${accountId}`,
+        level: 'info',
+        data: { accountId, snapshotAge: snapshot ? Date.now() - snapshot.computedAt.getTime() : null },
+      });
       snapshot = await regimePolicyEngine.evaluate(accountId, context);
     }
 

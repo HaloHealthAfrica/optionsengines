@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -161,6 +162,11 @@ export class DriftDetectionEngine {
       logger.warn('STRATEGY_DEGRADATION_DETECTED', {
         accountId, strategyTag, driftCount: drifts.length,
         types: drifts.map(d => d.driftType),
+      });
+      Sentry.captureMessage('STRATEGY_DEGRADATION_DETECTED', {
+        level: 'warning',
+        tags: { service: 'DriftDetectionEngine', strategyTag },
+        extra: { driftCount: drifts.length, types: drifts.map(d => d.driftType) },
       });
     }
 

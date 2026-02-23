@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -142,6 +143,7 @@ export class CorrelationMatrixJob {
 
         returnsMap.set(ticker, returns);
       } catch (err) {
+        Sentry.captureException(err, { tags: { service: 'CorrelationMatrixJob', op: 'fetchDailyReturns' } });
         logger.warn('Failed to fetch bars for correlation', {
           ticker, error: (err as Error).message,
         });

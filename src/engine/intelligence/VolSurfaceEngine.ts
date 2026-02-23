@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -59,6 +60,7 @@ export class VolSurfaceEngine {
       const snapshot = await massiveOptionsService.getOptionsSnapshot(input.underlying);
       quotes = snapshot.quotes;
     } catch (err) {
+      Sentry.captureException(err, { tags: { service: 'VolSurfaceEngine', op: 'computeAndPersist' } });
       fetchNotes.push(`Snapshot fetch failed: ${(err as Error).message}`);
     }
 

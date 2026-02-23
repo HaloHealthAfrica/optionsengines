@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -347,6 +348,15 @@ export class PortfolioGovernor {
       projectedShockLoss: shockLoss,
       underlyingLiquidityRatio: liquidityRatio,
     };
+
+    if (decision === GovernorDecision.REJECT) {
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Trade rejected by governor: ${reasonCodes.join(', ')}`,
+        level: 'warning',
+        data: { decision, reasonCodes, sizeMultiplier, shockLoss, liquidityRatio },
+      });
+    }
 
     logger.info('Governor evaluation', {
       decision,

@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { db } from '../../services/database.service.js';
 import { logger } from '../../utils/logger.js';
 import { PositionState, TradeStructure, LedgerTransactionType } from '../types/enums.js';
@@ -109,6 +110,9 @@ export class PositionStateService {
           });
           continue;
         }
+        if (error instanceof PositionWriteConflictError) {
+          Sentry.captureException(error, { tags: { service: 'PositionStateService', op: 'transition' } });
+        }
         throw error;
       }
     }
@@ -192,6 +196,13 @@ export class PositionStateService {
         from: fromState,
         to: toState,
         version: updated.version,
+      });
+
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Position ${positionId} transitioned ${fromState} → ${toState}`,
+        level: 'info',
+        data: { positionId, from: fromState, to: toState, version: updated.version },
       });
 
       return updated;

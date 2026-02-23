@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { getEngineConfig } from '../config/loader.js';
 import { correlationMatrixJob } from './CorrelationMatrixJob.js';
@@ -52,6 +53,12 @@ export class CorrelationQueryService {
     if (correlationLimitsEnabled) {
       // Fall back to static YAML buckets
       const staticBuckets = this.getStaticBuckets();
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: 'Falling back to static correlation buckets',
+        level: 'warning',
+        data: { reason: 'CORR_FALLBACK_STATIC', bucketCount: staticBuckets.size },
+      });
       logger.warn('Using static correlation buckets (CORR_FALLBACK_STATIC)');
       return {
         source: 'STATIC_FALLBACK',

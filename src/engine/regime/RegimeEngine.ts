@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -55,6 +56,15 @@ export class RegimeEngine {
     };
 
     await this.persist(snapshot);
+
+    if (prevSnapshot && prevSnapshot.ivRegime !== effectiveRegime) {
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Regime transition: ${prevSnapshot.ivRegime} → ${effectiveRegime}`,
+        level: 'info',
+        data: { underlying: input.underlying, from: prevSnapshot.ivRegime, to: effectiveRegime, ivPercentile, termShape, confidence },
+      });
+    }
 
     logger.info('Regime computed', {
       underlying: input.underlying,

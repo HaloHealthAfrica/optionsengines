@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { massiveOptionsService } from '../data/MassiveOptionsService.js';
@@ -117,6 +118,7 @@ export class IVSeriesCollector {
       return { underlying, success: true, row, failureReason: null };
 
     } catch (err) {
+      Sentry.captureException(err, { tags: { service: 'IVSeriesCollector', op: 'collect' } });
       return this.recordFailure(underlying, dateStr, 'COLLECTION_ERROR',
         { message: (err as Error).message });
     }

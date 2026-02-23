@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import type { IVRegime, TermShape } from '../types/enums.js';
@@ -239,6 +240,12 @@ export class AttributionEngine {
     const decaying = delta > degradationThreshold;
 
     if (decaying) {
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Edge decay detected for ${strategyTag}`,
+        level: 'warning',
+        data: { strategyTag, recentWinRate, overallWinRate: overall.winRate, delta },
+      });
       logger.warn('Edge decay detected', {
         strategyTag, recentWinRate, overallWinRate: overall.winRate, delta,
       });

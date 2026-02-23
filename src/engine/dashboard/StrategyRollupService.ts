@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 
@@ -119,6 +120,13 @@ export class StrategyRollupService {
     };
 
     await this.persistRollup(rollup);
+
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: 'Strategy rollup computed',
+      level: 'info',
+      data: { accountId, strategyTag, period, sampleCount: pnls.length, winRate, sharpe },
+    });
 
     logger.info('Strategy rollup computed', {
       accountId, strategyTag, period,

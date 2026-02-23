@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -61,6 +62,12 @@ export class CapitalAllocator {
 
     // 2. Check if trade fits in bucket
     if (bucketUsed + proposedRisk > bucketCapacity) {
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Allocation denied: bucket "${bucket}" exhausted`,
+        level: 'warning',
+        data: { bucket, bucketUsed, bucketCapacity, proposedRisk },
+      });
       return {
         allowed: false,
         rejectionCode: RejectionCode.BUCKET_EXHAUSTED,

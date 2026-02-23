@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { RejectionCode, GreekSource } from '../types/enums.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -228,6 +229,12 @@ export class DataSanityValidator {
 
     if (rejectedCount > 0) {
       const rejectionCounts = this.countRejections(candidateResults);
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `${rejectedCount}/${candidates.length} candidates rejected for sanity violations`,
+        level: 'warning',
+        data: { total: candidates.length, passed: passedCount, rejected: rejectedCount, rejectionCounts },
+      });
       logger.info('Data sanity validation completed', {
         total: candidates.length,
         passed: passedCount,

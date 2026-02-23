@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -244,6 +245,7 @@ export class LiquiditySlippageService {
       return { fresh: true, currentBid: quote.bid, currentAsk: quote.ask, currentMid: quote.mid };
     } catch (error) {
       logger.error('Quote revalidation failed', error as Error, { optionTicker });
+      Sentry.captureException(error, { tags: { service: 'LiquiditySlippageService', op: 'revalidateQuote' } });
       return { fresh: false, currentBid: 0, currentAsk: 0, currentMid: 0 };
     }
   }

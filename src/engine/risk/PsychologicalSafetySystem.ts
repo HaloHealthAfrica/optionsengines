@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -82,6 +83,12 @@ export class PsychologicalSafetySystem {
     // 2. Check for new losing streak
     const streakCheck = await this.checkLosingStreak(accountId, cfg.losingStreakCount);
     if (streakCheck.triggered) {
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Losing streak detected: ${streakCheck.consecutiveLosses} consecutive losses`,
+        level: 'warning',
+        data: { accountId, consecutiveLosses: streakCheck.consecutiveLosses, pauseDurationMinutes: cfg.pauseDurationMinutes },
+      });
       const event = await this.createEvent({
         accountId,
         eventType: SafetyEventType.LOSING_STREAK_PAUSE,
@@ -104,6 +111,12 @@ export class PsychologicalSafetySystem {
     if (currentIVPercentile !== null && previousIVPercentile !== null) {
       const ivChange = currentIVPercentile - previousIVPercentile;
       if (ivChange > cfg.ivSpikeThresholdPct) {
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: `IV spike detected: percentile change ${(ivChange * 100).toFixed(1)}%`,
+          level: 'warning',
+          data: { accountId, currentIVPercentile, previousIVPercentile, ivChange, sizeReduction: cfg.ivSpikeSizeReduction },
+        });
         const existingIVEvent = activeEvents.find(e => e.eventType === SafetyEventType.IV_SPIKE_RESIZE);
         if (!existingIVEvent) {
           const event = await this.createEvent({

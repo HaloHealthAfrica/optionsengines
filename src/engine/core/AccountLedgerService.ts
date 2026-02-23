@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { db } from '../../services/database.service.js';
 import { logger } from '../../utils/logger.js';
 import { distributedLock, type LockHandle } from './DistributedLock.js';
@@ -176,6 +177,13 @@ export class AccountLedgerService {
         referenceId,
       });
 
+      Sentry.addBreadcrumb({
+        category: 'engine',
+        message: `Capital reserved: ${amount} for ${referenceId}`,
+        level: 'info',
+        data: { accountId, amount, reservedCapital: newReserved, availableAfter },
+      });
+
       return {
         success: true,
         reservationId: txResult.rows[0].id,
@@ -249,6 +257,12 @@ export class AccountLedgerService {
         );
 
         logger.info('Entry committed', { accountId, amount, newCash, referenceId });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: `Entry committed: ${amount} for ${referenceId}`,
+          level: 'info',
+          data: { accountId, amount, newCash },
+        });
         return this.mapLedgerRow(txResult.rows[0]);
       });
     } finally {
@@ -313,6 +327,12 @@ export class AccountLedgerService {
         );
 
         logger.info('Capital released', { accountId, amount, newReserved, referenceId });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: `Capital released: ${amount} for ${referenceId}`,
+          level: 'info',
+          data: { accountId, amount, newReserved },
+        });
         return this.mapLedgerRow(txResult.rows[0]);
       });
     } finally {
@@ -387,6 +407,12 @@ export class AccountLedgerService {
         );
 
         logger.info('PnL realized', { accountId, pnl, newCash, newRealized, referenceId });
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: `PnL realized: ${pnl} for ${referenceId}`,
+          level: 'info',
+          data: { accountId, pnl, newCash, newRealized },
+        });
         return this.mapLedgerRow(txResult.rows[0]);
       });
     } finally {
@@ -506,6 +532,11 @@ export class AccountLedgerService {
 
       if (frozen) {
         logger.warn('Broker sync freeze triggered', { accountId, driftPct, drift });
+        Sentry.captureMessage('Broker sync freeze triggered', {
+          level: 'error',
+          tags: { service: 'AccountLedgerService', op: 'brokerSyncCheck' },
+          extra: { accountId, drift, driftPct, brokerEquity, localEquity: account.totalEquity },
+        });
         await globalSystemState.pause(
           SystemStateTransitionTrigger.BROKER_SYNC_FREEZE,
           'AccountLedgerService',

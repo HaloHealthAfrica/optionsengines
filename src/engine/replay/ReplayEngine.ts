@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { db } from '../../services/database.service.js';
 import { decisionTraceService } from '../core/DecisionTraceService.js';
@@ -180,6 +181,7 @@ export class ReplayEngine {
         logger.error('Replay failed for trace', err as Error, {
           traceId: trace.decisionTraceId,
         });
+        Sentry.captureException(err, { tags: { service: 'ReplayEngine', op: 'replayBatch' } });
       }
     }
 
@@ -404,10 +406,19 @@ export class ReplayEngine {
       }
     }
 
+    const driftCount = stages.reduce((s, st) => s + st.drifts.length, 0);
+
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: 'Replay drift detected',
+      level: 'warning',
+      data: { replayTraceId, originalTraceId, driftCount },
+    });
+
     logger.warn('Replay drift recorded', {
       replayTraceId,
       originalTraceId,
-      driftCount: stages.reduce((s, st) => s + st.drifts.length, 0),
+      driftCount,
     });
   }
 }

@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { redisCache } from '../../services/redis-cache.service.js';
 import { getEngineConfig } from '../config/loader.js';
@@ -50,6 +51,14 @@ export class VolSurfaceQueryService {
 
       const freshness = ageSeconds < ttl ? 'FRESH' as const : 'STALE' as const;
 
+      if (this.isMarketHours()) {
+        Sentry.addBreadcrumb({
+          category: 'engine',
+          message: `Vol surface cache miss during market hours for ${underlying}`,
+          level: 'info',
+          data: { underlying, ageSeconds, freshness },
+        });
+      }
       logger.debug('Vol surface served from DB', { underlying, ageSeconds });
       return { snapshot: dbSnapshot, freshness, source: 'DB', ageSeconds };
     }

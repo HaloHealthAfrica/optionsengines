@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { logger } from '../../utils/logger.js';
 import { getEngineConfig } from '../config/loader.js';
 import { RejectionCode } from '../types/enums.js';
@@ -87,6 +88,12 @@ export class SessionGuard {
     this.haltedSymbols.add(symbol);
     this.haltResumedAt.delete(symbol);
     logger.warn('Symbol halt registered', { symbol });
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: `Symbol halt registered: ${symbol}`,
+      level: 'warning',
+      data: { symbol },
+    });
   }
 
   /**
@@ -96,6 +103,12 @@ export class SessionGuard {
     this.haltedSymbols.delete(symbol);
     this.haltResumedAt.set(symbol, new Date());
     logger.info('Symbol halt resumed', { symbol });
+    Sentry.addBreadcrumb({
+      category: 'engine',
+      message: `Symbol halt resumed: ${symbol}`,
+      level: 'info',
+      data: { symbol },
+    });
   }
 
   /**
