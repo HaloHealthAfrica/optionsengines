@@ -67,7 +67,7 @@ describe('PortfolioGovernor', () => {
       structure: TradeStructure.LONG_CALL, underlying: 'SPY', contracts: 1,
       legs: [{
         legRole: LegRole.LONG, optionTicker: 'O:SPY260315C00500000',
-        expiration: '2026-03-15', strike: 500, right: OptionRight.C,
+        expiration: '2026-03-15', strike: 500, option_right: OptionRight.C,
         dte: 21, delta: 0.10, gamma: 0.01, vega: 0.05, iv: 0.25,
         greekSource: GreekSource.MASSIVE, bid: 1.00, ask: 1.10, mid: 1.05,
         volume: 2500, oi: 10000, spreadWidth: 0.10, spreadWidthPct: 0.10,
@@ -103,7 +103,7 @@ describe('PortfolioGovernor', () => {
         contracts: 2,
         legs: [{
           legRole: LegRole.LONG, optionTicker: 'O:SPY260315C00500000',
-          expiration: '2026-03-15', strike: 500, right: OptionRight.C,
+          expiration: '2026-03-15', strike: 500, option_right: OptionRight.C,
           dte: 21, delta: 0.45, gamma: 0.03, vega: 0.12, iv: 0.25,
           greekSource: GreekSource.MASSIVE, bid: 4.50, ask: 4.70, mid: 4.60,
           volume: 2500, oi: 10000, spreadWidth: 0.20, spreadWidthPct: 0.04,
@@ -126,7 +126,7 @@ describe('PortfolioGovernor', () => {
         legs: [
           {
             legRole: LegRole.SHORT, optionTicker: 'O:SPY_P495',
-            expiration: '2026-03-15', strike: 495, right: OptionRight.P,
+            expiration: '2026-03-15', strike: 495, option_right: OptionRight.P,
             dte: 21, delta: -0.40, gamma: 0.03, vega: 0.12, iv: 0.25,
             greekSource: GreekSource.MASSIVE, bid: 4.90, ask: 5.00, mid: 4.95,
             volume: 3000, oi: 12000, spreadWidth: 0.10, spreadWidthPct: 0.02,
@@ -134,7 +134,7 @@ describe('PortfolioGovernor', () => {
           },
           {
             legRole: LegRole.LONG, optionTicker: 'O:SPY_P490',
-            expiration: '2026-03-15', strike: 490, right: OptionRight.P,
+            expiration: '2026-03-15', strike: 490, option_right: OptionRight.P,
             dte: 21, delta: -0.28, gamma: 0.025, vega: 0.10, iv: 0.24,
             greekSource: GreekSource.MASSIVE, bid: 2.90, ask: 3.00, mid: 2.95,
             volume: 2500, oi: 10000, spreadWidth: 0.10, spreadWidthPct: 0.03,
@@ -234,7 +234,7 @@ describe('PortfolioGovernor', () => {
         contracts: 2,
         legs: [{
           legRole: LegRole.LONG, optionTicker: 'O:SPY',
-          expiration: '2026-03-15', strike: 500, right: OptionRight.C,
+          expiration: '2026-03-15', strike: 500, option_right: OptionRight.C,
           dte: 21, delta: 0.20, gamma: 0.03, vega: 0.12, iv: 0.25,
           greekSource: GreekSource.MASSIVE, bid: 2.00, ask: 2.20, mid: 2.10,
           volume: 2500, oi: 10000, spreadWidth: 0.20, spreadWidthPct: 0.10,

@@ -62,7 +62,7 @@ describe('CapitalAllocator', () => {
       structure: TradeStructure.LONG_CALL, underlying: 'SPY', contracts: 2,
       legs: [{
         legRole: LegRole.LONG, optionTicker: 'O:SPY260315C00500000',
-        expiration: '2026-03-15', strike: 500, right: OptionRight.C,
+        expiration: '2026-03-15', strike: 500, option_right: OptionRight.C,
         dte: 21, delta: 0.45, gamma: 0.03, vega: 0.12, iv: 0.25,
         greekSource: GreekSource.MASSIVE, bid: 4.50, ask: 4.70, mid: 4.60,
         volume: 2500, oi: 10000, spreadWidth: 0.20, spreadWidthPct: 0.04,

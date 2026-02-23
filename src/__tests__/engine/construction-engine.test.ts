@@ -470,7 +470,7 @@ describe('OptionsConstructionEngine', () => {
       const candidates: OptionCandidate[] = [
         {
           optionTicker: 'O:SPY_test', expiration: '2026-03-15', strike: 500,
-          right: OptionRight.C, dte: 21, delta: 0.40, gamma: 0.03, vega: 0.12,
+          option_right: OptionRight.C, dte: 21, delta: 0.40, gamma: 0.03, vega: 0.12,
           iv: 0.25, greekSource: GreekSource.MASSIVE,
           bid: 4.50, ask: 4.70, mid: 4.60, volume: 2500, oi: 10000,
           spreadWidth: 0.20, spreadWidthPct: 0.04, liquidityScore: 0,

@@ -61,7 +61,7 @@ export interface TradePlanLeg {
   optionTicker: string;
   expiration: string;
   strike: number;
-  right: OptionRight;
+  option_right: OptionRight;
   dte: number;
   delta: number;
   gamma: number;
@@ -122,7 +122,7 @@ export interface OptionCandidate {
   optionTicker: string;
   expiration: string;
   strike: number;
-  right: OptionRight;
+  option_right: OptionRight;
   dte: number;
   delta: number | null;
   gamma: number | null;

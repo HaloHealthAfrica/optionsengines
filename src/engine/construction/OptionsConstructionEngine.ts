@@ -207,7 +207,7 @@ export class OptionsConstructionEngine {
         optionTicker: contract.ticker,
         expiration: contract.expiration_date,
         strike: contract.strike_price,
-        right: contractRight,
+        option_right: contractRight,
         dte,
         delta: quote.delta,
         gamma: quote.gamma,
@@ -479,7 +479,7 @@ export class OptionsConstructionEngine {
     const eligible = candidates.filter(c => {
       if (c.optionTicker === shortLeg.optionTicker) return false;
       if (c.expiration !== shortLeg.expiration) return false;
-      if (c.right !== shortLeg.right) return false;
+      if (c.option_right !== shortLeg.option_right) return false;
       if (c.delta === null) return false;
 
       const absDelta = Math.abs(c.delta);
@@ -509,7 +509,7 @@ export class OptionsConstructionEngine {
       optionTicker: c.optionTicker,
       expiration: c.expiration,
       strike: c.strike,
-      right: c.right,
+      option_right: c.option_right,
       dte: c.dte,
       delta: c.delta ?? 0,
       gamma: c.gamma ?? 0,
