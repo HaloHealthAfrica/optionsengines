@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Lock, Mail, UserPlus } from 'lucide-react';
 
-export default function LoginForm() {
+export default function LoginForm({ redirectTo = '/' } = {}) {
   const router = useRouter();
   const [csrfToken, setCsrfToken] = useState('');
   const [status, setStatus] = useState('idle');
@@ -54,7 +54,7 @@ export default function LoginForm() {
         throw new Error(`${message}${hint}`);
       }
 
-      router.push('/');
+      router.push(redirectTo);
     } catch (err) {
       setError(err.message);
       setStatus('error');

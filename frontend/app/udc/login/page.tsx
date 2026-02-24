@@ -41,7 +41,7 @@ export default function UDCLoginPage() {
         <div className="glass w-full max-w-md rounded-3xl p-8 text-slate-900 dark:text-slate-100">
           <h2 className="text-xl font-semibold">Sign in to UDC</h2>
           <p className="muted mb-6 text-sm">Use your secure credentials to continue.</p>
-          <LoginForm />
+          <LoginForm redirectTo="/udc/dashboard" />
         </div>
       </div>
     </div>
