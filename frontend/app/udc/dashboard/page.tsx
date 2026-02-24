@@ -5,13 +5,18 @@ import { useRouter } from 'next/navigation';
 import {
   Activity,
   AlertTriangle,
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clock,
+  Copy,
+  DollarSign,
   FileJson,
   Info,
+  Layers,
   Moon,
   RefreshCw,
   Search,
@@ -19,9 +24,29 @@ import {
   ShieldCheck,
   ShieldOff,
   Sun,
+  Target,
+  TrendingDown,
+  TrendingUp,
   XCircle,
   Zap,
 } from 'lucide-react';
+
+interface OptionLeg {
+  symbol: string;
+  expiry: string;
+  strike: number;
+  type: 'CALL' | 'PUT';
+  side: 'BUY' | 'SELL';
+  quantity: number;
+}
+
+interface ParsedOrderPlan {
+  planId?: string;
+  symbol?: string;
+  structure?: string;
+  legs: OptionLeg[];
+  risk?: { maxLoss?: number };
+}
 
 interface Snapshot {
   id: string;
@@ -31,6 +56,53 @@ interface Snapshot {
   reason: string | null;
   order_plan_json: Record<string, unknown> | null;
   created_at: string;
+}
+
+function parseOrderPlan(json: Record<string, unknown> | null): ParsedOrderPlan | null {
+  if (!json) return null;
+  const legs = (Array.isArray(json.legs) ? json.legs : []) as OptionLeg[];
+  return {
+    planId: json.planId as string | undefined,
+    symbol: json.symbol as string | undefined,
+    structure: json.structure as string | undefined,
+    legs,
+    risk: json.risk as { maxLoss?: number } | undefined,
+  };
+}
+
+function shortId(id: string): string {
+  if (id.length <= 12) return id;
+  return `${id.slice(0, 6)}...${id.slice(-4)}`;
+}
+
+function formatStrike(strike: number): string {
+  return strike % 1 === 0 ? strike.toFixed(0) : strike.toFixed(2);
+}
+
+function formatCurrency(val: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(val);
+}
+
+function formatExpiry(expiry: string): string {
+  const d = new Date(expiry + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+}
+
+function daysUntilExpiry(expiry: string): number {
+  const d = new Date(expiry + 'T00:00:00');
+  const now = new Date();
+  return Math.ceil((d.getTime() - now.getTime()) / 86_400_000);
+}
+
+function structureLabel(structure: string): string {
+  return structure.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function inferDirection(legs: OptionLeg[]): 'BULL' | 'BEAR' | null {
+  if (legs.length === 0) return null;
+  const buyLeg = legs.find((l) => l.side === 'BUY');
+  if (!buyLeg) return null;
+  return buyLeg.type === 'CALL' ? 'BULL' : 'BEAR';
 }
 
 const MODES = ['LEGACY_ONLY', 'SHADOW_UDC', 'UDC_PRIMARY', 'UDC_ONLY'] as const;
@@ -118,6 +190,33 @@ function timeAgo(dateStr: string): string {
   if (mins < 60) return `${mins}m ago`;
   if (hours < 24) return `${hours}h ago`;
   return `${days}d ago`;
+}
+
+function CopyableField({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    await navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="group flex items-center justify-between rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
+      <span className="shrink-0 text-slate-500 dark:text-slate-400">{label}</span>
+      <div className="flex min-w-0 items-center gap-1.5 pl-2">
+        <span className="truncate font-mono text-slate-700 dark:text-slate-300" title={value}>
+          {value}
+        </span>
+        <button
+          onClick={handleCopy}
+          className="shrink-0 rounded p-0.5 text-slate-300 opacity-0 transition hover:text-slate-500 group-hover:opacity-100 dark:text-slate-600 dark:hover:text-slate-400"
+          title="Copy to clipboard"
+        >
+          {copied ? <CheckCircle2 size={12} className="text-emerald-500" /> : <Copy size={12} />}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function UDCDashboardPage() {
@@ -215,11 +314,14 @@ export default function UDCDashboardPage() {
   const filteredSnapshots = snapshots.filter((s) => {
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
+    const plan = parseOrderPlan(s.order_plan_json);
     return (
       s.signal_id.toLowerCase().includes(term) ||
       s.status.toLowerCase().includes(term) ||
       (s.reason && s.reason.toLowerCase().includes(term)) ||
-      (s.decision_id && s.decision_id.toLowerCase().includes(term))
+      (s.decision_id && s.decision_id.toLowerCase().includes(term)) ||
+      (plan?.symbol && plan.symbol.toLowerCase().includes(term)) ||
+      (plan?.structure && plan.structure.toLowerCase().includes(term))
     );
   });
 
@@ -440,15 +542,6 @@ export default function UDCDashboardPage() {
 
           {/* Table Content */}
           <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-            {/* Column Headers */}
-            <div className="hidden grid-cols-[1fr_120px_1.5fr_100px_32px] items-center gap-3 px-4 py-2.5 sm:grid">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Signal</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Status</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Reason</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Time</span>
-              <span />
-            </div>
-
             {/* Loading State */}
             {loading && snapshots.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16">
@@ -457,7 +550,6 @@ export default function UDCDashboardPage() {
                 <p className="mt-1 text-xs text-slate-400">Fetching the latest snapshots from the decision engine</p>
               </div>
             ) : filteredSnapshots.length === 0 ? (
-              /* Empty State */
               <div className="flex flex-col items-center justify-center py-16">
                 <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-800">
                   <FileJson size={24} className="text-slate-400" />
@@ -484,91 +576,331 @@ export default function UDCDashboardPage() {
                 )}
               </div>
             ) : (
-              /* Data Rows */
               filteredSnapshots.map((snap) => {
                 const statusCfg = STATUS_CONFIG[snap.status] ?? STATUS_CONFIG.NO_STRATEGY;
                 const isExpanded = expandedId === snap.id;
+                const plan = parseOrderPlan(snap.order_plan_json);
+                const direction = plan ? inferDirection(plan.legs) : null;
+                const firstLeg = plan?.legs[0];
+                const dte = firstLeg ? daysUntilExpiry(firstLeg.expiry) : null;
+
                 return (
                   <div key={snap.id}>
                     <button
                       type="button"
-                      className="grid w-full cursor-pointer grid-cols-[1fr_120px_1.5fr_100px_32px] items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                      className="w-full cursor-pointer px-4 py-3.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/40"
                       onClick={() => setExpandedId(isExpanded ? null : snap.id)}
                     >
-                      <div className="min-w-0">
-                        <span className="block truncate font-mono text-xs font-medium text-slate-700 dark:text-slate-200">
-                          {snap.signal_id}
-                        </span>
-                        {snap.decision_id && (
-                          <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-400 dark:text-slate-500">
-                            {snap.decision_id}
-                          </span>
-                        )}
-                      </div>
-                      <div>
-                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusCfg.bg} ${statusCfg.color}`}>
-                          {statusCfg.icon}
-                          {statusCfg.label}
-                        </span>
-                      </div>
-                      <span className="truncate text-xs text-slate-500 dark:text-slate-400">
-                        {snap.reason ?? <span className="text-slate-300 dark:text-slate-600">&mdash;</span>}
-                      </span>
-                      <span className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500">
-                        <Clock size={11} />
-                        {timeAgo(snap.created_at)}
-                      </span>
-                      <div className="flex justify-end">
-                        {isExpanded ? (
-                          <ChevronDown size={14} className="text-slate-400 transition dark:text-slate-500" />
-                        ) : (
-                          <ChevronRight size={14} className="text-slate-300 transition dark:text-slate-600" />
-                        )}
+                      <div className="flex items-start justify-between gap-3">
+                        {/* Left: Primary info */}
+                        <div className="flex min-w-0 flex-1 items-start gap-3">
+                          {/* Direction / Status indicator */}
+                          <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                            snap.status === 'PLAN_CREATED'
+                              ? direction === 'BULL'
+                                ? 'bg-emerald-50 dark:bg-emerald-500/10'
+                                : 'bg-rose-50 dark:bg-rose-500/10'
+                              : snap.status === 'BLOCKED'
+                                ? 'bg-rose-50 dark:bg-rose-500/10'
+                                : 'bg-slate-100 dark:bg-slate-800'
+                          }`}>
+                            {snap.status === 'PLAN_CREATED' ? (
+                              direction === 'BULL'
+                                ? <TrendingUp size={16} className="text-emerald-600 dark:text-emerald-400" />
+                                : <TrendingDown size={16} className="text-rose-600 dark:text-rose-400" />
+                            ) : snap.status === 'BLOCKED' ? (
+                              <XCircle size={16} className="text-rose-500 dark:text-rose-400" />
+                            ) : (
+                              <AlertTriangle size={16} className="text-slate-400" />
+                            )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            {/* Top line: Symbol + Structure + Status */}
+                            <div className="flex flex-wrap items-center gap-2">
+                              {plan?.symbol ? (
+                                <span className="text-sm font-bold text-slate-900 dark:text-white">
+                                  {plan.symbol}
+                                </span>
+                              ) : (
+                                <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                                  Signal
+                                </span>
+                              )}
+
+                              {plan?.structure && (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">
+                                  <Layers size={10} />
+                                  {structureLabel(plan.structure)}
+                                </span>
+                              )}
+
+                              {direction && (
+                                <span className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+                                  direction === 'BULL'
+                                    ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400'
+                                    : 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400'
+                                }`}>
+                                  {direction === 'BULL' ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
+                                  {direction === 'BULL' ? 'Bullish' : 'Bearish'}
+                                </span>
+                              )}
+
+                              <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusCfg.bg} ${statusCfg.color}`}>
+                                {statusCfg.icon}
+                                {statusCfg.label}
+                              </span>
+                            </div>
+
+                            {/* Second line: Trade summary or reason */}
+                            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+                              {plan && plan.legs.length > 0 ? (
+                                <>
+                                  {/* Legs summary */}
+                                  <span className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
+                                    <Target size={11} className="text-slate-400" />
+                                    {plan.legs.map((leg, i) => (
+                                      <span key={i} className="inline-flex items-center gap-0.5">
+                                        {i > 0 && <span className="mx-0.5 text-slate-300 dark:text-slate-600">/</span>}
+                                        <span className={`font-semibold ${leg.side === 'BUY' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                          {leg.side}
+                                        </span>
+                                        <span className="text-slate-500 dark:text-slate-400">
+                                          {formatStrike(leg.strike)} {leg.type}
+                                        </span>
+                                      </span>
+                                    ))}
+                                  </span>
+
+                                  {/* Expiry */}
+                                  {firstLeg && (
+                                    <span className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                                      <Clock size={11} />
+                                      {formatExpiry(firstLeg.expiry)}
+                                      {dte !== null && (
+                                        <span className={`rounded px-1 py-0.5 text-[10px] font-medium ${
+                                          dte <= 3
+                                            ? 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400'
+                                            : dte <= 7
+                                              ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400'
+                                              : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                                        }`}>
+                                          {dte}d
+                                        </span>
+                                      )}
+                                    </span>
+                                  )}
+
+                                  {/* Risk / Max Loss */}
+                                  {plan.risk?.maxLoss != null && (
+                                    <span className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                                      <DollarSign size={11} />
+                                      Max risk {formatCurrency(plan.risk.maxLoss)}
+                                    </span>
+                                  )}
+
+                                  {/* Quantity */}
+                                  {firstLeg && firstLeg.quantity > 0 && (
+                                    <span className="text-xs text-slate-400 dark:text-slate-500">
+                                      x{firstLeg.quantity}
+                                    </span>
+                                  )}
+                                </>
+                              ) : snap.reason ? (
+                                <span className="text-xs text-slate-500 dark:text-slate-400">{snap.reason}</span>
+                              ) : (
+                                <span className="text-xs text-slate-400 dark:text-slate-500">{statusCfg.description}</span>
+                              )}
+                            </div>
+
+                            {/* Third line: IDs + Time */}
+                            <div className="mt-1.5 flex items-center gap-3">
+                              <span className="font-mono text-[10px] text-slate-400 dark:text-slate-500" title={snap.signal_id}>
+                                sig:{shortId(snap.signal_id)}
+                              </span>
+                              {snap.decision_id && (
+                                <span className="font-mono text-[10px] text-slate-400 dark:text-slate-500" title={snap.decision_id}>
+                                  dec:{shortId(snap.decision_id)}
+                                </span>
+                              )}
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500" title={new Date(snap.created_at).toLocaleString()}>
+                                {timeAgo(snap.created_at)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right: Expand chevron */}
+                        <div className="mt-1 shrink-0">
+                          {isExpanded ? (
+                            <ChevronDown size={16} className="text-slate-400 dark:text-slate-500" />
+                          ) : (
+                            <ChevronRight size={16} className="text-slate-300 dark:text-slate-600" />
+                          )}
+                        </div>
                       </div>
                     </button>
 
-                    {/* Expanded Detail */}
+                    {/* Expanded Detail Panel */}
                     {isExpanded && (
-                      <div className="animate-fade-in border-t border-slate-100 bg-slate-50/50 px-4 py-4 dark:border-slate-800/60 dark:bg-slate-950/30">
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          {/* Metadata */}
-                          <div className="space-y-2">
-                            <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Details</h4>
-                            <div className="space-y-1.5 text-xs">
-                              <div className="flex justify-between rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
-                                <span className="text-slate-500 dark:text-slate-400">Snapshot ID</span>
-                                <span className="truncate pl-2 font-mono text-slate-700 dark:text-slate-300">{snap.id}</span>
+                      <div className="animate-fade-in border-t border-slate-100 bg-slate-50/50 px-4 py-5 dark:border-slate-800/60 dark:bg-slate-950/30">
+                        <div className="grid gap-5 lg:grid-cols-[1fr_1.5fr]">
+                          {/* Left column: Metadata */}
+                          <div className="space-y-4">
+                            <div>
+                              <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Identifiers</h4>
+                              <div className="space-y-1.5 text-xs">
+                                <CopyableField label="Snapshot ID" value={snap.id} />
+                                <CopyableField label="Signal ID" value={snap.signal_id} />
+                                {snap.decision_id && <CopyableField label="Decision ID" value={snap.decision_id} />}
                               </div>
-                              {snap.decision_id && (
-                                <div className="flex justify-between rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
-                                  <span className="text-slate-500 dark:text-slate-400">Decision ID</span>
-                                  <span className="truncate pl-2 font-mono text-slate-700 dark:text-slate-300">{snap.decision_id}</span>
+                            </div>
+
+                            <div>
+                              <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Decision Info</h4>
+                              <div className="space-y-1.5 text-xs">
+                                <div className="flex items-center justify-between rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
+                                  <span className="text-slate-500 dark:text-slate-400">Status</span>
+                                  <span className={`inline-flex items-center gap-1 font-medium ${statusCfg.color}`}>
+                                    {statusCfg.icon} {statusCfg.label}
+                                  </span>
                                 </div>
-                              )}
-                              <div className="flex justify-between rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
-                                <span className="text-slate-500 dark:text-slate-400">Created</span>
-                                <span className="text-slate-700 dark:text-slate-300">{new Date(snap.created_at).toLocaleString()}</span>
-                              </div>
-                              <div className="flex justify-between rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
-                                <span className="text-slate-500 dark:text-slate-400">Status</span>
-                                <span className={statusCfg.color}>{statusCfg.description}</span>
+                                <div className="rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
+                                  <span className="text-slate-500 dark:text-slate-400">Outcome</span>
+                                  <p className="mt-0.5 text-slate-700 dark:text-slate-300">
+                                    {snap.reason || statusCfg.description}
+                                  </p>
+                                </div>
+                                <div className="flex items-center justify-between rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
+                                  <span className="text-slate-500 dark:text-slate-400">Created</span>
+                                  <span className="text-slate-700 dark:text-slate-300">
+                                    {new Date(snap.created_at).toLocaleString()}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           </div>
 
-                          {/* Order Plan Preview */}
+                          {/* Right column: Order Plan */}
                           <div>
                             <div className="mb-2 flex items-center gap-1.5">
                               <FileJson size={12} className="text-slate-400" />
                               <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Order Plan</h4>
                             </div>
-                            {snap.order_plan_json ? (
-                              <pre className="max-h-48 overflow-auto rounded-xl border border-slate-200/70 bg-white p-3 text-[11px] leading-relaxed text-slate-600 dark:border-slate-700/50 dark:bg-slate-900/50 dark:text-slate-300">
-                                {JSON.stringify(snap.order_plan_json, null, 2)}
-                              </pre>
+                            {plan && plan.legs.length > 0 ? (
+                              <div className="space-y-3">
+                                {/* Plan header */}
+                                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/70 bg-white px-4 py-3 dark:border-slate-700/50 dark:bg-slate-900/50">
+                                  <span className="text-base font-bold text-slate-900 dark:text-white">{plan.symbol}</span>
+                                  {plan.structure && (
+                                    <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">
+                                      {structureLabel(plan.structure)}
+                                    </span>
+                                  )}
+                                  {direction && (
+                                    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold ${
+                                      direction === 'BULL'
+                                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'
+                                        : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400'
+                                    }`}>
+                                      {direction === 'BULL' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                                      {direction}
+                                    </span>
+                                  )}
+                                  {plan.risk?.maxLoss != null && (
+                                    <span className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+                                      <DollarSign size={12} />
+                                      Max Risk: <span className="font-bold text-rose-600 dark:text-rose-400">{formatCurrency(plan.risk.maxLoss)}</span>
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Legs table */}
+                                <div className="overflow-hidden rounded-xl border border-slate-200/70 dark:border-slate-700/50">
+                                  <table className="w-full text-xs">
+                                    <thead>
+                                      <tr className="border-b border-slate-200/70 bg-slate-100/80 dark:border-slate-700/50 dark:bg-slate-800/50">
+                                        <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Side</th>
+                                        <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Type</th>
+                                        <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Strike</th>
+                                        <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Expiry</th>
+                                        <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">DTE</th>
+                                        <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Qty</th>
+                                        <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Contract</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                                      {plan.legs.map((leg, i) => {
+                                        const legDte = daysUntilExpiry(leg.expiry);
+                                        return (
+                                          <tr key={i} className="bg-white dark:bg-slate-900/50">
+                                            <td className="px-3 py-2.5">
+                                              <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold ${
+                                                leg.side === 'BUY'
+                                                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                                                  : 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400'
+                                              }`}>
+                                                {leg.side === 'BUY' ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
+                                                {leg.side}
+                                              </span>
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                              <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${
+                                                leg.type === 'CALL'
+                                                  ? 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-400'
+                                                  : 'bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-400'
+                                              }`}>
+                                                {leg.type}
+                                              </span>
+                                            </td>
+                                            <td className="px-3 py-2.5 text-right font-mono font-semibold text-slate-800 dark:text-slate-200">
+                                              ${formatStrike(leg.strike)}
+                                            </td>
+                                            <td className="px-3 py-2.5 text-slate-600 dark:text-slate-300">
+                                              {formatExpiry(leg.expiry)}
+                                            </td>
+                                            <td className="px-3 py-2.5 text-right">
+                                              <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                                                legDte <= 3
+                                                  ? 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400'
+                                                  : legDte <= 7
+                                                    ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400'
+                                                    : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                                              }`}>
+                                                {legDte}d
+                                              </span>
+                                            </td>
+                                            <td className="px-3 py-2.5 text-right font-semibold text-slate-700 dark:text-slate-300">
+                                              {leg.quantity}
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                              <span className="font-mono text-[10px] text-slate-400 dark:text-slate-500" title={leg.symbol}>
+                                                {shortId(leg.symbol)}
+                                              </span>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+
+                                {plan.planId && (
+                                  <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500">
+                                    <span>Plan ID:</span>
+                                    <span className="font-mono">{plan.planId}</span>
+                                  </div>
+                                )}
+                              </div>
                             ) : (
-                              <div className="flex h-24 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-800/30">
-                                <p className="text-xs text-slate-400">No order plan generated</p>
+                              <div className="flex h-28 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-800/30">
+                                <div className="text-center">
+                                  <FileJson size={20} className="mx-auto mb-1.5 text-slate-300 dark:text-slate-600" />
+                                  <p className="text-xs font-medium text-slate-400">No order plan generated</p>
+                                  <p className="mt-0.5 text-[10px] text-slate-300 dark:text-slate-600">
+                                    {snap.status === 'BLOCKED' ? 'Blocked by risk governance' : 'No strategy matched this signal'}
+                                  </p>
+                                </div>
                               </div>
                             )}
                           </div>
