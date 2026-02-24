@@ -70,13 +70,15 @@ export class MarketWebhookPipelineWorker {
       Sentry.captureException(error, { tags: { worker: 'MarketWebhookPipelineWorker' } });
     });
 
-    this.subscriber.subscribe('pipeline:trigger', (error) => {
-      if (error) {
-        logger.error('Market webhook pipeline subscribe failed', error);
-        Sentry.captureException(error, { tags: { worker: 'MarketWebhookPipelineWorker' } });
-        return;
-      }
-      logger.info('Market webhook pipeline subscribed to triggers');
+    this.subscriber.on('ready', () => {
+      this.subscriber!.subscribe('pipeline:trigger', (error) => {
+        if (error) {
+          logger.error('Market webhook pipeline subscribe failed', error);
+          Sentry.captureException(error, { tags: { worker: 'MarketWebhookPipelineWorker' } });
+          return;
+        }
+        logger.info('Market webhook pipeline subscribed to triggers');
+      });
     });
 
     this.subscriber.on('message', (_channel, message) => {

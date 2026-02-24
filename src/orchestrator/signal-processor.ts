@@ -101,15 +101,26 @@ export class SignalProcessor {
         params
       );
 
-      const signals: Signal[] = result.rows.map(row => {
+      const signals: Signal[] = [];
+      for (const row of result.rows) {
         const signal = {
           ...row,
           experiment_id: row.experiment_id ?? undefined,
         };
-        
-        // Validate with schema
-        return SignalSchema.parse(signal);
-      });
+        const parsed = SignalSchema.safeParse(signal);
+        if (parsed.success) {
+          signals.push(parsed.data);
+        } else {
+          logger.warn('Skipping invalid signal during fetch', {
+            signal_id: row.signal_id,
+            errors: parsed.error.errors.map(e => `${e.path.join('.')}: ${e.message}`),
+          });
+          await client.query(
+            `UPDATE signals SET status = 'rejected', rejection_reason = $1 WHERE signal_id = $2`,
+            [`Schema validation failed: ${parsed.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ')}`, row.signal_id],
+          );
+        }
+      }
 
       const orderedSignals = [...signals].sort(
         (a, b) => a.timestamp.getTime() - b.timestamp.getTime()

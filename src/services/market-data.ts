@@ -10,6 +10,7 @@ import { logger } from '../utils/logger.js';
 import { config } from '../config/index.js';
 import { retry } from '../utils/retry.js';
 import { CircuitBreaker } from './circuit-breaker.service.js';
+import { classifyProviderError } from './provider-error-classifier.js';
 import { Candle, GexData, GexStrikeLevel, Indicators, OptionsFlowEntry, OptionsFlowSummary } from '../types/index.js';
 import type { Greeks } from '../lib/shared/types.js';
 import { adaptOptionChain, approximateGreeks, estimateIV } from './option-chain-adapter.service.js';
@@ -34,6 +35,7 @@ export class MarketDataService {
   private readonly maxFailures: number = 5;
   private readonly resetTimeout: number = 60000;
   private readonly maxRetries: number = 2;
+  private readonly entitlementCooldownMs: number = 30 * 60 * 1000; // 30 min
   private providerPriority: Provider[] = [];
   private readonly streamEnabled: boolean = config.polygonWsEnabled;
 
@@ -127,11 +129,30 @@ export class MarketDataService {
   }
 
   /**
-   * Record circuit breaker failure
+   * Record circuit breaker failure, with immediate force-open for entitlement errors.
    */
-  private recordFailure(provider: Provider): void {
+  private recordFailure(provider: Provider, error?: unknown): void {
     const breaker = this.circuitBreakers.get(provider);
     if (!breaker) return;
+
+    if (error) {
+      const classified = classifyProviderError(error);
+      if (classified.disableProvider) {
+        breaker.forceOpen(this.entitlementCooldownMs);
+        logger.error(
+          `Circuit breaker force-opened for ${provider} (${classified.type}) — cooldown ${this.entitlementCooldownMs / 60000}min`,
+          { provider, errorType: classified.type }
+        );
+        Sentry.addBreadcrumb({
+          category: 'market-data',
+          message: 'Circuit breaker force-opened (entitlement)',
+          level: 'error',
+          data: { provider, errorType: classified.type, cooldownMin: this.entitlementCooldownMs / 60000 },
+        });
+        return;
+      }
+    }
+
     breaker.recordFailure();
     const status = breaker.getStatus();
     if (status.state === 'open') {
@@ -210,7 +231,7 @@ export class MarketDataService {
         Sentry.captureException(error, {
           tags: { stage: 'market-data', provider: providerName, symbol },
         });
-        this.recordFailure(providerName);
+        this.recordFailure(providerName, error);
       }
     }
 
@@ -297,7 +318,7 @@ export class MarketDataService {
         Sentry.captureException(error, {
           tags: { stage: 'market-data', provider: providerName, symbol },
         });
-        this.recordFailure(providerName);
+        this.recordFailure(providerName, error);
       }
     }
 
@@ -439,7 +460,7 @@ export class MarketDataService {
         Sentry.captureException(error, {
           tags: { stage: 'market-data', provider: providerName, symbol },
         });
-        this.recordFailure(providerName);
+        this.recordFailure(providerName, error);
       }
     }
 
@@ -549,7 +570,7 @@ export class MarketDataService {
       cache.set(cacheKey, isOpen, 60);
       return isOpen;
     } catch (error) {
-      this.recordFailure('twelvedata');
+      this.recordFailure('twelvedata', error);
       logger.warn('TwelveData market hours check failed, using time-based fallback', { error });
       Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'twelvedata' } });
     }
@@ -648,7 +669,7 @@ export class MarketDataService {
           return rows;
         }
       } catch (error) {
-        this.recordFailure('unusualwhales');
+        this.recordFailure('unusualwhales', error);
         logger.warn('Unusual Whales options chain failed, trying MarketData.app fallback', { symbol, error });
       }
     }
@@ -674,7 +695,7 @@ export class MarketDataService {
         logger.info('Options chain: MarketData.app (fallback)', { symbol, count: rows.length });
         return rows;
       } catch (error) {
-        this.recordFailure('marketdata');
+        this.recordFailure('marketdata', error);
         logger.warn('MarketData.app options chain failed', { symbol, error });
       }
     }
@@ -790,7 +811,7 @@ export class MarketDataService {
       cache.set(cacheKey, gexData, 300); // GEX TTL 300s minimum
       return gexData;
     } catch (error) {
-      this.recordFailure('marketdata');
+      this.recordFailure('marketdata', error);
       logger.error('Failed to calculate GEX', error, { symbol });
       Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'marketdata', symbol } });
       throw error;
@@ -821,7 +842,7 @@ export class MarketDataService {
         }
         flowDebug = 'unusualwhales_returned_empty';
       } catch (uwError) {
-        this.recordFailure('unusualwhales');
+        this.recordFailure('unusualwhales', uwError);
         flowDebug = `unusualwhales_failed: ${(uwError as Error).message}`;
         logger.warn('Unusual Whales options flow failed, trying MarketData.app fallback', { symbol, error: uwError });
       }
@@ -872,7 +893,7 @@ export class MarketDataService {
         logger.info('Options flow: MarketData.app (fallback)', { symbol, count: entries.length });
         return summary;
       } catch (error) {
-        this.recordFailure('marketdata');
+        this.recordFailure('marketdata', error);
         logger.warn('MarketData.app options flow failed', { error, symbol });
         Sentry.captureException(error, { tags: { stage: 'market-data', provider: 'marketdata', symbol } });
       }

@@ -1,47 +1,45 @@
 import type { StrategyCandidate, UDCSignal } from '../types.js';
 
-const INTRADAY_INVALIDATION_PCT = 0.012;
-const SWING_INVALIDATION_PCT = 0.025;
+const INTRADAY_INVALIDATION_PCT = 0.010;
+const SWING_INVALIDATION_PCT = 0.020;
 const INTRADAY_TIMEFRAMES = new Set(['1', '3', '5', '15']);
 
 /**
- * Failed-2 strategy: identifies failed second attempts at breakout/breakdown.
- * Pure evaluation — no portfolio or execution logic.
- *
- * Invalidation is resolved from (in priority order):
- *   1. raw_payload.invalidation  (explicit stop level)
- *   2. raw_payload.stop_loss     (alias)
- *   3. Derived from raw_payload.price × percentage based on timeframe
+ * Momentum strategy: trend-following entries on strong directional moves.
+ * Matches patterns: momentum, trend_cont, trend_start, breakout, continuation.
  */
-export function evaluateFailed2(signal: UDCSignal): StrategyCandidate | null {
+export function evaluateMomentum(signal: UDCSignal): StrategyCandidate | null {
   const pattern = (signal.pattern ?? '').toLowerCase();
   const direction = signal.direction?.toLowerCase();
 
-  const isFailed2Pattern =
-    pattern.includes('failed') ||
-    pattern.includes('f2') ||
-    pattern.includes('failed_2');
+  const isMomentumPattern =
+    pattern.includes('momentum') ||
+    pattern.includes('trend_cont') ||
+    pattern.includes('trend_start') ||
+    pattern.includes('breakout') ||
+    pattern.includes('continuation') ||
+    pattern.includes('impulse');
 
-  if (!isFailed2Pattern) {
+  if (!isMomentumPattern) {
     return null;
   }
 
   const isBull = direction === 'long' || direction === 'bull' || direction === 'bullish';
   const tradeDirection = isBull ? 'BULL' as const : 'BEAR' as const;
-  const confidence = signal.confidence ?? 0.6;
+  const confidence = signal.confidence ?? 0.55;
   const isIntraday = INTRADAY_TIMEFRAMES.has(signal.timeframe);
 
   const invalidation = resolveInvalidation(signal, isBull, isIntraday);
 
   return {
     intent: {
-      strategy: 'FAILED_2',
+      strategy: 'MOMENTUM',
       symbol: signal.symbol,
       direction: tradeDirection,
       structure: tradeDirection === 'BULL' ? 'LONG_CALL' : 'LONG_PUT',
       invalidation,
-      dteMin: isIntraday ? 2 : 5,
-      dteMax: isIntraday ? 10 : 21,
+      dteMin: isIntraday ? 1 : 7,
+      dteMax: isIntraday ? 7 : 30,
       confidence,
     },
     confidence,

@@ -100,6 +100,16 @@ export interface ExecutionPolicy {
 }
 
 /**
+ * EngineResult wraps an engine invocation outcome so the orchestrator knows
+ * WHY a recommendation was null instead of falling back to the generic
+ * 'risk_rejected' status.
+ */
+export interface EngineResult {
+  recommendation: TradeRecommendation | null;
+  rejectionReason?: string;
+}
+
+/**
  * TradeRecommendation - Engine's trade recommendation
  */
 export interface TradeRecommendation {

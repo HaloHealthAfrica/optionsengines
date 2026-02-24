@@ -7,6 +7,7 @@ import { ExperimentManager } from './experiment-manager.js';
 import { PolicyEngine } from './policy-engine.js';
 import { SignalProcessor } from './signal-processor.js';
 import {
+  EngineResult,
   ExperimentResult,
   MarketContext,
   Signal,
@@ -247,6 +248,16 @@ export class OrchestratorService {
             message: 'Enrichment complete',
             level: 'info',
           });
+        // Fire UDC path early — runs in parallel with the rest of the legacy flow.
+        // UDC builds its own market snapshot, so it doesn't depend on legacy enrichment.
+        const udcPromise = this.runUDCPath(signal).catch((udcErr) => {
+          logger.warn('UDC parallel run failed (non-blocking)', {
+            signal_id: signal.signal_id,
+            error: udcErr?.message ?? udcErr,
+          });
+          return null as Awaited<ReturnType<typeof this.runUDCPath>> | null;
+        });
+
         if (enrichment.queueUntil) {
           Sentry.addBreadcrumb({
             category: 'enrichment',
@@ -254,6 +265,8 @@ export class OrchestratorService {
             level: 'info',
             data: { queueUntil: enrichment.queueUntil, reason: enrichment.queueReason },
           });
+          // Wait for UDC to finish before returning — it may have created a snapshot
+          await udcPromise;
           await this.signalProcessor.queueSignal(
             signal.signal_id,
             enrichment.queueUntil,
@@ -269,6 +282,31 @@ export class OrchestratorService {
           };
         }
         if (enrichment.rejectionReason) {
+          // Legacy enrichment rejected this signal. Check if UDC can still handle it.
+          const udcResult = await udcPromise;
+          const mode = getTradingMode();
+          if (
+            (mode === 'UDC_PRIMARY' || mode === 'UDC_ONLY') &&
+            udcResult?.status === 'PLAN_CREATED' &&
+            udcResult.plan
+          ) {
+            logger.info('Legacy enrichment rejected but UDC produced a plan — using UDC path', {
+              signal_id: signal.signal_id,
+              enrichmentRejection: enrichment.rejectionReason,
+              udcPlanId: udcResult.plan.planId,
+            });
+            await this.createOrdersFromUDCPlan(signal, udcResult.plan);
+            await this.signalProcessor.updateStatus(signal.signal_id, 'approved');
+            await this.signalProcessor.markProcessed(signal.signal_id, 'UDC');
+            return {
+              experiment: {} as any,
+              policy: {} as any,
+              market_context: {} as any,
+              success: true,
+              duration_ms: Date.now() - startedAt,
+            };
+          }
+
           const isRetryable = !OrchestratorService.NON_TRANSIENT_FAILURES.has(enrichment.rejectionReason);
           if (isRetryable) {
             return this.handleProcessingFailure(
@@ -377,7 +415,14 @@ export class OrchestratorService {
           level: 'info',
           data: { execution_mode: policy.execution_mode, variant: experiment.variant },
         });
-        let { engineA, engineB } = await this.distributeSignal(signal, contextWithEnrichment, experiment);
+        const { engineA: engineAResult, engineB: engineBResult } = await this.distributeSignal(signal, contextWithEnrichment, experiment);
+
+        let engineA = engineAResult.recommendation;
+        let engineB = engineBResult.recommendation;
+        const engineRejectionReason =
+          (experiment.variant === 'A' ? engineAResult.rejectionReason : engineBResult.rejectionReason)
+          ?? engineAResult.rejectionReason
+          ?? engineBResult.rejectionReason;
 
         const activeRec = experiment.variant === 'A' ? engineA : engineB;
         if (activeRec?.entryWait) {
@@ -492,11 +537,17 @@ export class OrchestratorService {
           policy,
           engine_a_recommendation,
           engine_b_recommendation,
-          enrichment
+          enrichment,
+          engineRejectionReason
         );
-        // Test signals bypass decisionOnly to allow full pipeline testing
         const isTest = !!(signal.raw_payload as Record<string,any>)?.is_test || config.e2eTestMode;
-        if (!enrichment.decisionOnly || isTest) {
+
+        // Determine if legacy engines produced a tradeable recommendation
+        const executed = policy.executed_engine;
+        const activeRecommendation = executed === 'A' ? engine_a_recommendation : executed === 'B' ? engine_b_recommendation : null;
+        const legacyHasTrade = Boolean(activeRecommendation && !activeRecommendation.is_shadow);
+
+        if (legacyHasTrade && (!enrichment.decisionOnly || isTest)) {
           if (enrichment.decisionOnly && isTest) {
             logger.info('Test signal bypassing decisionOnly gate for order creation', {
               signal_id: signal.signal_id,
@@ -509,6 +560,30 @@ export class OrchestratorService {
             engine_b_recommendation,
             enrichment
           );
+        } else if (!legacyHasTrade && !enrichment.decisionOnly) {
+          // Legacy engines produced no recommendation — check UDC result
+          const mode = getTradingMode();
+          const udcResult = await udcPromise;
+          if (
+            (mode === 'UDC_PRIMARY' || mode === 'UDC_ONLY') &&
+            udcResult?.status === 'PLAN_CREATED' &&
+            udcResult.plan
+          ) {
+            logger.info('Legacy engines returned no trade — UDC plan created, routing to execution', {
+              signal_id: signal.signal_id,
+              engineRejectionReason,
+              planId: udcResult.plan.planId,
+            });
+            await this.createOrdersFromUDCPlan(signal, udcResult.plan);
+            await this.signalProcessor.updateStatus(signal.signal_id, 'approved');
+          } else {
+            Sentry.addBreadcrumb({
+              category: 'orders',
+              message: 'No orders created (no legacy recommendation, no UDC plan)',
+              level: 'info',
+              data: { signal_id: signal.signal_id, engineRejectionReason },
+            });
+          }
         } else {
           Sentry.addBreadcrumb({
             category: 'orders',
@@ -527,13 +602,8 @@ export class OrchestratorService {
           dealerDecision
         );
 
-        // UDC parallel shadow path — never modifies legacy flow
-        await this.runUDCParallel(signal, market_context).catch((udcErr) => {
-          logger.warn('UDC parallel run failed (non-blocking)', {
-            signal_id: signal.signal_id,
-            error: udcErr?.message ?? udcErr,
-          });
-        });
+        // Await UDC if it hasn't been awaited yet (e.g., legacy path succeeded)
+        await udcPromise;
 
         await this.signalProcessor.markProcessed(signal.signal_id, experiment.experiment_id);
 
@@ -576,18 +646,22 @@ export class OrchestratorService {
     return this.policyEngine.getExecutionPolicy(experiment_id, 'v1.0', variant);
   }
 
-  async distributeSignal(signal: Signal, context: MarketContext, experiment: { variant: 'A' | 'B' }) {
+  async distributeSignal(
+    signal: Signal,
+    context: MarketContext,
+    experiment: { variant: 'A' | 'B' },
+  ): Promise<{ engineA: EngineResult; engineB: EngineResult }> {
     if (config.enableShadowExecution) {
       return this.engineCoordinator.invokeBoth(signal, context);
     }
 
     if (experiment.variant === 'A') {
       const engineA = await this.engineCoordinator.invokeEngineA(signal, context);
-      return { engineA, engineB: null };
+      return { engineA, engineB: { recommendation: null } };
     }
 
     const engineB = await this.engineCoordinator.invokeEngineB(signal, context);
-    return { engineA: null, engineB };
+    return { engineA: { recommendation: null }, engineB };
   }
 
   private applyGammaOverride(
@@ -685,7 +759,8 @@ export class OrchestratorService {
     policy: { executed_engine: 'A' | 'B' | null },
     engineA?: TradeRecommendation | null,
     engineB?: TradeRecommendation | null,
-    enrichment?: { enrichedData: Record<string, any>; riskResult: Record<string, any>; rejectionReason: string | null; decisionOnly?: boolean }
+    enrichment?: { enrichedData: Record<string, any>; riskResult: Record<string, any>; rejectionReason: string | null; decisionOnly?: boolean },
+    engineRejectionReason?: string | null,
   ): Promise<void> {
     const risk = enrichment?.riskResult || {};
     const isTest = Boolean(risk.testBypass);
@@ -710,7 +785,12 @@ export class OrchestratorService {
         !decisionOnly
     );
     const status = shouldTrade || decisionOnly ? 'approved' : 'rejected';
-    const rejectionReason = hasRejection && !decisionOnly ? enrichment?.rejectionReason || 'risk_rejected' : null;
+    // Use the specific engine rejection reason when available instead of the generic fallback
+    const rejectionReason = hasRejection && !decisionOnly
+      ? enrichment?.rejectionReason || engineRejectionReason || 'risk_rejected'
+      : !shouldTrade && !decisionOnly
+        ? engineRejectionReason || 'no_recommendation'
+        : null;
 
     if (executed === 'B' && !shouldTrade && !decisionOnly) {
       const reason =
@@ -940,17 +1020,19 @@ export class OrchestratorService {
 
   /**
    * Runs UDC in parallel with the legacy engine flow.
-   * In SHADOW_UDC mode: persists DecisionSnapshot only, no execution.
-   * In UDC_PRIMARY mode: persists + executes via paper order path.
-   * In LEGACY_ONLY / UDC_ONLY: skipped entirely from this path.
+   * Returns the UDCResult so the caller can use it for order creation
+   * when legacy engines produce no recommendation.
+   *
+   * In LEGACY_ONLY: skipped entirely.
+   * In SHADOW_UDC: persists DecisionSnapshot only.
+   * In UDC_PRIMARY / UDC_ONLY: persists + result used for order creation.
    */
-  private async runUDCParallel(
+  private async runUDCPath(
     signal: Signal,
-    _marketContext: MarketContext,
-  ): Promise<void> {
+  ): Promise<import('../lib/udc/types.js').UDCResult | null> {
     const mode = getTradingMode();
-    if (mode !== 'SHADOW_UDC' && mode !== 'UDC_PRIMARY') {
-      return;
+    if (mode === 'LEGACY_ONLY') {
+      return null;
     }
 
     const udcSignal: UDCSignal = {
@@ -987,7 +1069,7 @@ export class OrchestratorService {
         level: 'warning',
         data: { signal_id: signal.signal_id, reason },
       });
-      return;
+      return null;
     }
 
     const portfolio: PortfolioState = {
@@ -1026,7 +1108,7 @@ export class OrchestratorService {
           signal_id: signal.signal_id,
           decisionId: udcResult.decisionId,
         });
-        return;
+        return udcResult;
       }
     }
 
@@ -1049,16 +1131,9 @@ export class OrchestratorService {
           signal_id: signal.signal_id,
           decisionId: udcResult.decisionId,
         });
-        return;
+        return udcResult;
       }
       throw insertErr;
-    }
-
-    if (mode === 'UDC_PRIMARY' && udcResult.status === 'PLAN_CREATED' && udcResult.plan) {
-      logger.info('UDC_PRIMARY: plan created, routing to paper execution', {
-        signal_id: signal.signal_id,
-        planId: udcResult.plan.planId,
-      });
     }
 
     Sentry.addBreadcrumb({
@@ -1072,6 +1147,61 @@ export class OrchestratorService {
         planId: udcResult.plan?.planId,
         decisionId: udcResult.decisionId,
       },
+    });
+
+    return udcResult;
+  }
+
+  /**
+   * Creates paper orders from a UDC OrderPlan.
+   * Each leg in the plan maps to one order in the orders table.
+   */
+  private async createOrdersFromUDCPlan(
+    signal: Signal,
+    plan: import('../lib/udc/types.js').OrderPlan,
+  ): Promise<void> {
+    if (config.appMode !== 'PAPER') {
+      return;
+    }
+
+    for (const leg of plan.legs) {
+      const optionType = leg.type === 'CALL' ? 'call' : 'put';
+      const optionSymbol = leg.symbol;
+      const isEntry = leg.side === 'BUY';
+
+      const existing = await db.query(
+        `SELECT order_id FROM orders WHERE signal_id = $1 AND option_symbol = $2 AND order_type = $3 LIMIT 1`,
+        [signal.signal_id, optionSymbol, 'paper'],
+      );
+      if (existing.rows.length > 0) {
+        continue;
+      }
+
+      await db.query(
+        `INSERT INTO orders (
+          signal_id, symbol, option_symbol, strike, expiration,
+          type, quantity, engine, experiment_id, order_type, status
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [
+          isEntry ? signal.signal_id : null,
+          signal.symbol,
+          optionSymbol,
+          leg.strike,
+          leg.expiry,
+          optionType,
+          leg.quantity,
+          'UDC',
+          null,
+          'paper',
+          'pending_execution',
+        ],
+      );
+    }
+
+    logger.info('UDC orders created', {
+      signal_id: signal.signal_id,
+      planId: plan.planId,
+      legCount: plan.legs.length,
     });
   }
 

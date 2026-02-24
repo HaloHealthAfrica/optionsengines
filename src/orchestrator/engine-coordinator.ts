@@ -2,13 +2,13 @@
  * Engine Coordinator - invokes Engine A and Engine B with identical inputs
  */
 
-import { MarketContext, Signal, TradeRecommendation } from './types.js';
+import { MarketContext, Signal, EngineResult } from './types.js';
 import { logger } from '../utils/logger.js';
 
 export type EngineInvoker = (
   signal: Signal,
   context: MarketContext
-) => Promise<TradeRecommendation | null>;
+) => Promise<EngineResult>;
 
 export class EngineCoordinator {
   private invokeA: EngineInvoker;
@@ -19,11 +19,11 @@ export class EngineCoordinator {
     this.invokeB = engineBInvoker;
   }
 
-  async invokeEngineA(signal: Signal, context: MarketContext): Promise<TradeRecommendation | null> {
+  async invokeEngineA(signal: Signal, context: MarketContext): Promise<EngineResult> {
     return this.invokeA(signal, context);
   }
 
-  async invokeEngineB(signal: Signal, context: MarketContext): Promise<TradeRecommendation | null> {
+  async invokeEngineB(signal: Signal, context: MarketContext): Promise<EngineResult> {
     return this.invokeB(signal, context);
   }
 
@@ -33,7 +33,7 @@ export class EngineCoordinator {
   async invokeBoth(
     signal: Signal,
     context: MarketContext
-  ): Promise<{ engineA: TradeRecommendation | null; engineB: TradeRecommendation | null }> {
+  ): Promise<{ engineA: EngineResult; engineB: EngineResult }> {
     const [engineA, engineB] = await Promise.all([
       this.invokeEngineA(signal, context),
       this.invokeEngineB(signal, context),

@@ -53,7 +53,8 @@
     "simulate:dte": "node scripts/simulate-dte-buckets.js",
     "compare:engine-ab": "node scripts/compare-engine-a-b.js",
     "verify:canary": "node scripts/run-canary-verification.js",
-    "recompute:pnl": "tsx scripts/recompute-pnl.ts"
+    "recompute:pnl": "tsx scripts/recompute-pnl.ts",
+    "test:udc:e2e": "tsx scripts/test-udc-e2e-paper.ts"
   },
   "keywords": [
     "options",

@@ -1,50 +1,52 @@
 import type { StrategyCandidate, UDCSignal } from '../types.js';
 
-const INTRADAY_INVALIDATION_PCT = 0.012;
-const SWING_INVALIDATION_PCT = 0.025;
+const INTRADAY_INVALIDATION_PCT = 0.015;
+const SWING_INVALIDATION_PCT = 0.030;
 const INTRADAY_TIMEFRAMES = new Set(['1', '3', '5', '15']);
 
 /**
- * Failed-2 strategy: identifies failed second attempts at breakout/breakdown.
- * Pure evaluation — no portfolio or execution logic.
+ * Reversal / mean-reversion strategy: counter-trend entries at extremes.
+ * Matches patterns: reversal, scalp_rev, mean_rev, exhaustion, divergence, climax.
  *
- * Invalidation is resolved from (in priority order):
- *   1. raw_payload.invalidation  (explicit stop level)
- *   2. raw_payload.stop_loss     (alias)
- *   3. Derived from raw_payload.price × percentage based on timeframe
+ * Reversals get wider invalidation than momentum (higher adverse move tolerance)
+ * and shorter DTE windows (faster time-decay capture).
  */
-export function evaluateFailed2(signal: UDCSignal): StrategyCandidate | null {
+export function evaluateReversal(signal: UDCSignal): StrategyCandidate | null {
   const pattern = (signal.pattern ?? '').toLowerCase();
   const direction = signal.direction?.toLowerCase();
 
-  const isFailed2Pattern =
-    pattern.includes('failed') ||
-    pattern.includes('f2') ||
-    pattern.includes('failed_2');
+  const isReversalPattern =
+    pattern.includes('reversal') ||
+    pattern.includes('scalp_rev') ||
+    pattern.includes('scalp') ||
+    pattern.includes('mean_rev') ||
+    pattern.includes('exhaustion') ||
+    pattern.includes('divergence') ||
+    pattern.includes('climax');
 
-  if (!isFailed2Pattern) {
+  if (!isReversalPattern) {
     return null;
   }
 
   const isBull = direction === 'long' || direction === 'bull' || direction === 'bullish';
   const tradeDirection = isBull ? 'BULL' as const : 'BEAR' as const;
-  const confidence = signal.confidence ?? 0.6;
+  const baseConfidence = signal.confidence ?? 0.50;
   const isIntraday = INTRADAY_TIMEFRAMES.has(signal.timeframe);
 
   const invalidation = resolveInvalidation(signal, isBull, isIntraday);
 
   return {
     intent: {
-      strategy: 'FAILED_2',
+      strategy: 'REVERSAL',
       symbol: signal.symbol,
       direction: tradeDirection,
       structure: tradeDirection === 'BULL' ? 'LONG_CALL' : 'LONG_PUT',
       invalidation,
-      dteMin: isIntraday ? 2 : 5,
-      dteMax: isIntraday ? 10 : 21,
-      confidence,
+      dteMin: isIntraday ? 0 : 3,
+      dteMax: isIntraday ? 5 : 14,
+      confidence: baseConfidence,
     },
-    confidence,
+    confidence: baseConfidence,
   };
 }
 

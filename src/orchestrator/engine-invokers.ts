@@ -5,7 +5,7 @@
 import { config } from '../config/index.js';
 
 import { evaluateMarketSession } from '../utils/market-session.js';
-import { TradeRecommendation, Signal, MarketContext } from './types.js';
+import { TradeRecommendation, Signal, MarketContext, EngineResult } from './types.js';
 import { logger } from '../utils/logger.js';
 import { selectStrike } from '../services/strike-selection.service.js';
 import { advancedStrikeSelect } from '../services/advanced-strike-selection.service.js';
@@ -69,51 +69,50 @@ async function buildRecommendation(
   engine: 'A' | 'B',
   signal: Signal,
   context?: MarketContext
-): Promise<TradeRecommendation | null> {
+): Promise<EngineResult> {
   try {
-    // Check if this is a test signal — bypass bias/guard requirements
     const isTest = !!(signal.raw_payload as Record<string, unknown>)?.is_test || config.e2eTestMode;
 
     let mtfBias: Awaited<ReturnType<typeof getMTFBiasContext>> = null;
     if (config.requireMTFBiasForEntry && !isTest) {
       mtfBias = await getMTFBiasContext(signal.symbol);
       if (!mtfBias) {
-        logger.info('Engine A/B HOLD: no MTF bias state', { symbol: signal.symbol });
-        Sentry.addBreadcrumb({
-          category: 'engine',
-          message: 'MTF bias required but missing - HOLD',
-          level: 'info',
-          data: { symbol: signal.symbol },
+        logger.warn('Engine A/B HOLD: no MTF bias state', { engine, symbol: signal.symbol, signal_id: signal.signal_id });
+        Sentry.captureMessage(`Engine ${engine} HOLD: MTF bias missing for ${signal.symbol}`, {
+          level: 'warning',
+          tags: { engine, alert: 'mtf_bias_missing' },
+          extra: { signal_id: signal.signal_id, symbol: signal.symbol },
         });
-        return null;
+        return { recommendation: null, rejectionReason: 'mtf_bias_missing' };
       }
       if (mtfBias.tradeSuppressed) {
+        const reason = 'trade_suppressed_by_bias';
         if (config.biasControlDebugMode) {
-          logger.info('Engine A/B HOLD: trade suppressed (debug)', {
-            symbol: signal.symbol,
+          logger.warn('Engine A/B HOLD: trade suppressed (debug)', {
+            engine, symbol: signal.symbol,
             suppressionNotes: mtfBias.unifiedState?.effective?.notes,
             effectiveConfidence: mtfBias.unifiedState?.effective?.effectiveConfidence,
             riskMultiplier: mtfBias.unifiedState?.effective?.riskMultiplier,
           });
         } else {
-          logger.info('Engine A/B HOLD: trade suppressed by bias gating', { symbol: signal.symbol });
+          logger.warn('Engine A/B HOLD: trade suppressed by bias gating', { engine, symbol: signal.symbol });
         }
         Sentry.addBreadcrumb({
           category: 'engine',
           message: 'Trade suppressed by effective gating',
-          level: 'info',
+          level: 'warning',
           data: { symbol: signal.symbol },
         });
-        return null;
+        return { recommendation: null, rejectionReason: reason };
       }
       if (mtfBias.unifiedState?.isStale) {
         const stalenessCfg = await getStalenessConfig();
         if (stalenessCfg.behavior === 'block') {
-          logger.info('Engine A/B HOLD: bias state stale, blocking new trades', {
-            symbol: signal.symbol,
+          logger.warn('Engine A/B HOLD: bias state stale, blocking new trades', {
+            engine, symbol: signal.symbol,
             stalenessMinutes: mtfBias.unifiedState.stalenessMinutes,
           });
-          return null;
+          return { recommendation: null, rejectionReason: 'bias_state_stale' };
         }
       }
       if (mtfBias.unifiedState && config.enablePortfolioGuard) {
@@ -121,8 +120,8 @@ async function buildRecommendation(
         try {
           openPositions = await loadOpenPositions();
         } catch (err) {
-          logger.warn('Engine A/B: DB unavailable for portfolio guard, blocking', { symbol: signal.symbol, error: err });
-          return null;
+          logger.warn('Engine A/B: DB unavailable for portfolio guard, blocking', { engine, symbol: signal.symbol, error: err });
+          return { recommendation: null, rejectionReason: 'portfolio_guard_db_unavailable' };
         }
         const hint = mtfBias.unifiedState.riskContext?.entryModeHint ?? 'NO_TRADE';
         const strategyType = ['BREAKOUT', 'PULLBACK', 'MEAN_REVERT'].includes(hint)
@@ -138,8 +137,8 @@ async function buildRecommendation(
           marketState: mtfBias.unifiedState,
         });
         if (exposureResult.result === 'BLOCK') {
-          logger.info('Engine A/B HOLD: portfolio guard block', {
-            symbol: signal.symbol,
+          logger.warn('Engine A/B HOLD: portfolio guard block', {
+            engine, symbol: signal.symbol,
             reasons: exposureResult.reasons,
             decisionAudit: {
               exposureDecision: 'BLOCK',
@@ -150,19 +149,18 @@ async function buildRecommendation(
           Sentry.addBreadcrumb({
             category: 'engine',
             message: 'Portfolio guard blocked',
-            level: 'info',
+            level: 'warning',
             data: { symbol: signal.symbol, reasons: exposureResult.reasons },
           });
-          return null;
+          return { recommendation: null, rejectionReason: 'portfolio_guard_block' };
         }
       }
     }
 
-    // Portfolio safety pre-flight for Engine A (matches Engine B safety posture)
     if (engine === 'A' && !isTest) {
       const drawdownStatus = await checkDrawdownCircuitBreaker();
       if (drawdownStatus.frozen) {
-        logger.info('Engine A HOLD: drawdown circuit breaker active', {
+        logger.warn('Engine A HOLD: drawdown circuit breaker active', {
           signal_id: signal.signal_id,
           symbol: signal.symbol,
           freezeUntil: drawdownStatus.freezeUntil?.toISOString(),
@@ -174,12 +172,12 @@ async function buildRecommendation(
           level: 'warning',
           data: { signal_id: signal.signal_id, drawdownPct: drawdownStatus.currentDrawdownPct },
         });
-        return null;
+        return { recommendation: null, rejectionReason: 'drawdown_circuit_breaker' };
       }
 
       const gammaCheck = await checkGammaExposure();
       if (!gammaCheck.allowed) {
-        logger.info('Engine A HOLD: gamma exposure limit', {
+        logger.warn('Engine A HOLD: gamma exposure limit', {
           signal_id: signal.signal_id,
           symbol: signal.symbol,
           reasons: gammaCheck.reasons,
@@ -191,7 +189,7 @@ async function buildRecommendation(
           level: 'warning',
           data: { signal_id: signal.signal_id, reasons: gammaCheck.reasons },
         });
-        return null;
+        return { recommendation: null, rejectionReason: 'gamma_exposure_limit' };
       }
     }
 
@@ -239,7 +237,7 @@ async function buildRecommendation(
       }
 
       if (entryResult.action === 'BLOCK') {
-        logger.info('Engine A entry decision blocked', {
+        logger.warn('Engine A entry decision blocked', {
           signal_id: signal.signal_id,
           symbol: signal.symbol,
           rationale: entryResult.rationale,
@@ -251,10 +249,10 @@ async function buildRecommendation(
         Sentry.addBreadcrumb({
           category: 'engine',
           message: 'Engine A entry blocked by tier rules',
-          level: 'info',
+          level: 'warning',
           data: { signal_id: signal.signal_id, rationale: entryResult.rationale },
         });
-        return null;
+        return { recommendation: null, rejectionReason: `entry_tier_block:${entryResult.triggeredRules?.join(',') ?? 'unknown'}` };
       }
       if (entryResult.action === 'WAIT') {
         logger.info('Engine A entry decision wait', {
@@ -269,16 +267,18 @@ async function buildRecommendation(
           data: { signal_id: signal.signal_id, rationale: entryResult.rationale },
         });
         return {
-          experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
-          engine,
-          symbol: signal.symbol,
-          direction: signal.direction,
-          strike: 0,
-          expiration: new Date(),
-          quantity: 0,
-          entry_price: 0,
-          is_shadow: false,
-          entryWait: true,
+          recommendation: {
+            experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
+            engine,
+            symbol: signal.symbol,
+            direction: signal.direction,
+            strike: 0,
+            expiration: new Date(),
+            quantity: 0,
+            entry_price: 0,
+            is_shadow: false,
+            entryWait: true,
+          },
         };
       }
     }
@@ -377,11 +377,10 @@ async function buildRecommendation(
       }
     }
 
-    // DTE concentration check for Engine A (matches Engine B)
     if (engine === 'A' && !isTest) {
       const dteCheck = await checkDTEConcentration(expiration);
       if (!dteCheck.allowed) {
-        logger.info('Engine A HOLD: DTE concentration limit', {
+        logger.warn('Engine A HOLD: DTE concentration limit', {
           signal_id: signal.signal_id,
           symbol: signal.symbol,
           expiration: expiration.toISOString(),
@@ -393,7 +392,7 @@ async function buildRecommendation(
           level: 'warning',
           data: { signal_id: signal.signal_id, reasons: dteCheck.reasons },
         });
-        return null;
+        return { recommendation: null, rejectionReason: 'dte_concentration_limit' };
       }
     }
 
@@ -460,30 +459,32 @@ async function buildRecommendation(
     };
 
     return {
-      experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
-      engine,
-      symbol: signal.symbol,
-      direction: signal.direction,
-      strike,
-      expiration,
-      quantity,
-      entry_price: entryPrice,
-      is_shadow: false,
-      entry_metadata: entryMetadata,
+      recommendation: {
+        experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
+        engine,
+        symbol: signal.symbol,
+        direction: signal.direction,
+        strike,
+        expiration,
+        quantity,
+        entry_price: entryPrice,
+        is_shadow: false,
+        entry_metadata: entryMetadata,
+      },
     };
   } catch (error) {
     logger.error('Engine recommendation failed', error, { engine, signal_id: signal.signal_id });
     Sentry.captureException(error, {
       tags: { stage: 'engine', engine, signalId: signal.signal_id },
     });
-    return null;
+    return { recommendation: null, rejectionReason: 'engine_error' };
   }
 }
 
 async function buildEngineBRecommendation(
   signal: Signal,
   context?: MarketContext
-): Promise<TradeRecommendation | null> {
+): Promise<EngineResult> {
   try {
     const isTestB = !!(signal.raw_payload as Record<string, unknown>)?.is_test || config.e2eTestMode;
 
@@ -491,33 +492,32 @@ async function buildEngineBRecommendation(
     if (config.requireMTFBiasForEntry && !isTestB) {
       mtfBiasB = await getMTFBiasContext(signal.symbol);
       if (!mtfBiasB) {
-        logger.info('Engine B HOLD: no MTF bias state', { symbol: signal.symbol });
-        Sentry.addBreadcrumb({
-          category: 'engine',
-          message: 'MTF bias required but missing - HOLD',
-          level: 'info',
-          data: { symbol: signal.symbol },
+        logger.warn('Engine B HOLD: no MTF bias state', { symbol: signal.symbol, signal_id: signal.signal_id });
+        Sentry.captureMessage(`Engine B HOLD: MTF bias missing for ${signal.symbol}`, {
+          level: 'warning',
+          tags: { engine: 'B', alert: 'mtf_bias_missing' },
+          extra: { signal_id: signal.signal_id, symbol: signal.symbol },
         });
-        return null;
+        return { recommendation: null, rejectionReason: 'mtf_bias_missing' };
       }
       if (mtfBiasB.tradeSuppressed) {
-        logger.info('Engine B HOLD: trade suppressed by bias gating', { symbol: signal.symbol });
+        logger.warn('Engine B HOLD: trade suppressed by bias gating', { symbol: signal.symbol });
         Sentry.addBreadcrumb({
           category: 'engine',
           message: 'Trade suppressed by effective gating',
-          level: 'info',
+          level: 'warning',
           data: { symbol: signal.symbol },
         });
-        return null;
+        return { recommendation: null, rejectionReason: 'trade_suppressed_by_bias' };
       }
       if (mtfBiasB.unifiedState?.isStale) {
         const stalenessCfg = await getStalenessConfig();
         if (stalenessCfg.behavior === 'block') {
-          logger.info('Engine B HOLD: bias state stale, blocking new trades', {
+          logger.warn('Engine B HOLD: bias state stale, blocking new trades', {
             symbol: signal.symbol,
             stalenessMinutes: mtfBiasB.unifiedState.stalenessMinutes,
           });
-          return null;
+          return { recommendation: null, rejectionReason: 'bias_state_stale' };
         }
       }
       if (mtfBiasB.unifiedState && config.enablePortfolioGuard) {
@@ -526,7 +526,7 @@ async function buildEngineBRecommendation(
           openPositions = await loadOpenPositions();
         } catch (err) {
           logger.warn('Engine B: DB unavailable for portfolio guard, blocking', { symbol: signal.symbol, error: err });
-          return null;
+          return { recommendation: null, rejectionReason: 'portfolio_guard_db_unavailable' };
         }
         const hint = mtfBiasB.unifiedState.riskContext?.entryModeHint ?? 'NO_TRADE';
         const strategyType = ['BREAKOUT', 'PULLBACK', 'MEAN_REVERT'].includes(hint)
@@ -538,11 +538,11 @@ async function buildEngineBRecommendation(
           marketState: mtfBiasB.unifiedState,
         });
         if (exposureResult.result === 'BLOCK') {
-          logger.info('Engine B HOLD: portfolio guard block', {
+          logger.warn('Engine B HOLD: portfolio guard block', {
             symbol: signal.symbol,
             reasons: exposureResult.reasons,
           });
-          return null;
+          return { recommendation: null, rejectionReason: 'portfolio_guard_block' };
         }
       }
     }
@@ -556,7 +556,7 @@ async function buildEngineBRecommendation(
       );
       const entryResult = evaluateEntryDecision(entryInput);
       if (entryResult.action === 'BLOCK') {
-        logger.info('Engine B entry decision blocked', {
+        logger.warn('Engine B entry decision blocked', {
           signal_id: signal.signal_id,
           symbol: signal.symbol,
           rationale: entryResult.rationale,
@@ -564,10 +564,10 @@ async function buildEngineBRecommendation(
         Sentry.addBreadcrumb({
           category: 'engine',
           message: 'Engine B entry blocked by tier rules',
-          level: 'info',
+          level: 'warning',
           data: { signal_id: signal.signal_id, rationale: entryResult.rationale },
         });
-        return null;
+        return { recommendation: null, rejectionReason: `entry_tier_block:${entryResult.triggeredRules?.join(',') ?? 'unknown'}` };
       }
       if (entryResult.action === 'WAIT') {
         logger.info('Engine B entry decision wait', {
@@ -582,16 +582,18 @@ async function buildEngineBRecommendation(
           data: { signal_id: signal.signal_id, rationale: entryResult.rationale },
         });
         return {
-          experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
-          engine: 'B',
-          symbol: signal.symbol,
-          direction: signal.direction,
-          strike: 0,
-          expiration: new Date(),
-          quantity: 0,
-          entry_price: 0,
-          is_shadow: false,
-          entryWait: true,
+          recommendation: {
+            experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
+            engine: 'B',
+            symbol: signal.symbol,
+            direction: signal.direction,
+            strike: 0,
+            expiration: new Date(),
+            quantity: 0,
+            entry_price: 0,
+            is_shadow: false,
+            entryWait: true,
+          },
         };
       }
     }
@@ -635,7 +637,7 @@ async function buildEngineBRecommendation(
         hasIndicators: Boolean(indicators),
         hasPrice: Boolean(currentPrice),
       });
-      return null;
+      return { recommendation: null, rejectionReason: 'market_data_unavailable' };
     }
 
     if (!indicators) {
@@ -711,26 +713,24 @@ async function buildEngineBRecommendation(
       setupType,
     };
 
-    // Phase 4: Drawdown circuit breaker check
     const drawdownStatus = await checkDrawdownCircuitBreaker();
     if (drawdownStatus.frozen) {
-      logger.info('Engine B HOLD: drawdown circuit breaker active', {
+      logger.warn('Engine B HOLD: drawdown circuit breaker active', {
         symbol: signal.symbol,
         freezeUntil: drawdownStatus.freezeUntil?.toISOString(),
         drawdownPct: drawdownStatus.currentDrawdownPct,
       });
-      return null;
+      return { recommendation: null, rejectionReason: 'drawdown_circuit_breaker' };
     }
 
-    // Phase 4: Gamma exposure check
     const gammaCheck = await checkGammaExposure();
     if (!gammaCheck.allowed) {
-      logger.info('Engine B HOLD: gamma exposure limit', {
+      logger.warn('Engine B HOLD: gamma exposure limit', {
         symbol: signal.symbol,
         reasons: gammaCheck.reasons,
         greeks: gammaCheck.greeks,
       });
-      return null;
+      return { recommendation: null, rejectionReason: 'gamma_exposure_limit' };
     }
 
     // Fetch multi-timeframe data for MTF Trend Agent (all 5 timeframes)
@@ -874,7 +874,7 @@ async function buildEngineBRecommendation(
     }
 
     if (metaDecision.decision !== 'approve') {
-      logger.info('Engine B meta decision rejected', {
+      logger.warn('Engine B meta decision rejected', {
         signal_id: signal.signal_id,
         reasons: metaDecision.reasons,
         confidence: metaDecision.finalConfidence,
@@ -882,7 +882,7 @@ async function buildEngineBRecommendation(
         thresholdAdjustments: metaDecision.thresholdAdjustments,
         agentWeights: metaDecision.agentWeightsUsed,
       });
-      return null;
+      return { recommendation: null, rejectionReason: `meta_decision_rejected:${metaDecision.reasons?.join(',') ?? 'unknown'}` };
     }
 
     let strike = 0;
@@ -930,12 +930,12 @@ async function buildEngineBRecommendation(
 
     const dteCheck = await checkDTEConcentration(expiration);
     if (!dteCheck.allowed) {
-      logger.info('Engine B HOLD: DTE concentration limit', {
+      logger.warn('Engine B HOLD: DTE concentration limit', {
         symbol: signal.symbol,
         expiration: expiration.toISOString(),
         reasons: dteCheck.reasons,
       });
-      return null;
+      return { recommendation: null, rejectionReason: 'dte_concentration_limit' };
     }
 
     let baseSize = Math.max(1, Math.floor(config.maxPositionSize));
@@ -992,19 +992,21 @@ async function buildEngineBRecommendation(
     }
 
     return {
-      experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
-      engine: 'B',
-      symbol: signal.symbol,
-      direction: signal.direction,
-      strike,
-      expiration,
-      quantity,
-      entry_price: entryPrice,
-      is_shadow: false,
-      entry_metadata: {
-        advancedStrikeUsed: advancedStrikeUsedB,
-        biasConfidence: mtfBiasB?.unifiedState?.confidence,
-        biasRegime: mtfBiasB?.unifiedState?.regimeType,
+      recommendation: {
+        experiment_id: signal.experiment_id ?? '00000000-0000-0000-0000-000000000000',
+        engine: 'B',
+        symbol: signal.symbol,
+        direction: signal.direction,
+        strike,
+        expiration,
+        quantity,
+        entry_price: entryPrice,
+        is_shadow: false,
+        entry_metadata: {
+          advancedStrikeUsed: advancedStrikeUsedB,
+          biasConfidence: mtfBiasB?.unifiedState?.confidence,
+          biasRegime: mtfBiasB?.unifiedState?.regimeType,
+        },
       },
     };
   } catch (error) {
@@ -1012,16 +1014,16 @@ async function buildEngineBRecommendation(
     Sentry.captureException(error, {
       tags: { stage: 'engine', engine: 'B', signalId: signal.signal_id },
     });
-    return null;
+    return { recommendation: null, rejectionReason: 'engine_error' };
   }
 }
 
 export function createEngineAInvoker() {
-  return async (signal: Signal, context: MarketContext) =>
+  return async (signal: Signal, context: MarketContext): Promise<EngineResult> =>
     buildRecommendation('A', signal, context);
 }
 
 export function createEngineBInvoker() {
-  return async (signal: Signal, context: MarketContext) =>
+  return async (signal: Signal, context: MarketContext): Promise<EngineResult> =>
     buildEngineBRecommendation(signal, context);
 }

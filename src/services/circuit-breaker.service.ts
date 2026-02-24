@@ -10,6 +10,7 @@ export class CircuitBreaker {
   private failures = 0;
   private lastFailure = 0;
   private state: CircuitBreakerState = 'closed';
+  private overrideResetMs: number | null = null;
   private readonly now: () => number;
 
   constructor(private readonly options: CircuitBreakerOptions) {
@@ -18,8 +19,10 @@ export class CircuitBreaker {
 
   canRequest(): boolean {
     if (this.state === 'open') {
-      if (this.now() - this.lastFailure >= this.options.resetTimeoutMs) {
+      const resetMs = this.overrideResetMs ?? this.options.resetTimeoutMs;
+      if (this.now() - this.lastFailure >= resetMs) {
         this.state = 'half-open';
+        this.overrideResetMs = null;
         return true;
       }
       return false;
@@ -30,6 +33,7 @@ export class CircuitBreaker {
   recordSuccess(): void {
     this.failures = 0;
     this.state = 'closed';
+    this.overrideResetMs = null;
   }
 
   recordFailure(): void {
@@ -38,6 +42,17 @@ export class CircuitBreaker {
     if (this.failures >= this.options.maxFailures) {
       this.state = 'open';
     }
+  }
+
+  /**
+   * Immediately open the circuit breaker with a custom cooldown duration.
+   * Used for non-transient errors (e.g. 403 entitlement) where retrying is pointless.
+   */
+  forceOpen(durationMs: number): void {
+    this.state = 'open';
+    this.failures = this.options.maxFailures;
+    this.lastFailure = this.now();
+    this.overrideResetMs = durationMs;
   }
 
   getStatus(): { state: CircuitBreakerState; failures: number; lastFailure: number } {
