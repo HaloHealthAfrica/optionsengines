@@ -323,7 +323,7 @@ function normalizeTimeframe(payload: WebhookPayload): string | null {
     return normalized;
   }
 
-  return value;
+  return value.slice(0, 50);
 }
 
 function normalizeTimestamp(raw: WebhookPayload['timestamp']): Date {
