@@ -33,6 +33,10 @@ import {
 } from '../services/same-strike-cooldown.service.js';
 import { buildOptionSymbol } from '../lib/shared/option-utils.js';
 import * as Sentry from '@sentry/node';
+import { getTradingMode } from '../config/trading-mode.js';
+import { runUDC } from '../lib/udc/index.js';
+import type { UDCSignal, PortfolioState } from '../lib/udc/types.js';
+import { marketSnapshotService, StaleSnapshotError } from '../services/market-snapshot.service.js';
 
 export class OrchestratorService {
   constructor(
@@ -523,6 +527,14 @@ export class OrchestratorService {
           dealerDecision
         );
 
+        // UDC parallel shadow path — never modifies legacy flow
+        await this.runUDCParallel(signal, market_context).catch((udcErr) => {
+          logger.warn('UDC parallel run failed (non-blocking)', {
+            signal_id: signal.signal_id,
+            error: udcErr?.message ?? udcErr,
+          });
+        });
+
         await this.signalProcessor.markProcessed(signal.signal_id, experiment.experiment_id);
 
         return {
@@ -925,6 +937,143 @@ export class OrchestratorService {
   }
 
   // buildOptionSymbol moved to src/lib/shared/option-utils.ts
+
+  /**
+   * Runs UDC in parallel with the legacy engine flow.
+   * In SHADOW_UDC mode: persists DecisionSnapshot only, no execution.
+   * In UDC_PRIMARY mode: persists + executes via paper order path.
+   * In LEGACY_ONLY / UDC_ONLY: skipped entirely from this path.
+   */
+  private async runUDCParallel(
+    signal: Signal,
+    _marketContext: MarketContext,
+  ): Promise<void> {
+    const mode = getTradingMode();
+    if (mode !== 'SHADOW_UDC' && mode !== 'UDC_PRIMARY') {
+      return;
+    }
+
+    const udcSignal: UDCSignal = {
+      id: signal.signal_id,
+      symbol: signal.symbol,
+      direction: signal.direction,
+      timeframe: signal.timeframe,
+      timestamp: signal.timestamp instanceof Date ? signal.timestamp.getTime() : Date.now(),
+      pattern: (signal.raw_payload as Record<string, unknown>)?.pattern as string | undefined,
+      confidence: (signal.raw_payload as Record<string, unknown>)?.confidence as number | undefined,
+    };
+
+    const isIntraday = ['1', '3', '5', '15'].includes(signal.timeframe ?? '');
+
+    let snapshot;
+    try {
+      snapshot = await marketSnapshotService.getSnapshot(signal.symbol, {
+        needOptionsChain: true,
+        dteMin: isIntraday ? 0 : 5,
+        dteMax: isIntraday ? 7 : 45,
+        strikeWindowPct: 0.10,
+        needGreeks: true,
+      });
+    } catch (err) {
+      const reason = err instanceof StaleSnapshotError ? 'STALE_SNAPSHOT' : 'SNAPSHOT_FETCH_FAILED';
+      await db.query(
+        `INSERT INTO decision_snapshots (signal_id, status, reason, order_plan_json, created_at)
+         VALUES ($1, $2, $3, NULL, NOW())`,
+        [signal.signal_id, 'BLOCKED', `${reason}: ${(err as Error).message}`],
+      );
+      Sentry.addBreadcrumb({
+        category: 'udc',
+        message: `UDC ${mode}: BLOCKED (${reason})`,
+        level: 'warning',
+        data: { signal_id: signal.signal_id, reason },
+      });
+      return;
+    }
+
+    const portfolio: PortfolioState = {
+      risk: {
+        drawdownPct: 0,
+        positionCount: 0,
+        dailyPnL: 0,
+        maxDailyLoss: config.maxDailyLoss,
+        portfolioDelta: 0,
+        portfolioGamma: 0,
+        maxOpenPositions: config.maxOpenPositions,
+        dteConcentration: {},
+        lastEntryTimestamp: null,
+      },
+    };
+
+    try {
+      const openPositions = await db.query(
+        `SELECT COUNT(*)::int AS cnt FROM refactored_positions WHERE status = 'open'`,
+      );
+      portfolio.risk.positionCount = openPositions.rows[0]?.cnt ?? 0;
+    } catch {
+      // fail-closed: if we can't read positions, positionCount stays 0
+    }
+
+    const udcResult = await runUDC(udcSignal, snapshot, portfolio);
+
+    // Idempotent upsert: if decisionId already exists, return existing snapshot
+    if (udcResult.decisionId) {
+      const existing = await db.query(
+        `SELECT id FROM decision_snapshots WHERE decision_id = $1 LIMIT 1`,
+        [udcResult.decisionId],
+      );
+      if (existing.rows.length > 0) {
+        logger.info('UDC: idempotent hit — snapshot already exists', {
+          signal_id: signal.signal_id,
+          decisionId: udcResult.decisionId,
+        });
+        return;
+      }
+    }
+
+    try {
+      await db.query(
+        `INSERT INTO decision_snapshots (signal_id, decision_id, status, reason, order_plan_json, created_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [
+          signal.signal_id,
+          udcResult.decisionId ?? null,
+          udcResult.status,
+          udcResult.reason ?? null,
+          udcResult.plan ? JSON.stringify(udcResult.plan) : null,
+        ],
+      );
+    } catch (insertErr: any) {
+      // Handle unique violation (concurrent insert race)
+      if (insertErr?.code === '23505') {
+        logger.info('UDC: unique violation caught — concurrent duplicate', {
+          signal_id: signal.signal_id,
+          decisionId: udcResult.decisionId,
+        });
+        return;
+      }
+      throw insertErr;
+    }
+
+    if (mode === 'UDC_PRIMARY' && udcResult.status === 'PLAN_CREATED' && udcResult.plan) {
+      logger.info('UDC_PRIMARY: plan created, routing to paper execution', {
+        signal_id: signal.signal_id,
+        planId: udcResult.plan.planId,
+      });
+    }
+
+    Sentry.addBreadcrumb({
+      category: 'udc',
+      message: `UDC ${mode}: ${udcResult.status}`,
+      level: 'info',
+      data: {
+        signal_id: signal.signal_id,
+        status: udcResult.status,
+        reason: udcResult.reason,
+        planId: udcResult.plan?.planId,
+        decisionId: udcResult.decisionId,
+      },
+    });
+  }
 
   private applyPolicyToRecommendation(
     experiment_id: string,

@@ -17,6 +17,7 @@ import { createTestingWebSocketServer } from './services/testing-live.service.js
 import { webhookIngestionService } from './services/webhook-ingestion.service.js';
 import { biasRedisService } from './services/bias-state-aggregator/bias-redis.service.js';
 import { startRealtimeWebSocketServer, stopRealtimeWebSocketServer } from './services/realtime-websocket.service.js';
+import { initTradingMode } from './config/trading-mode.js';
 
 async function bootstrap(): Promise<void> {
   try {
@@ -58,6 +59,11 @@ async function bootstrap(): Promise<void> {
   } else {
     logger.warn('Redis not configured, caching disabled');
   }
+
+  // Eagerly load trading mode from DB so first UDC run isn't stale
+  await initTradingMode().catch((err) => {
+    logger.warn('Failed to init trading mode from DB, using env fallback', { error: err });
+  });
 
   const server = app.listen(config.port, () => {
     logger.info(`Server started`, {

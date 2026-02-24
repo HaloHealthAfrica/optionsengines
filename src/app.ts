@@ -32,6 +32,7 @@ import monitoringApiRoutes from './routes/monitoring-api.js';
 import stratPlanRoutes from './routes/strat-plan.js';
 import stratCommandRoutes from './routes/strat-command.js';
 import researchRoutes from './routes/research.js';
+import udcRoutes from './routes/udc.js';
 
 const app: Express = express();
 
@@ -88,6 +89,7 @@ app.use('/api/cron', cronRoutes);
 app.use('/api/strat-plan', stratPlanRoutes);
 app.use('/api/strat', stratCommandRoutes);
 app.use('/api/research', researchRoutes);
+app.use('/api/udc', udcRoutes);
 
 // Sentry error handler (must be before other error middleware)
 Sentry.setupExpressErrorHandler(app);
