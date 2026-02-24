@@ -52,6 +52,7 @@ export async function middleware(request) {
 
   if (
     pathname.startsWith('/login') ||
+    pathname.startsWith('/udc/login') ||
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/webhook') ||
     pathname.startsWith('/_next') ||
