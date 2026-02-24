@@ -157,7 +157,7 @@ export function evaluateStrat(signal: UDCSignal): StrategyCandidate | null {
 function resolveInvalidation(
   signal: UDCSignal,
   isBull: boolean,
-  isIntraday: boolean,
+  _isIntraday: boolean,
 ): number {
   const raw = signal.raw_payload ?? {};
 
