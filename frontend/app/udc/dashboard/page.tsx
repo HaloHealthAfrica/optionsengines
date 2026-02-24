@@ -5,14 +5,22 @@ import { useRouter } from 'next/navigation';
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Clock,
   FileJson,
+  Info,
+  Moon,
   RefreshCw,
+  Search,
   Shield,
+  ShieldCheck,
+  ShieldOff,
+  Sun,
   XCircle,
-  Settings,
+  Zap,
 } from 'lucide-react';
 
 interface Snapshot {
@@ -29,23 +37,76 @@ const MODES = ['LEGACY_ONLY', 'SHADOW_UDC', 'UDC_PRIMARY', 'UDC_ONLY'] as const;
 
 type StatusFilter = '' | 'NO_STRATEGY' | 'BLOCKED' | 'PLAN_CREATED';
 
-const STATUS_COLORS: Record<string, string> = {
-  PLAN_CREATED: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
-  BLOCKED: 'text-rose-400 bg-rose-500/10 border-rose-500/30',
-  NO_STRATEGY: 'text-slate-400 bg-slate-500/10 border-slate-500/30',
+const STATUS_CONFIG: Record<string, {
+  label: string;
+  color: string;
+  bg: string;
+  icon: React.ReactNode;
+  description: string;
+}> = {
+  PLAN_CREATED: {
+    label: 'Plan Created',
+    color: 'text-emerald-600 dark:text-emerald-400',
+    bg: 'bg-emerald-50 border-emerald-200 dark:bg-emerald-500/10 dark:border-emerald-500/30',
+    icon: <CheckCircle2 size={14} />,
+    description: 'Order plan was generated and is ready for execution',
+  },
+  BLOCKED: {
+    label: 'Blocked',
+    color: 'text-rose-600 dark:text-rose-400',
+    bg: 'bg-rose-50 border-rose-200 dark:bg-rose-500/10 dark:border-rose-500/30',
+    icon: <XCircle size={14} />,
+    description: 'Signal was blocked by risk governance rules',
+  },
+  NO_STRATEGY: {
+    label: 'No Strategy',
+    color: 'text-slate-500 dark:text-slate-400',
+    bg: 'bg-slate-50 border-slate-200 dark:bg-slate-500/10 dark:border-slate-500/30',
+    icon: <AlertTriangle size={14} />,
+    description: 'No matching strategy found for this signal',
+  },
 };
 
-const STATUS_ICONS: Record<string, React.ReactNode> = {
-  PLAN_CREATED: <CheckCircle2 size={14} />,
-  BLOCKED: <XCircle size={14} />,
-  NO_STRATEGY: <AlertTriangle size={14} />,
-};
-
-const MODE_LABELS: Record<string, { label: string; color: string }> = {
-  LEGACY_ONLY: { label: 'Legacy Only', color: 'text-slate-400 bg-slate-500/10 border-slate-500/30' },
-  SHADOW_UDC: { label: 'Shadow UDC', color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
-  UDC_PRIMARY: { label: 'UDC Primary', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' },
-  UDC_ONLY: { label: 'UDC Only', color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30' },
+const MODE_CONFIG: Record<string, {
+  label: string;
+  description: string;
+  color: string;
+  badgeColor: string;
+  icon: React.ReactNode;
+  step: number;
+}> = {
+  LEGACY_ONLY: {
+    label: 'Legacy Only',
+    description: 'Only the legacy engine processes signals. UDC is off.',
+    color: 'border-slate-300 dark:border-slate-600',
+    badgeColor: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
+    icon: <ShieldOff size={16} />,
+    step: 0,
+  },
+  SHADOW_UDC: {
+    label: 'Shadow Mode',
+    description: 'UDC runs in parallel but does not execute. Decisions are logged for review.',
+    color: 'border-amber-400 dark:border-amber-500',
+    badgeColor: 'bg-amber-50 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300',
+    icon: <Shield size={16} />,
+    step: 1,
+  },
+  UDC_PRIMARY: {
+    label: 'UDC Primary',
+    description: 'UDC is the primary decision engine. Executes via paper orders.',
+    color: 'border-emerald-400 dark:border-emerald-500',
+    badgeColor: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300',
+    icon: <ShieldCheck size={16} />,
+    step: 2,
+  },
+  UDC_ONLY: {
+    label: 'UDC Only',
+    description: 'Full UDC control. Legacy engine is disabled.',
+    color: 'border-cyan-400 dark:border-cyan-500',
+    badgeColor: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-300',
+    icon: <Zap size={16} />,
+    step: 3,
+  },
 };
 
 function timeAgo(dateStr: string): string {
@@ -68,8 +129,21 @@ export default function UDCDashboardPage() {
   const [filter, setFilter] = useState<StatusFilter>('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [mode, setMode] = useState('LEGACY_ONLY');
-  const [modeOpen, setModeOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem('oa-theme');
+    if (saved === 'light' || saved === 'dark') setTheme(saved);
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') root.classList.add('dark');
+    else root.classList.remove('dark');
+    window.localStorage.setItem('oa-theme', theme);
+  }, [theme]);
 
   const switchMode = useCallback(async (newMode: string) => {
     setSwitching(true);
@@ -90,7 +164,6 @@ export default function UDCDashboardPage() {
       setError('Failed to switch mode');
     } finally {
       setSwitching(false);
-      setModeOpen(false);
     }
   }, []);
 
@@ -100,18 +173,15 @@ export default function UDCDashboardPage() {
     try {
       const params = new URLSearchParams({ limit: '50', offset: '0' });
       if (filter) params.set('status', filter);
-
       const res = await fetch(`/api/udc/snapshots?${params.toString()}`);
-      if (res.status === 401) {
-        router.push('/udc/login');
-        return;
-      }
+      if (res.status === 401) { router.push('/udc/login'); return; }
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       setSnapshots(data.data ?? []);
       setTotal(data.total ?? 0);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load snapshots');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to load snapshots';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -124,9 +194,7 @@ export default function UDCDashboardPage() {
         const data = await res.json();
         setMode(data.mode ?? 'LEGACY_ONLY');
       }
-    } catch {
-      // keep default
-    }
+    } catch { /* keep default */ }
   }, []);
 
   useEffect(() => {
@@ -141,210 +209,405 @@ export default function UDCDashboardPage() {
     noStrategy: snapshots.filter((s) => s.status === 'NO_STRATEGY').length,
   };
 
-  const modeInfo = MODE_LABELS[mode] ?? MODE_LABELS.LEGACY_ONLY;
+  const planRate = stats.total > 0 ? Math.round((stats.plans / stats.total) * 100) : 0;
+  const blockRate = stats.total > 0 ? Math.round((stats.blocked / stats.total) * 100) : 0;
+
+  const filteredSnapshots = snapshots.filter((s) => {
+    if (!searchTerm) return true;
+    const term = searchTerm.toLowerCase();
+    return (
+      s.signal_id.toLowerCase().includes(term) ||
+      s.status.toLowerCase().includes(term) ||
+      (s.reason && s.reason.toLowerCase().includes(term)) ||
+      (s.decision_id && s.decision_id.toLowerCase().includes(term))
+    );
+  });
+
+  const modeInfo = MODE_CONFIG[mode] ?? MODE_CONFIG.LEGACY_ONLY;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-4 py-8 text-white sm:px-6">
-      <div className="mx-auto max-w-6xl">
-        {/* Header */}
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Unified Decision Core</h1>
-            <p className="mt-1 text-sm text-slate-400">
-              Shadow decision audit trail and order plan review
-            </p>
-          </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 transition-colors duration-300">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+
+        {/* Top Bar */}
+        <div className="mb-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {/* Mode toggle dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setModeOpen(!modeOpen)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition hover:opacity-80 ${modeInfo.color}`}
-              >
-                <Shield size={12} />
-                {switching ? 'Switching...' : modeInfo.label}
-                <Settings size={10} className="ml-0.5 opacity-60" />
-              </button>
-              {modeOpen && (
-                <div className="absolute right-0 z-10 mt-2 w-48 overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl">
-                  {MODES.map((m) => {
-                    const info = MODE_LABELS[m] ?? MODE_LABELS.LEGACY_ONLY;
-                    const active = mode === m;
-                    return (
-                      <button
-                        key={m}
-                        onClick={() => !active && switchMode(m)}
-                        disabled={active || switching}
-                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition ${
-                          active
-                            ? 'bg-slate-800 font-semibold text-white'
-                            : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
-                        } disabled:opacity-50`}
-                      >
-                        <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-                        {info.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 via-cyan-500 to-brand-600 shadow-md">
+              <Activity size={20} className="text-white" />
             </div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900 dark:text-white">Decision Core</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Unified decision engine audit trail</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+            >
+              {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
             <button
               onClick={() => { fetchSnapshots(); fetchMode(); }}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:bg-slate-700"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-brand-500 via-cyan-500 to-brand-600 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:shadow-lg hover:-translate-y-0.5"
             >
-              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
               Refresh
             </button>
           </div>
         </div>
 
-        {/* Stats */}
-        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {[
-            { label: 'Total Decisions', value: stats.total, icon: <Activity size={16} />, color: 'text-slate-300' },
-            { label: 'Plans Created', value: stats.plans, icon: <CheckCircle2 size={16} />, color: 'text-emerald-400' },
-            { label: 'Blocked', value: stats.blocked, icon: <XCircle size={16} />, color: 'text-rose-400' },
-            { label: 'No Strategy', value: stats.noStrategy, icon: <AlertTriangle size={16} />, color: 'text-slate-500' },
-          ].map((stat) => (
-            <div
-              key={stat.label}
-              className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3"
-            >
-              <div className={`mb-1 flex items-center gap-1.5 text-xs ${stat.color}`}>
-                {stat.icon}
-                {stat.label}
-              </div>
-              <p className="text-xl font-bold">{stat.value}</p>
+        {/* Mode Selector - Pipeline Visualization */}
+        <div className="card mb-6 overflow-hidden rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/60">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Trading Mode</h2>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                Controls how signals are routed between legacy and UDC engines
+              </p>
             </div>
-          ))}
-        </div>
-
-        {/* Filter */}
-        <div className="mb-4 flex items-center gap-2">
-          <span className="text-xs text-slate-500">Filter:</span>
-          {(['', 'PLAN_CREATED', 'BLOCKED', 'NO_STRATEGY'] as StatusFilter[]).map((f) => (
-            <button
-              key={f || 'all'}
-              onClick={() => setFilter(f)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                filter === f
-                  ? 'bg-slate-100 text-slate-900 shadow-sm dark:bg-white dark:text-slate-900'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {f || 'All'}
-            </button>
-          ))}
-        </div>
-
-        {/* Error */}
-        {error && (
-          <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
-            {error}
-          </div>
-        )}
-
-        {/* Table */}
-        <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
-          <div className="grid grid-cols-[1fr_100px_1fr_120px_40px] gap-2 border-b border-slate-800 px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-slate-500">
-            <span>Signal ID</span>
-            <span>Status</span>
-            <span>Reason</span>
-            <span>Time</span>
-            <span />
+            <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${modeInfo.badgeColor}`}>
+              {modeInfo.icon}
+              {switching ? 'Switching...' : modeInfo.label}
+            </div>
           </div>
 
-          {loading && snapshots.length === 0 ? (
-            <div className="flex items-center justify-center py-12 text-sm text-slate-500">
-              <RefreshCw size={16} className="mr-2 animate-spin" />
-              Loading snapshots...
+          <div className="relative">
+            {/* Progress track */}
+            <div className="absolute left-0 right-0 top-5 z-0 mx-auto h-0.5 w-[calc(100%-80px)] bg-slate-200 dark:bg-slate-700" style={{ left: '40px', right: '40px', width: 'calc(100% - 80px)' }}>
+              <div
+                className="h-full bg-gradient-to-r from-brand-500 to-cyan-500 transition-all duration-500"
+                style={{ width: `${(modeInfo.step / 3) * 100}%` }}
+              />
             </div>
-          ) : snapshots.length === 0 ? (
-            <div className="py-12 text-center text-sm text-slate-500">
-              No decision snapshots found.
-              {mode === 'LEGACY_ONLY' && (
-                <span className="mt-1 block text-xs">
-                  Set <code className="rounded bg-slate-800 px-1.5 py-0.5">TRADING_MODE=SHADOW_UDC</code> to start collecting.
-                </span>
-              )}
-            </div>
-          ) : (
-            snapshots.map((snap) => (
-              <div key={snap.id}>
-                <div
-                  className="grid cursor-pointer grid-cols-[1fr_100px_1fr_120px_40px] items-center gap-2 border-b border-slate-800/50 px-4 py-3 text-sm transition hover:bg-slate-800/40"
-                  onClick={() => setExpandedId(expandedId === snap.id ? null : snap.id)}
-                >
-                  <span className="truncate font-mono text-xs text-slate-300">
-                    {snap.signal_id}
-                  </span>
-                  <span
-                    className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${
-                      STATUS_COLORS[snap.status] ?? STATUS_COLORS.NO_STRATEGY
-                    }`}
+
+            <div className="relative z-10 grid grid-cols-4 gap-2">
+              {MODES.map((m) => {
+                const config = MODE_CONFIG[m];
+                const isActive = mode === m;
+                const isPast = config.step < modeInfo.step;
+                return (
+                  <button
+                    key={m}
+                    onClick={() => !isActive && !switching && switchMode(m)}
+                    disabled={isActive || switching}
+                    className="group flex flex-col items-center gap-2 text-center"
                   >
-                    {STATUS_ICONS[snap.status]}
-                    {snap.status.replace('_', ' ')}
-                  </span>
-                  <span className="truncate text-xs text-slate-400">
-                    {snap.reason ?? '—'}
-                  </span>
-                  <span className="flex items-center gap-1 text-xs text-slate-500">
-                    <Clock size={12} />
-                    {timeAgo(snap.created_at)}
-                  </span>
-                  <span className="flex justify-end">
-                    <ChevronDown
-                      size={14}
-                      className={`text-slate-500 transition ${
-                        expandedId === snap.id ? 'rotate-180' : ''
+                    <div
+                      className={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-all duration-300 ${
+                        isActive
+                          ? 'border-brand-500 bg-brand-500 text-white shadow-md shadow-brand-500/30 dark:border-brand-400 dark:bg-brand-500'
+                          : isPast
+                            ? 'border-brand-300 bg-brand-50 text-brand-500 dark:border-brand-500/50 dark:bg-brand-500/20 dark:text-brand-400'
+                            : 'border-slate-200 bg-white text-slate-400 group-hover:border-slate-300 group-hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-500 dark:group-hover:border-slate-500'
                       }`}
-                    />
-                  </span>
-                </div>
+                    >
+                      {config.icon}
+                    </div>
+                    <div>
+                      <p className={`text-xs font-medium ${isActive ? 'text-brand-600 dark:text-brand-400' : 'text-slate-600 dark:text-slate-400'}`}>
+                        {config.label}
+                      </p>
+                      <p className="mt-0.5 hidden text-[10px] text-slate-400 dark:text-slate-500 sm:block">
+                        {m === 'LEGACY_ONLY' ? 'UDC off' : m === 'SHADOW_UDC' ? 'Log only' : m === 'UDC_PRIMARY' ? 'Paper trade' : 'Full control'}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-                {expandedId === snap.id && (
-                  <div className="animate-fade-in border-b border-slate-800/50 bg-slate-950/40 px-4 py-4">
-                    <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-400">
-                      <FileJson size={14} />
-                      Order Plan Preview
-                    </div>
-                    {snap.order_plan_json ? (
-                      <pre className="max-h-60 overflow-auto rounded-xl bg-slate-900 p-3 text-xs text-slate-300">
-                        {JSON.stringify(snap.order_plan_json, null, 2)}
-                      </pre>
-                    ) : (
-                      <p className="text-xs text-slate-500">No order plan generated.</p>
-                    )}
-                    <div className="mt-3 space-y-1 text-xs text-slate-500">
-                      <div>
-                        Snapshot ID: <span className="font-mono">{snap.id}</span>
-                        <span className="mx-2">|</span>
-                        Created: {new Date(snap.created_at).toLocaleString()}
-                      </div>
-                      {snap.decision_id && (
-                        <div>
-                          Decision ID: <span className="font-mono">{snap.decision_id}</span>
-                        </div>
-                      )}
-                    </div>
+          {/* Active mode description */}
+          <div className={`mt-4 flex items-start gap-2 rounded-xl border p-3 ${modeInfo.badgeColor} border-current/10`}>
+            <Info size={14} className="mt-0.5 shrink-0" />
+            <p className="text-xs leading-relaxed">{modeInfo.description}</p>
+          </div>
+        </div>
+
+        {/* Stats Grid */}
+        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/60">
+            <div className="flex items-center justify-between">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                <Activity size={16} className="text-slate-600 dark:text-slate-300" />
+              </div>
+              <span className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Total</span>
+            </div>
+            <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{stats.total}</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Total decisions processed</p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/60">
+            <div className="flex items-center justify-between">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 dark:bg-emerald-500/10">
+                <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">{planRate}%</span>
+            </div>
+            <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{stats.plans}</p>
+            <div className="mt-2">
+              <div className="h-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: `${planRate}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Plans created</p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/60">
+            <div className="flex items-center justify-between">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 dark:bg-rose-500/10">
+                <XCircle size={16} className="text-rose-600 dark:text-rose-400" />
+              </div>
+              <span className="text-[10px] font-medium text-rose-600 dark:text-rose-400">{blockRate}%</span>
+            </div>
+            <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{stats.blocked}</p>
+            <div className="mt-2">
+              <div className="h-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                <div className="h-full rounded-full bg-rose-500 transition-all duration-500" style={{ width: `${blockRate}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Blocked by risk rules</p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm dark:border-slate-800/80 dark:bg-slate-900/60">
+            <div className="flex items-center justify-between">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                <AlertTriangle size={16} className="text-slate-500 dark:text-slate-400" />
+              </div>
+              <span className="text-[10px] font-medium text-slate-400">
+                {stats.total > 0 ? `${Math.round((stats.noStrategy / stats.total) * 100)}%` : '0%'}
+              </span>
+            </div>
+            <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{stats.noStrategy}</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">No matching strategy</p>
+          </div>
+        </div>
+
+        {/* Decision Log */}
+        <div className="rounded-2xl border border-slate-200/70 bg-white shadow-sm dark:border-slate-800/80 dark:bg-slate-900/60">
+          {/* Table Header */}
+          <div className="flex flex-col gap-3 border-b border-slate-200/70 p-4 dark:border-slate-800/80 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Decision Log</h2>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                Every signal processed by the UDC is logged here with its outcome
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Search */}
+              <div className="relative">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search signals..."
+                  className="h-8 w-44 rounded-lg border border-slate-200 bg-slate-50 pl-8 pr-3 text-xs text-slate-700 placeholder-slate-400 outline-none transition focus:border-brand-400 focus:ring-1 focus:ring-brand-400/30 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:placeholder-slate-500 dark:focus:border-brand-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Tabs */}
+          <div className="flex items-center gap-1 border-b border-slate-200/70 px-4 py-2 dark:border-slate-800/80">
+            {([
+              { key: '' as StatusFilter, label: 'All', count: stats.total },
+              { key: 'PLAN_CREATED' as StatusFilter, label: 'Plans', count: stats.plans },
+              { key: 'BLOCKED' as StatusFilter, label: 'Blocked', count: stats.blocked },
+              { key: 'NO_STRATEGY' as StatusFilter, label: 'No Strategy', count: stats.noStrategy },
+            ]).map((f) => (
+              <button
+                key={f.key || 'all'}
+                onClick={() => setFilter(f.key)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  filter === f.key
+                    ? 'bg-slate-900 text-white shadow-sm dark:bg-white dark:text-slate-900'
+                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                {f.label}
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                  filter === f.key
+                    ? 'bg-white/20 dark:bg-slate-900/20'
+                    : 'bg-slate-200/60 dark:bg-slate-700/60'
+                }`}>
+                  {f.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Table Content */}
+          <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+            {/* Column Headers */}
+            <div className="hidden grid-cols-[1fr_120px_1.5fr_100px_32px] items-center gap-3 px-4 py-2.5 sm:grid">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Signal</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Status</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Reason</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Time</span>
+              <span />
+            </div>
+
+            {/* Loading State */}
+            {loading && snapshots.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16">
+                <RefreshCw size={20} className="mb-3 animate-spin text-brand-500" />
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Loading decisions...</p>
+                <p className="mt-1 text-xs text-slate-400">Fetching the latest snapshots from the decision engine</p>
+              </div>
+            ) : filteredSnapshots.length === 0 ? (
+              /* Empty State */
+              <div className="flex flex-col items-center justify-center py-16">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-800">
+                  <FileJson size={24} className="text-slate-400" />
+                </div>
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">No decisions found</p>
+                {searchTerm ? (
+                  <p className="mt-1 text-xs text-slate-400">Try adjusting your search or filter criteria</p>
+                ) : mode === 'LEGACY_ONLY' ? (
+                  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center dark:border-amber-500/30 dark:bg-amber-500/10">
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      Switch to <strong>Shadow Mode</strong> to start collecting UDC decisions alongside your legacy engine.
+                    </p>
+                    <button
+                      onClick={() => switchMode('SHADOW_UDC')}
+                      className="mt-2 inline-flex items-center gap-1 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-700"
+                    >
+                      Enable Shadow Mode <ArrowRight size={12} />
+                    </button>
                   </div>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-400">
+                    Decisions will appear here when signals are processed by the UDC
+                  </p>
                 )}
               </div>
-            ))
-          )}
+            ) : (
+              /* Data Rows */
+              filteredSnapshots.map((snap) => {
+                const statusCfg = STATUS_CONFIG[snap.status] ?? STATUS_CONFIG.NO_STRATEGY;
+                const isExpanded = expandedId === snap.id;
+                return (
+                  <div key={snap.id}>
+                    <button
+                      type="button"
+                      className="grid w-full cursor-pointer grid-cols-[1fr_120px_1.5fr_100px_32px] items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                      onClick={() => setExpandedId(isExpanded ? null : snap.id)}
+                    >
+                      <div className="min-w-0">
+                        <span className="block truncate font-mono text-xs font-medium text-slate-700 dark:text-slate-200">
+                          {snap.signal_id}
+                        </span>
+                        {snap.decision_id && (
+                          <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                            {snap.decision_id}
+                          </span>
+                        )}
+                      </div>
+                      <div>
+                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusCfg.bg} ${statusCfg.color}`}>
+                          {statusCfg.icon}
+                          {statusCfg.label}
+                        </span>
+                      </div>
+                      <span className="truncate text-xs text-slate-500 dark:text-slate-400">
+                        {snap.reason ?? <span className="text-slate-300 dark:text-slate-600">&mdash;</span>}
+                      </span>
+                      <span className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500">
+                        <Clock size={11} />
+                        {timeAgo(snap.created_at)}
+                      </span>
+                      <div className="flex justify-end">
+                        {isExpanded ? (
+                          <ChevronDown size={14} className="text-slate-400 transition dark:text-slate-500" />
+                        ) : (
+                          <ChevronRight size={14} className="text-slate-300 transition dark:text-slate-600" />
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Expanded Detail */}
+                    {isExpanded && (
+                      <div className="animate-fade-in border-t border-slate-100 bg-slate-50/50 px-4 py-4 dark:border-slate-800/60 dark:bg-slate-950/30">
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          {/* Metadata */}
+                          <div className="space-y-2">
+                            <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Details</h4>
+                            <div className="space-y-1.5 text-xs">
+                              <div className="flex justify-between rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
+                                <span className="text-slate-500 dark:text-slate-400">Snapshot ID</span>
+                                <span className="truncate pl-2 font-mono text-slate-700 dark:text-slate-300">{snap.id}</span>
+                              </div>
+                              {snap.decision_id && (
+                                <div className="flex justify-between rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
+                                  <span className="text-slate-500 dark:text-slate-400">Decision ID</span>
+                                  <span className="truncate pl-2 font-mono text-slate-700 dark:text-slate-300">{snap.decision_id}</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
+                                <span className="text-slate-500 dark:text-slate-400">Created</span>
+                                <span className="text-slate-700 dark:text-slate-300">{new Date(snap.created_at).toLocaleString()}</span>
+                              </div>
+                              <div className="flex justify-between rounded-lg border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700/50 dark:bg-slate-900/50">
+                                <span className="text-slate-500 dark:text-slate-400">Status</span>
+                                <span className={statusCfg.color}>{statusCfg.description}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Order Plan Preview */}
+                          <div>
+                            <div className="mb-2 flex items-center gap-1.5">
+                              <FileJson size={12} className="text-slate-400" />
+                              <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Order Plan</h4>
+                            </div>
+                            {snap.order_plan_json ? (
+                              <pre className="max-h-48 overflow-auto rounded-xl border border-slate-200/70 bg-white p-3 text-[11px] leading-relaxed text-slate-600 dark:border-slate-700/50 dark:bg-slate-900/50 dark:text-slate-300">
+                                {JSON.stringify(snap.order_plan_json, null, 2)}
+                              </pre>
+                            ) : (
+                              <div className="flex h-24 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 dark:border-slate-700 dark:bg-slate-800/30">
+                                <p className="text-xs text-slate-400">No order plan generated</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
 
         {/* Footer */}
-        <div className="mt-4 flex items-center justify-between text-xs text-slate-500">
-          <span>
-            Showing {snapshots.length} of {total} snapshots
+        <div className="mt-4 flex items-center justify-between px-1">
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            Showing {filteredSnapshots.length} of {total} decisions
           </span>
-          <span>
-            Mode: <code className="rounded bg-slate-800 px-1.5 py-0.5">{mode}</code>
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400 dark:text-slate-500">Engine:</span>
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${modeInfo.badgeColor}`}>
+              {modeInfo.icon}
+              {modeInfo.label}
+            </span>
+          </div>
         </div>
+
+        {/* Error Toast */}
+        {error && (
+          <div className="fixed bottom-6 right-6 z-50 animate-fade-in rounded-xl border border-rose-200 bg-white px-4 py-3 shadow-lg dark:border-rose-500/30 dark:bg-slate-900">
+            <div className="flex items-center gap-2">
+              <XCircle size={16} className="text-rose-500" />
+              <p className="text-sm text-rose-700 dark:text-rose-300">{error}</p>
+              <button onClick={() => setError('')} className="ml-2 text-xs text-slate-400 hover:text-slate-600">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
