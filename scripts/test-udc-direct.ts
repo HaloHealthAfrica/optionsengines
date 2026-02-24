@@ -515,8 +515,8 @@ async function main() {
       // Persist snapshot to DB for dashboard visibility
       try {
         await db.query(
-          `INSERT INTO decision_snapshots (signal_id, decision_id, status, reason, order_plan_json, created_at)
-           VALUES ($1, $2, $3, $4, $5, NOW())
+          `INSERT INTO decision_snapshots (signal_id, decision_id, status, reason, order_plan_json, strategy_json, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW())
            ON CONFLICT DO NOTHING`,
           [
             test.signal.id,
@@ -524,6 +524,7 @@ async function main() {
             result.status,
             result.reason ?? null,
             result.plan ? JSON.stringify(result.plan) : null,
+            result.decision ? JSON.stringify(result.decision) : null,
           ],
         );
         console.log(`  [DB] Snapshot persisted`);

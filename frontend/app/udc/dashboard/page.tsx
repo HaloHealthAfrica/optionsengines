@@ -48,6 +48,22 @@ interface ParsedOrderPlan {
   risk?: { maxLoss?: number };
 }
 
+interface TradeIntent {
+  strategy: string;
+  symbol: string;
+  direction: 'BULL' | 'BEAR';
+  structure: string;
+  invalidation: number;
+  dteMin: number;
+  dteMax: number;
+  confidence: number;
+}
+
+interface ParsedStrategy {
+  intent: TradeIntent;
+  confidence: number;
+}
+
 interface Snapshot {
   id: string;
   signal_id: string;
@@ -55,6 +71,7 @@ interface Snapshot {
   status: string;
   reason: string | null;
   order_plan_json: Record<string, unknown> | null;
+  strategy_json: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -98,11 +115,43 @@ function structureLabel(structure: string): string {
   return structure.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function inferDirection(legs: OptionLeg[]): 'BULL' | 'BEAR' | null {
+function parseStrategy(json: Record<string, unknown> | null): ParsedStrategy | null {
+  if (!json) return null;
+  const intent = json.intent as Record<string, unknown> | undefined;
+  if (!intent) return null;
+  return {
+    intent: {
+      strategy: (intent.strategy as string) ?? '',
+      symbol: (intent.symbol as string) ?? '',
+      direction: (intent.direction as 'BULL' | 'BEAR') ?? 'BULL',
+      structure: (intent.structure as string) ?? '',
+      invalidation: (intent.invalidation as number) ?? 0,
+      dteMin: (intent.dteMin as number) ?? 0,
+      dteMax: (intent.dteMax as number) ?? 0,
+      confidence: (intent.confidence as number) ?? 0,
+    },
+    confidence: (json.confidence as number) ?? 0,
+  };
+}
+
+function inferDirection(legs: OptionLeg[], strategy: ParsedStrategy | null): 'BULL' | 'BEAR' | null {
+  if (strategy?.intent.direction) return strategy.intent.direction;
   if (legs.length === 0) return null;
   const buyLeg = legs.find((l) => l.side === 'BUY');
   if (!buyLeg) return null;
   return buyLeg.type === 'CALL' ? 'BULL' : 'BEAR';
+}
+
+function strategyName(name: string): string {
+  const map: Record<string, string> = {
+    FAILED_2: 'Failed 2',
+    ORB: 'Opening Range Breakout',
+    MOMENTUM: 'Momentum',
+    REVERSAL: 'Reversal',
+    STRAT: 'STRAT',
+    SATYLAND: 'Satyland',
+  };
+  return map[name] ?? name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 const MODES = ['LEGACY_ONLY', 'SHADOW_UDC', 'UDC_PRIMARY', 'UDC_ONLY'] as const;
@@ -315,13 +364,15 @@ export default function UDCDashboardPage() {
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
     const plan = parseOrderPlan(s.order_plan_json);
+    const strat = parseStrategy(s.strategy_json);
     return (
       s.signal_id.toLowerCase().includes(term) ||
       s.status.toLowerCase().includes(term) ||
       (s.reason && s.reason.toLowerCase().includes(term)) ||
       (s.decision_id && s.decision_id.toLowerCase().includes(term)) ||
       (plan?.symbol && plan.symbol.toLowerCase().includes(term)) ||
-      (plan?.structure && plan.structure.toLowerCase().includes(term))
+      (plan?.structure && plan.structure.toLowerCase().includes(term)) ||
+      (strat?.intent.strategy && strat.intent.strategy.toLowerCase().includes(term))
     );
   });
 
@@ -580,7 +631,8 @@ export default function UDCDashboardPage() {
                 const statusCfg = STATUS_CONFIG[snap.status] ?? STATUS_CONFIG.NO_STRATEGY;
                 const isExpanded = expandedId === snap.id;
                 const plan = parseOrderPlan(snap.order_plan_json);
-                const direction = plan ? inferDirection(plan.legs) : null;
+                const strategy = parseStrategy(snap.strategy_json);
+                const direction = inferDirection(plan?.legs ?? [], strategy);
                 const firstLeg = plan?.legs[0];
                 const dte = firstLeg ? daysUntilExpiry(firstLeg.expiry) : null;
 
@@ -616,7 +668,7 @@ export default function UDCDashboardPage() {
                           </div>
 
                           <div className="min-w-0 flex-1">
-                            {/* Top line: Symbol + Structure + Status */}
+                            {/* Top line: Symbol + Strategy + Structure + Status */}
                             <div className="flex flex-wrap items-center gap-2">
                               {plan?.symbol ? (
                                 <span className="text-sm font-bold text-slate-900 dark:text-white">
@@ -625,6 +677,13 @@ export default function UDCDashboardPage() {
                               ) : (
                                 <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">
                                   Signal
+                                </span>
+                              )}
+
+                              {strategy && (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+                                  <Zap size={10} />
+                                  {strategyName(strategy.intent.strategy)}
                                 </span>
                               )}
 
@@ -779,6 +838,58 @@ export default function UDCDashboardPage() {
                                 </div>
                               </div>
                             </div>
+
+                            {strategy && (
+                              <div>
+                                <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Strategy</h4>
+                                <div className="rounded-xl border border-amber-200/70 bg-amber-50/50 p-3 dark:border-amber-500/20 dark:bg-amber-500/5">
+                                  <div className="flex items-center gap-2">
+                                    <Zap size={14} className="text-amber-600 dark:text-amber-400" />
+                                    <span className="text-sm font-bold text-amber-800 dark:text-amber-300">
+                                      {strategyName(strategy.intent.strategy)}
+                                    </span>
+                                  </div>
+                                  <div className="mt-2.5 grid grid-cols-2 gap-1.5 text-xs">
+                                    <div className="flex items-center justify-between rounded-md bg-white/80 px-2.5 py-1.5 dark:bg-slate-900/50">
+                                      <span className="text-slate-500 dark:text-slate-400">Direction</span>
+                                      <span className={`font-semibold ${
+                                        strategy.intent.direction === 'BULL'
+                                          ? 'text-emerald-600 dark:text-emerald-400'
+                                          : 'text-rose-600 dark:text-rose-400'
+                                      }`}>
+                                        {strategy.intent.direction}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between rounded-md bg-white/80 px-2.5 py-1.5 dark:bg-slate-900/50">
+                                      <span className="text-slate-500 dark:text-slate-400">Confidence</span>
+                                      <span className="font-semibold text-slate-700 dark:text-slate-300">
+                                        {Math.round(strategy.confidence * 100)}%
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between rounded-md bg-white/80 px-2.5 py-1.5 dark:bg-slate-900/50">
+                                      <span className="text-slate-500 dark:text-slate-400">Structure</span>
+                                      <span className="font-medium text-slate-700 dark:text-slate-300">
+                                        {structureLabel(strategy.intent.structure)}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between rounded-md bg-white/80 px-2.5 py-1.5 dark:bg-slate-900/50">
+                                      <span className="text-slate-500 dark:text-slate-400">DTE Range</span>
+                                      <span className="font-medium text-slate-700 dark:text-slate-300">
+                                        {strategy.intent.dteMin}–{strategy.intent.dteMax}d
+                                      </span>
+                                    </div>
+                                    {strategy.intent.invalidation > 0 && (
+                                      <div className="col-span-2 flex items-center justify-between rounded-md bg-white/80 px-2.5 py-1.5 dark:bg-slate-900/50">
+                                        <span className="text-slate-500 dark:text-slate-400">Invalidation</span>
+                                        <span className="font-mono font-medium text-slate-700 dark:text-slate-300">
+                                          ${formatStrike(strategy.intent.invalidation)}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
 
                           {/* Right column: Order Plan */}

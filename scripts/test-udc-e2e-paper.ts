@@ -196,9 +196,9 @@ async function main() {
 
       // Persist decision snapshot
       await db.query(
-        `INSERT INTO decision_snapshots (signal_id, decision_id, status, reason, order_plan_json, created_at)
-         VALUES ($1, $2, $3, $4, $5, NOW()) ON CONFLICT DO NOTHING`,
-        [signalId, result.decisionId, result.status, result.reason ?? null, JSON.stringify(result.plan)],
+        `INSERT INTO decision_snapshots (signal_id, decision_id, status, reason, order_plan_json, strategy_json, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW()) ON CONFLICT DO NOTHING`,
+        [signalId, result.decisionId, result.status, result.reason ?? null, JSON.stringify(result.plan), result.decision ? JSON.stringify(result.decision) : null],
       );
 
       // ── Step 3: Create orders (replicates createOrdersFromUDCPlan) ────

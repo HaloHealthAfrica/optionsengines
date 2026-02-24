@@ -1059,8 +1059,8 @@ export class OrchestratorService {
     } catch (err) {
       const reason = err instanceof StaleSnapshotError ? 'STALE_SNAPSHOT' : 'SNAPSHOT_FETCH_FAILED';
       await db.query(
-        `INSERT INTO decision_snapshots (signal_id, status, reason, order_plan_json, created_at)
-         VALUES ($1, $2, $3, NULL, NOW())`,
+        `INSERT INTO decision_snapshots (signal_id, status, reason, order_plan_json, strategy_json, created_at)
+         VALUES ($1, $2, $3, NULL, NULL, NOW())`,
         [signal.signal_id, 'BLOCKED', `${reason}: ${(err as Error).message}`],
       );
       Sentry.addBreadcrumb({
@@ -1114,14 +1114,15 @@ export class OrchestratorService {
 
     try {
       await db.query(
-        `INSERT INTO decision_snapshots (signal_id, decision_id, status, reason, order_plan_json, created_at)
-         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        `INSERT INTO decision_snapshots (signal_id, decision_id, status, reason, order_plan_json, strategy_json, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
         [
           signal.signal_id,
           udcResult.decisionId ?? null,
           udcResult.status,
           udcResult.reason ?? null,
           udcResult.plan ? JSON.stringify(udcResult.plan) : null,
+          udcResult.decision ? JSON.stringify(udcResult.decision) : null,
         ],
       );
     } catch (insertErr: any) {

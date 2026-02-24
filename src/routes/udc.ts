@@ -39,7 +39,7 @@ router.get('/snapshots', requireAuth, async (req: Request, res: Response) => {
     const offset = Math.max(0, Number(req.query.offset) || 0);
     const status = req.query.status as string | undefined;
 
-    let query = `SELECT id, signal_id, decision_id, status, reason, order_plan_json, created_at
+    let query = `SELECT id, signal_id, decision_id, status, reason, order_plan_json, strategy_json, created_at
                  FROM decision_snapshots`;
     const params: unknown[] = [];
 
