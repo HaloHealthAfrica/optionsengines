@@ -1035,14 +1035,16 @@ export class OrchestratorService {
       return null;
     }
 
+    const rawPayload = signal.raw_payload as Record<string, unknown> | undefined;
     const udcSignal: UDCSignal = {
       id: signal.signal_id,
       symbol: signal.symbol,
       direction: signal.direction,
       timeframe: signal.timeframe,
       timestamp: signal.timestamp instanceof Date ? signal.timestamp.getTime() : Date.now(),
-      pattern: (signal.raw_payload as Record<string, unknown>)?.pattern as string | undefined,
-      confidence: (signal.raw_payload as Record<string, unknown>)?.confidence as number | undefined,
+      pattern: rawPayload?.pattern as string | undefined,
+      confidence: rawPayload?.confidence as number | undefined,
+      raw_payload: rawPayload,
     };
 
     const isIntraday = ['1', '3', '5', '15'].includes(signal.timeframe ?? '');

@@ -2,6 +2,7 @@
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 import { Candle } from '../../types/index.js';
+import type { MarketDataOptionRow } from './marketdata-client.js';
 
 export interface PolygonBar {
   t: number; // timestamp (ms)
@@ -236,6 +237,84 @@ export class PolygonClient implements Pick<IMarketDataProvider, 'name' | 'health
       });
       throw error;
     }
+  }
+
+  /**
+   * Get full options chain for an underlying symbol via the v3 snapshot endpoint.
+   * Returns rows in MarketDataOptionRow format for compatibility with the rest of the system.
+   */
+  async getOptionsChain(symbol: string): Promise<MarketDataOptionRow[]> {
+    if (!this.apiKey) {
+      throw new Error('Polygon API key not configured');
+    }
+
+    interface PolygonOptionSnapshot {
+      details?: {
+        contract_type?: string;
+        expiration_date?: string;
+        strike_price?: number;
+        ticker?: string;
+      };
+      greeks?: {
+        delta?: number;
+        gamma?: number;
+        theta?: number;
+        vega?: number;
+      };
+      implied_volatility?: number;
+      last_quote?: {
+        ask?: number;
+        bid?: number;
+        midpoint?: number;
+      };
+      open_interest?: number;
+      day?: { volume?: number };
+    }
+
+    interface PolygonOptionsResponse {
+      results?: PolygonOptionSnapshot[];
+      status?: string;
+      next_url?: string;
+    }
+
+    const allRows: MarketDataOptionRow[] = [];
+    let url: string | null = `/v3/snapshot/options/${symbol}?limit=250`;
+
+    while (url) {
+      const resp: PolygonOptionsResponse = await this.request<PolygonOptionsResponse>(url);
+
+      if (!resp.results || resp.results.length === 0) break;
+
+      for (const snap of resp.results) {
+        const d = snap.details;
+        if (!d?.strike_price || !d.expiration_date) continue;
+
+        const contractType = d.contract_type?.toLowerCase();
+        const optionType: 'call' | 'put' =
+          contractType === 'call' ? 'call' : 'put';
+
+        allRows.push({
+          optionSymbol: d.ticker ?? `O:${symbol}`,
+          strike: d.strike_price,
+          expiration: d.expiration_date,
+          optionType,
+          openInterest: snap.open_interest ?? 0,
+          gamma: snap.greeks?.gamma ?? undefined,
+          volume: snap.day?.volume ?? 0,
+          iv: snap.implied_volatility ?? undefined,
+        });
+      }
+
+      if (resp.next_url) {
+        const parsed: URL = new URL(resp.next_url);
+        url = parsed.pathname + parsed.search;
+      } else {
+        url = null;
+      }
+    }
+
+    logger.info('Polygon options chain fetched', { symbol, count: allRows.length });
+    return allRows;
   }
 
   /**

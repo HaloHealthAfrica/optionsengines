@@ -322,6 +322,24 @@ export class MarketDataService {
       }
     }
 
+    // Implicit Polygon fallback when not already in the priority list
+    if (config.polygonApiKey && !this.providerPriority.includes('polygon') && this.checkCircuitBreaker('polygon')) {
+      try {
+        const polygonQuote = await this.polygon.getLatestQuote(symbol);
+        const price = polygonQuote.mid;
+        if (this.isValidPrice(symbol, price)) {
+          this.recordSuccess('polygon');
+          cache.set(cacheKey, price, 30);
+          this.lastKnownStockPrices.set(symbol, { price, fetchedAt: Date.now() });
+          logger.info('Price fetched from polygon (implicit fallback)', { symbol, price });
+          return price;
+        }
+      } catch (error) {
+        logger.warn('Polygon implicit price fallback failed', { error, symbol });
+        this.recordFailure('polygon', error);
+      }
+    }
+
     // P0: Fall back to last known price if within staleness threshold
     const lastKnown = this.lastKnownStockPrices.get(symbol);
     if (lastKnown && (Date.now() - lastKnown.fetchedAt) < config.staleDataMaxAgeMs) {
@@ -697,6 +715,32 @@ export class MarketDataService {
       } catch (error) {
         this.recordFailure('marketdata', error);
         logger.warn('MarketData.app options chain failed', { symbol, error });
+      }
+    }
+
+    // Last resort: Polygon / Massive.com
+    if (config.polygonApiKey && this.checkCircuitBreaker('polygon')) {
+      try {
+        const rows = await retry(
+          async () => {
+            await rateLimiter.waitForToken('polygon');
+            return this.polygon.getOptionsChain(symbol);
+          },
+          {
+            retries: this.maxRetries,
+            onRetry: (error, attempt, delayMs) => {
+              logger.warn(`Retry ${attempt} for polygon options chain`, { error, delayMs });
+            },
+          }
+        );
+
+        this.recordSuccess('polygon');
+        cache.set(cacheKey, rows, 60);
+        logger.info('Options chain: Polygon (fallback)', { symbol, count: rows.length });
+        return rows;
+      } catch (error) {
+        this.recordFailure('polygon', error);
+        logger.warn('Polygon options chain failed', { symbol, error });
       }
     }
 
