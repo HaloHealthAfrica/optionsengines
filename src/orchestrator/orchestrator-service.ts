@@ -1114,11 +1114,23 @@ export class OrchestratorService {
       }
     }
 
-    const entryRaw = Number(rawPayload?.entry ?? rawPayload?.entry_price ?? 0) || null;
-    const targetRaw = Number(rawPayload?.target ?? rawPayload?.target_price ?? 0) || null;
+    const entryFromPayload = Number(rawPayload?.entry ?? rawPayload?.entry_price ?? 0) || null;
+    const targetFromPayload = Number(rawPayload?.target ?? rawPayload?.target_price ?? 0) || null;
     const stopRaw = Number(rawPayload?.stop ?? rawPayload?.stop_loss ?? rawPayload?.stop_price ?? 0) || null;
     const stratInv = udcResult.decision?.intent?.invalidation ?? 0;
     const snapshotInvalidation = (stratInv > 0 ? stratInv : null) ?? stopRaw;
+
+    const snapshotPrice = snapshot?.price ?? 0;
+    const entryRaw = entryFromPayload ?? (snapshotPrice > 0 ? snapshotPrice : null);
+
+    const isBull = udcResult.decision?.intent?.direction === 'BULL';
+    let targetRaw = targetFromPayload;
+    if (targetRaw == null && entryRaw != null && snapshotInvalidation != null && snapshotInvalidation > 0) {
+      const risk = Math.abs(entryRaw - snapshotInvalidation);
+      if (risk > 0) {
+        targetRaw = Math.round((isBull ? entryRaw + risk * 2 : entryRaw - risk * 2) * 100) / 100;
+      }
+    }
 
     try {
       await db.query(
@@ -1135,7 +1147,7 @@ export class OrchestratorService {
           udcResult.plan ? JSON.stringify(udcResult.plan) : null,
           udcResult.decision ? JSON.stringify(udcResult.decision) : null,
           entryRaw,
-          entryRaw != null && targetRaw != null ? entryRaw + 1 : null,
+          entryRaw != null ? Math.round((entryRaw + 1) * 100) / 100 : null,
           targetRaw,
           targetRaw,
           snapshotInvalidation,
