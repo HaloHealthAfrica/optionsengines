@@ -482,6 +482,37 @@ export class MarketDataService {
       }
     }
 
+    // MarketData.app fallback: fetch the options chain and find the matching contract
+    if (this.checkCircuitBreaker('marketdata')) {
+      try {
+        const chain = await retry(
+          async () => {
+            await rateLimiter.waitForToken('twelvedata');
+            return this.marketData.getOptionsChain(symbol);
+          },
+          { retries: 1, providerAware: true }
+        );
+
+        const expiryStr = expiration.toISOString().slice(0, 10);
+        const match = chain.find(r =>
+          Math.abs(r.strike - strike) < 0.01 &&
+          r.optionType === optionType &&
+          r.expiration?.startsWith(expiryStr)
+        );
+
+        if (match?.premium != null && Number.isFinite(match.premium) && match.premium > 0) {
+          this.recordSuccess('marketdata');
+          cache.set(cacheKey, match.premium, 30);
+          this.lastKnownOptionPrices.set(cacheKey, { price: match.premium, fetchedAt: Date.now() });
+          logger.info('Option price from MarketData.app chain lookup', { symbol, strike, optionType, price: match.premium });
+          return match.premium;
+        }
+      } catch (error) {
+        this.recordFailure('marketdata', error);
+        logger.warn('MarketData.app chain-based option price fallback failed', { symbol, strike, optionType, error });
+      }
+    }
+
     // P0: Fall back to last known option price if within staleness threshold
     const lastKnown = this.lastKnownOptionPrices.get(cacheKey);
     if (lastKnown && (Date.now() - lastKnown.fetchedAt) < config.staleDataMaxAgeMs) {

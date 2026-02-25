@@ -199,7 +199,7 @@ export class PolygonClient implements Pick<IMarketDataProvider, 'name' | 'health
   }
 
   /**
-   * Get option price
+   * Get option price via v3 options snapshot (filtered by strike/expiry/type).
    */
   async getOptionPrice(
     symbol: string,
@@ -207,36 +207,36 @@ export class PolygonClient implements Pick<IMarketDataProvider, 'name' | 'health
     expiration: Date,
     optionType: 'call' | 'put'
   ): Promise<number> {
-    try {
-      // Format option symbol: O:SPY240119C00450000
-      const optionSymbol = this.formatOptionSymbol(symbol, strike, expiration, optionType);
+    const expiryStr = expiration.toISOString().slice(0, 10);
 
-      const endpoint = `/v2/snapshot/locale/us/markets/stocks/tickers/${optionSymbol}`;
-
-      interface PolygonSnapshotResponse {
-        status: string;
-        ticker: PolygonSnapshot;
-      }
-
-      const response = await this.request<PolygonSnapshotResponse>(endpoint);
-
-      const price = response.ticker.day.c;
-
-      logger.debug('Massive.com option price fetched', {
-        optionSymbol,
-        price,
-      });
-
-      return price;
-    } catch (error) {
-      logger.error('Failed to fetch Massive.com option price', error, {
-        symbol,
-        strike,
-        expiration,
-        optionType,
-      });
-      throw error;
+    interface PolygonOptionSnap {
+      details?: { strike_price?: number; expiration_date?: string; contract_type?: string };
+      last_quote?: { ask?: number; bid?: number; midpoint?: number };
+      day?: { close?: number; volume?: number };
     }
+    interface PolygonOptionsResp {
+      results?: PolygonOptionSnap[];
+      status?: string;
+    }
+
+    const endpoint = `/v3/snapshot/options/${symbol}?strike_price=${strike}&expiration_date=${expiryStr}&contract_type=${optionType}&limit=10`;
+    const response = await this.request<PolygonOptionsResp>(endpoint);
+
+    if (!response.results || response.results.length === 0) {
+      throw new Error(`No option snapshot for ${symbol} ${strike} ${expiryStr} ${optionType}`);
+    }
+
+    const snap = response.results[0];
+    const mid = snap.last_quote?.midpoint;
+    const bid = snap.last_quote?.bid;
+    const ask = snap.last_quote?.ask;
+    const dayClose = snap.day?.close;
+
+    if (mid != null && mid > 0) return mid;
+    if (bid != null && ask != null && bid > 0 && ask > 0) return (bid + ask) / 2;
+    if (dayClose != null && dayClose > 0) return dayClose;
+
+    throw new Error(`No valid price in option snapshot for ${symbol} ${strike} ${expiryStr} ${optionType}`);
   }
 
   /**
@@ -315,25 +315,6 @@ export class PolygonClient implements Pick<IMarketDataProvider, 'name' | 'health
 
     logger.info('Polygon options chain fetched', { symbol, count: allRows.length });
     return allRows;
-  }
-
-  /**
-   * Format option symbol in Massive.com format (same as Polygon)
-   * Example: O:SPY240119C00450000
-   */
-  private formatOptionSymbol(
-    underlying: string,
-    strike: number,
-    expiration: Date,
-    optionType: 'call' | 'put'
-  ): string {
-    const year = expiration.getFullYear().toString().slice(-2);
-    const month = (expiration.getMonth() + 1).toString().padStart(2, '0');
-    const day = expiration.getDate().toString().padStart(2, '0');
-    const type = optionType === 'call' ? 'C' : 'P';
-    const strikeStr = (strike * 1000).toFixed(0).padStart(8, '0');
-
-    return `O:${underlying}${year}${month}${day}${type}${strikeStr}`;
   }
 
   /**

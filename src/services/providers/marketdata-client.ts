@@ -265,6 +265,7 @@ export class MarketDataClient implements Pick<IMarketDataProvider, 'name' | 'hea
         gamma: response.gamma?.[i],
         volume: response.volume?.[i],
         iv: response.iv?.[i],
+        premium: response.mid?.[i] ?? response.last?.[i] ?? response.premium?.[i],
       });
     }
 
