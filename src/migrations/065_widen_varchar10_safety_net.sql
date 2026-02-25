@@ -24,4 +24,4 @@ ALTER TABLE alert_outcomes ALTER COLUMN timeframe TYPE VARCHAR(50);
 -- Also widen symbol columns that are too narrow for longer tickers (e.g. BRK/B, GOOGL)
 ALTER TABLE alert_outcomes ALTER COLUMN symbol TYPE VARCHAR(20);
 ALTER TABLE symbol_strat_scores ALTER COLUMN symbol TYPE VARCHAR(20);
-ALTER TABLE orchestrator_context ALTER COLUMN symbol TYPE VARCHAR(20);
+ALTER TABLE IF EXISTS orchestrator_context ALTER COLUMN symbol TYPE VARCHAR(20);
