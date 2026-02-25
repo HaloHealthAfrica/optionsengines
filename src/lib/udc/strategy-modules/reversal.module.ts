@@ -18,7 +18,7 @@ export function evaluateReversal(signal: UDCSignal): StrategyCandidate | null {
   const isReversalPattern =
     pattern.includes('reversal') ||
     pattern.includes('scalp_rev') ||
-    pattern.includes('scalp') ||
+    pattern === 'scalp' ||
     pattern.includes('mean_rev') ||
     pattern.includes('exhaustion') ||
     pattern.includes('divergence') ||

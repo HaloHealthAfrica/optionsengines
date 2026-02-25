@@ -65,7 +65,7 @@ export async function runUDC(
   const setupType = routed.intent.structure;
   const decisionId = buildDecisionId(signal.id, strategy, horizon, setupType);
 
-  if (routed.intent.invalidation === 0 && strategy !== 'ORB') {
+  if (routed.intent.invalidation === 0) {
     return { status: 'BLOCKED', reason: 'Invalidation level missing', decisionId };
   }
 
