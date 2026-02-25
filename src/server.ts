@@ -65,7 +65,7 @@ async function bootstrap(): Promise<void> {
     logger.warn('Failed to init trading mode from DB, using env fallback', { error: err });
   });
 
-  const server = app.listen(config.port, () => {
+  const server = app.listen(config.port, '0.0.0.0', () => {
     logger.info(`Server started`, {
       port: config.port,
       environment: config.nodeEnv,
