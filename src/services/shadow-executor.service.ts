@@ -111,7 +111,7 @@ export class ShadowExecutor {
         optionPrice,
         entryTimestamp,
         JSON.stringify(decision.contributingAgents),
-        decision.finalConfidence,
+        Math.round(decision.finalConfidence),
         metaGamma ?? null,
       ]
     );

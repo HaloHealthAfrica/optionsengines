@@ -883,9 +883,9 @@ export class OrchestratorService {
 
     const metaDecision: MetaDecision = {
       finalBias: signal.direction === 'long' ? 'bullish' : 'bearish',
-      finalConfidence: 0.75,
+      finalConfidence: 75,
       contributingAgents: ['orchestrator-shadow'],
-      consensusStrength: 0.75,
+      consensusStrength: 75,
       decision: 'approve',
       reasons: ['orchestrator shadow execution'],
     };
