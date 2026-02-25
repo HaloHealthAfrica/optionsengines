@@ -63,8 +63,17 @@ router.get('/snapshots', requireAuth, async (req: Request, res: Response) => {
       : `SELECT COUNT(*)::int AS total FROM decision_snapshots`;
     const countResult = await db.query(countQuery, status ? [status] : []);
 
+    const NUMERIC_FIELDS = ['entry_price_low', 'entry_price_high', 'exit_price_partial', 'exit_price_full', 'invalidation_price', 'option_stop_pct'] as const;
+    const data = result.rows.map((row: Record<string, unknown>) => {
+      const out = { ...row };
+      for (const f of NUMERIC_FIELDS) {
+        if (out[f] != null) out[f] = Number(out[f]);
+      }
+      return out;
+    });
+
     res.json({
-      data: result.rows,
+      data,
       total: countResult.rows[0]?.total ?? 0,
       limit,
       offset,

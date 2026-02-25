@@ -108,8 +108,10 @@ function shortId(id: string): string {
   return `${id.slice(0, 6)}...${id.slice(-4)}`;
 }
 
-function formatStrike(strike: number): string {
-  return strike % 1 === 0 ? strike.toFixed(0) : strike.toFixed(2);
+function formatStrike(strike: number | string): string {
+  const n = Number(strike);
+  if (!Number.isFinite(n)) return String(strike);
+  return n % 1 === 0 ? n.toFixed(0) : n.toFixed(2);
 }
 
 function formatCurrency(val: number): string {
