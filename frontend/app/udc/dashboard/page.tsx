@@ -65,16 +65,13 @@ interface ParsedStrategy {
   confidence: number;
 }
 
-interface TradeLevels {
-  entryLow: string;
-  entryHigh: string;
-  exitLow: string;
-  exitHigh: string;
-  invalidation: string;
-  entryNote: string;
-  exitNote: string;
-  invalidationNote: string;
-  optionStopPct: string;
+interface TradeLevelEdits {
+  entry_price_low: string;
+  entry_price_high: string;
+  exit_price_partial: string;
+  exit_price_full: string;
+  invalidation_price: string;
+  option_stop_pct: string;
 }
 
 interface Snapshot {
@@ -85,6 +82,12 @@ interface Snapshot {
   reason: string | null;
   order_plan_json: Record<string, unknown> | null;
   strategy_json: Record<string, unknown> | null;
+  entry_price_low: number | null;
+  entry_price_high: number | null;
+  exit_price_partial: number | null;
+  exit_price_full: number | null;
+  invalidation_price: number | null;
+  option_stop_pct: number | null;
   created_at: string;
 }
 
@@ -144,43 +147,6 @@ function parseStrategy(json: Record<string, unknown> | null): ParsedStrategy | n
       confidence: (intent.confidence as number) ?? 0,
     },
     confidence: (json.confidence as number) ?? 0,
-  };
-}
-
-function deriveTradeLevels(strategy: ParsedStrategy | null, plan: ParsedOrderPlan | null): TradeLevels {
-  const inv = strategy?.intent.invalidation ?? 0;
-  const strike = plan?.legs?.[0]?.strike ?? 0;
-  const isBull = strategy?.intent.direction !== 'BEAR';
-  const symbol = plan?.symbol ?? strategy?.intent.symbol ?? '';
-
-  const entryLow = strike > 0 ? strike + 1 : 0;
-  const entryHigh = entryLow > 0 ? entryLow + 1 : 0;
-
-  const riskDistance = entryLow > 0 && inv > 0 ? Math.abs(entryLow - inv) : 5;
-  const exitBase = isBull
-    ? Math.round(entryLow + riskDistance * 2)
-    : Math.round(entryLow - riskDistance * 2);
-  const exitLow = isBull ? exitBase : exitBase - 1;
-  const exitHigh = isBull ? exitBase + 1 : exitBase;
-
-  return {
-    entryLow: entryLow > 0 ? entryLow.toString() : '',
-    entryHigh: entryHigh > 0 ? entryHigh.toString() : '',
-    exitLow: exitLow > 0 ? exitLow.toString() : '',
-    exitHigh: exitHigh > 0 ? exitHigh.toString() : '',
-    invalidation: inv > 0 ? inv.toString() : '',
-    entryNote: strategy?.intent.strategy === 'ORB'
-      ? 'Wait for confirmed breakout above ORH'
-      : 'Wait for confirmed entry signal',
-    exitNote:
-      exitLow > 0
-        ? `Partial exit at $${formatStrike(Math.min(exitLow, exitHigh))}, full exit at $${formatStrike(Math.max(exitLow, exitHigh))}`
-        : 'Set target levels',
-    invalidationNote:
-      inv > 0
-        ? `Exit if ${symbol || 'price'} closes 5-min candle below this level`
-        : 'Set invalidation level',
-    optionStopPct: '50',
   };
 }
 
@@ -330,7 +296,13 @@ export default function UDCDashboardPage() {
   const [switching, setSwitching] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
-  const [tradeLevelsMap, setTradeLevelsMap] = useState<Record<string, TradeLevels>>({});
+  const [editingLevelsId, setEditingLevelsId] = useState<string | null>(null);
+  const [levelEdits, setLevelEdits] = useState<TradeLevelEdits>({
+    entry_price_low: '', entry_price_high: '',
+    exit_price_partial: '', exit_price_full: '',
+    invalidation_price: '', option_stop_pct: '',
+  });
+  const [savingLevels, setSavingLevels] = useState(false);
 
   useEffect(() => {
     const saved = window.localStorage.getItem('oa-theme');
@@ -400,6 +372,43 @@ export default function UDCDashboardPage() {
     fetchSnapshots();
     fetchMode();
   }, [fetchSnapshots, fetchMode]);
+
+  const startEditingLevels = useCallback((snap: Snapshot) => {
+    setEditingLevelsId(snap.id);
+    setLevelEdits({
+      entry_price_low: snap.entry_price_low?.toString() ?? '',
+      entry_price_high: snap.entry_price_high?.toString() ?? '',
+      exit_price_partial: snap.exit_price_partial?.toString() ?? '',
+      exit_price_full: snap.exit_price_full?.toString() ?? '',
+      invalidation_price: snap.invalidation_price?.toString() ?? '',
+      option_stop_pct: (snap.option_stop_pct ?? 50).toString(),
+    });
+  }, []);
+
+  const saveTradeLevels = useCallback(async (snapId: string) => {
+    setSavingLevels(true);
+    try {
+      const body: Record<string, number | null> = {};
+      for (const [key, val] of Object.entries(levelEdits)) {
+        body[key] = val === '' ? null : Number(val);
+      }
+      const res = await fetch(`/api/udc/snapshots/${snapId}/trade-levels`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('Save failed');
+      const saved = await res.json();
+      setSnapshots(prev => prev.map(s =>
+        s.id === snapId ? { ...s, ...saved } : s,
+      ));
+      setEditingLevelsId(null);
+    } catch {
+      setError('Failed to save trade levels');
+    } finally {
+      setSavingLevels(false);
+    }
+  }, [levelEdits]);
 
   const stats = {
     total,
@@ -687,23 +696,18 @@ export default function UDCDashboardPage() {
                 const firstLeg = plan?.legs[0];
                 const dte = firstLeg ? daysUntilExpiry(firstLeg.expiry) : null;
 
-                const levels = tradeLevelsMap[snap.id] ?? deriveTradeLevels(strategy, plan);
-                const updateLevel = (field: keyof TradeLevels, value: string) => {
-                  setTradeLevelsMap(prev => ({
-                    ...prev,
-                    [snap.id]: { ...(prev[snap.id] ?? deriveTradeLevels(strategy, plan)), [field]: value },
-                  }));
+                const isEditingLevels = editingLevelsId === snap.id;
+                const toNum = (v: string | number | null | undefined): number | null => {
+                  if (v == null || v === '') return null;
+                  const n = Number(v);
+                  return Number.isFinite(n) ? n : null;
                 };
-                const eLow = parseFloat(levels.entryLow) || 0;
-                const eHigh = parseFloat(levels.entryHigh) || 0;
-                const entryMid = eHigh > 0 ? (eLow + eHigh) / 2 : eLow;
-                const xLow = parseFloat(levels.exitLow) || 0;
-                const xHigh = parseFloat(levels.exitHigh) || 0;
-                const exitMid = xHigh > 0 ? (xLow + xHigh) / 2 : xLow;
-                const invPrice = parseFloat(levels.invalidation) || 0;
-                const reward = Math.abs(exitMid - entryMid);
-                const risk = Math.abs(entryMid - invPrice);
-                const rrRatio = risk > 0 && reward > 0 ? (reward / risk).toFixed(1) : '—';
+                const entryLow = toNum(isEditingLevels ? levelEdits.entry_price_low : snap.entry_price_low);
+                const exitFull = toNum(isEditingLevels ? levelEdits.exit_price_full : snap.exit_price_full);
+                const invPrice = toNum(isEditingLevels ? levelEdits.invalidation_price : snap.invalidation_price);
+                const reward = entryLow != null && exitFull != null ? exitFull - entryLow : null;
+                const risk = entryLow != null && invPrice != null ? entryLow - invPrice : null;
+                const rrRatio = risk != null && reward != null && risk > 0 && reward > 0 ? (reward / risk).toFixed(1) : '—';
 
                 return (
                   <div key={snap.id}>
@@ -1086,11 +1090,35 @@ export default function UDCDashboardPage() {
                           </div>
                         </div>
 
-                        {(strategy || plan) && (entryMid > 0 || invPrice > 0) && (
+                        {(strategy || plan) && (
                           <div className="mt-5">
                             <div className="mb-3 flex items-center gap-2">
                               <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Trade Levels</h4>
-                              <Pencil size={10} className="text-slate-300 dark:text-slate-600" />
+                              {isEditingLevels ? (
+                                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    onClick={() => saveTradeLevels(snap.id)}
+                                    disabled={savingLevels}
+                                    className="rounded-md bg-emerald-500 px-2 py-0.5 text-[10px] font-semibold text-white transition hover:bg-emerald-600 disabled:opacity-50"
+                                  >
+                                    {savingLevels ? 'Saving…' : 'Save'}
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingLevelsId(null)}
+                                    className="rounded-md bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-600 transition hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); startEditingLevels(snap); }}
+                                  className="rounded p-0.5 text-slate-300 transition hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400"
+                                  title="Edit trade levels"
+                                >
+                                  <Pencil size={10} />
+                                </button>
+                              )}
                             </div>
 
                             <div className="grid gap-3 sm:grid-cols-3">
@@ -1102,32 +1130,33 @@ export default function UDCDashboardPage() {
                                     Entry Price
                                   </span>
                                 </div>
-                                <div className="mt-1.5 flex items-baseline gap-1">
-                                  <span className="text-sm text-blue-400 dark:text-blue-500">$</span>
-                                  <input
-                                    type="text"
-                                    value={levels.entryLow}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onChange={(e) => updateLevel('entryLow', e.target.value)}
-                                    className="w-14 bg-transparent text-sm font-bold text-blue-700 outline-none transition focus:ring-1 focus:ring-blue-400/50 rounded px-0.5 dark:text-blue-300"
-                                  />
-                                  <span className="text-sm text-blue-300 dark:text-blue-600">–</span>
-                                  <span className="text-sm text-blue-400 dark:text-blue-500">$</span>
-                                  <input
-                                    type="text"
-                                    value={levels.entryHigh}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onChange={(e) => updateLevel('entryHigh', e.target.value)}
-                                    className="w-14 bg-transparent text-sm font-bold text-blue-700 outline-none transition focus:ring-1 focus:ring-blue-400/50 rounded px-0.5 dark:text-blue-300"
-                                  />
-                                </div>
-                                <input
-                                  type="text"
-                                  value={levels.entryNote}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onChange={(e) => updateLevel('entryNote', e.target.value)}
-                                  className="mt-1.5 w-full bg-transparent text-[10px] text-blue-500/70 outline-none transition focus:ring-1 focus:ring-blue-400/50 rounded px-0.5 dark:text-blue-400/60"
-                                />
+                                {isEditingLevels ? (
+                                  <div className="mt-1.5 flex items-baseline gap-1" onClick={(e) => e.stopPropagation()}>
+                                    <span className="text-sm text-blue-400 dark:text-blue-500">$</span>
+                                    <input
+                                      type="text"
+                                      value={levelEdits.entry_price_low}
+                                      onChange={(e) => setLevelEdits(p => ({ ...p, entry_price_low: e.target.value }))}
+                                      placeholder="Low"
+                                      className="w-14 rounded bg-white px-1 text-sm font-bold text-blue-700 outline-none ring-1 ring-blue-300 focus:ring-blue-500 dark:bg-slate-800 dark:text-blue-300 dark:ring-blue-600"
+                                    />
+                                    <span className="text-sm text-blue-300 dark:text-blue-600">–</span>
+                                    <span className="text-sm text-blue-400 dark:text-blue-500">$</span>
+                                    <input
+                                      type="text"
+                                      value={levelEdits.entry_price_high}
+                                      onChange={(e) => setLevelEdits(p => ({ ...p, entry_price_high: e.target.value }))}
+                                      placeholder="High"
+                                      className="w-14 rounded bg-white px-1 text-sm font-bold text-blue-700 outline-none ring-1 ring-blue-300 focus:ring-blue-500 dark:bg-slate-800 dark:text-blue-300 dark:ring-blue-600"
+                                    />
+                                  </div>
+                                ) : (
+                                  <p className={`mt-1.5 text-sm font-bold ${snap.entry_price_low != null ? 'text-blue-700 dark:text-blue-300' : 'text-slate-300 dark:text-slate-600'}`}>
+                                    {snap.entry_price_low != null
+                                      ? `$${formatStrike(snap.entry_price_low)}${snap.entry_price_high != null ? ` – $${formatStrike(snap.entry_price_high)}` : ''}`
+                                      : '—'}
+                                  </p>
+                                )}
                               </div>
 
                               {/* Exit Card */}
@@ -1138,32 +1167,33 @@ export default function UDCDashboardPage() {
                                     Exit Price
                                   </span>
                                 </div>
-                                <div className="mt-1.5 flex items-baseline gap-1">
-                                  <span className="text-sm text-emerald-400 dark:text-emerald-500">$</span>
-                                  <input
-                                    type="text"
-                                    value={levels.exitLow}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onChange={(e) => updateLevel('exitLow', e.target.value)}
-                                    className="w-14 bg-transparent text-sm font-bold text-emerald-700 outline-none transition focus:ring-1 focus:ring-emerald-400/50 rounded px-0.5 dark:text-emerald-300"
-                                  />
-                                  <span className="text-sm text-emerald-300 dark:text-emerald-600">–</span>
-                                  <span className="text-sm text-emerald-400 dark:text-emerald-500">$</span>
-                                  <input
-                                    type="text"
-                                    value={levels.exitHigh}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onChange={(e) => updateLevel('exitHigh', e.target.value)}
-                                    className="w-14 bg-transparent text-sm font-bold text-emerald-700 outline-none transition focus:ring-1 focus:ring-emerald-400/50 rounded px-0.5 dark:text-emerald-300"
-                                  />
-                                </div>
-                                <input
-                                  type="text"
-                                  value={levels.exitNote}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onChange={(e) => updateLevel('exitNote', e.target.value)}
-                                  className="mt-1.5 w-full bg-transparent text-[10px] text-emerald-500/70 outline-none transition focus:ring-1 focus:ring-emerald-400/50 rounded px-0.5 dark:text-emerald-400/60"
-                                />
+                                {isEditingLevels ? (
+                                  <div className="mt-1.5 flex items-baseline gap-1" onClick={(e) => e.stopPropagation()}>
+                                    <span className="text-sm text-emerald-400 dark:text-emerald-500">$</span>
+                                    <input
+                                      type="text"
+                                      value={levelEdits.exit_price_partial}
+                                      onChange={(e) => setLevelEdits(p => ({ ...p, exit_price_partial: e.target.value }))}
+                                      placeholder="Partial"
+                                      className="w-14 rounded bg-white px-1 text-sm font-bold text-emerald-700 outline-none ring-1 ring-emerald-300 focus:ring-emerald-500 dark:bg-slate-800 dark:text-emerald-300 dark:ring-emerald-600"
+                                    />
+                                    <span className="text-sm text-emerald-300 dark:text-emerald-600">–</span>
+                                    <span className="text-sm text-emerald-400 dark:text-emerald-500">$</span>
+                                    <input
+                                      type="text"
+                                      value={levelEdits.exit_price_full}
+                                      onChange={(e) => setLevelEdits(p => ({ ...p, exit_price_full: e.target.value }))}
+                                      placeholder="Full"
+                                      className="w-14 rounded bg-white px-1 text-sm font-bold text-emerald-700 outline-none ring-1 ring-emerald-300 focus:ring-emerald-500 dark:bg-slate-800 dark:text-emerald-300 dark:ring-emerald-600"
+                                    />
+                                  </div>
+                                ) : (
+                                  <p className={`mt-1.5 text-sm font-bold ${snap.exit_price_partial != null ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-300 dark:text-slate-600'}`}>
+                                    {snap.exit_price_partial != null
+                                      ? `$${formatStrike(snap.exit_price_partial)}${snap.exit_price_full != null ? ` – $${formatStrike(snap.exit_price_full)}` : ''}`
+                                      : '—'}
+                                  </p>
+                                )}
                               </div>
 
                               {/* Invalidation Card */}
@@ -1174,23 +1204,22 @@ export default function UDCDashboardPage() {
                                     Invalidation Price
                                   </span>
                                 </div>
-                                <div className="mt-1.5 flex items-baseline gap-1">
-                                  <span className="text-sm text-rose-400 dark:text-rose-500">$</span>
-                                  <input
-                                    type="text"
-                                    value={levels.invalidation}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onChange={(e) => updateLevel('invalidation', e.target.value)}
-                                    className="w-16 bg-transparent text-sm font-bold text-rose-700 outline-none transition focus:ring-1 focus:ring-rose-400/50 rounded px-0.5 dark:text-rose-300"
-                                  />
-                                </div>
-                                <input
-                                  type="text"
-                                  value={levels.invalidationNote}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onChange={(e) => updateLevel('invalidationNote', e.target.value)}
-                                  className="mt-1.5 w-full bg-transparent text-[10px] text-rose-500/70 outline-none transition focus:ring-1 focus:ring-rose-400/50 rounded px-0.5 dark:text-rose-400/60"
-                                />
+                                {isEditingLevels ? (
+                                  <div className="mt-1.5 flex items-baseline gap-1" onClick={(e) => e.stopPropagation()}>
+                                    <span className="text-sm text-rose-400 dark:text-rose-500">$</span>
+                                    <input
+                                      type="text"
+                                      value={levelEdits.invalidation_price}
+                                      onChange={(e) => setLevelEdits(p => ({ ...p, invalidation_price: e.target.value }))}
+                                      placeholder="Stop"
+                                      className="w-16 rounded bg-white px-1 text-sm font-bold text-rose-700 outline-none ring-1 ring-rose-300 focus:ring-rose-500 dark:bg-slate-800 dark:text-rose-300 dark:ring-rose-600"
+                                    />
+                                  </div>
+                                ) : (
+                                  <p className={`mt-1.5 text-sm font-bold ${snap.invalidation_price != null ? 'text-rose-700 dark:text-rose-300' : 'text-slate-300 dark:text-slate-600'}`}>
+                                    {snap.invalidation_price != null ? `$${formatStrike(snap.invalidation_price)}` : '—'}
+                                  </p>
+                                )}
                               </div>
                             </div>
 
@@ -1200,17 +1229,22 @@ export default function UDCDashboardPage() {
                                 <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-500 dark:text-amber-400">
                                   Option Stop
                                 </span>
-                                <div className="flex items-baseline gap-1">
-                                  <span className="text-xs text-amber-400 dark:text-amber-500">−</span>
-                                  <input
-                                    type="text"
-                                    value={levels.optionStopPct}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onChange={(e) => updateLevel('optionStopPct', e.target.value)}
-                                    className="w-10 bg-transparent text-right text-sm font-bold text-amber-700 outline-none transition focus:ring-1 focus:ring-amber-400/50 rounded px-0.5 dark:text-amber-300"
-                                  />
-                                  <span className="text-xs font-medium text-amber-500 dark:text-amber-400">% of premium</span>
-                                </div>
+                                {isEditingLevels ? (
+                                  <div className="flex items-baseline gap-1" onClick={(e) => e.stopPropagation()}>
+                                    <span className="text-xs text-amber-400 dark:text-amber-500">−</span>
+                                    <input
+                                      type="text"
+                                      value={levelEdits.option_stop_pct}
+                                      onChange={(e) => setLevelEdits(p => ({ ...p, option_stop_pct: e.target.value }))}
+                                      className="w-10 rounded bg-white px-1 text-right text-sm font-bold text-amber-700 outline-none ring-1 ring-amber-300 focus:ring-amber-500 dark:bg-slate-800 dark:text-amber-300 dark:ring-amber-600"
+                                    />
+                                    <span className="text-xs font-medium text-amber-500 dark:text-amber-400">% of premium</span>
+                                  </div>
+                                ) : (
+                                  <span className={`text-sm font-bold ${snap.option_stop_pct != null ? 'text-amber-700 dark:text-amber-300' : 'text-slate-300 dark:text-slate-600'}`}>
+                                    {snap.option_stop_pct != null ? `−${snap.option_stop_pct}% of premium` : '—'}
+                                  </span>
+                                )}
                               </div>
 
                               <div className="flex items-center justify-between rounded-xl border border-slate-200/70 bg-white px-4 py-2.5 dark:border-slate-700/50 dark:bg-slate-900/50">

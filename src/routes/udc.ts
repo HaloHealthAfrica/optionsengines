@@ -39,7 +39,9 @@ router.get('/snapshots', requireAuth, async (req: Request, res: Response) => {
     const offset = Math.max(0, Number(req.query.offset) || 0);
     const status = req.query.status as string | undefined;
 
-    let query = `SELECT id, signal_id, decision_id, status, reason, order_plan_json, strategy_json, created_at
+    let query = `SELECT id, signal_id, decision_id, status, reason, order_plan_json, strategy_json,
+                        entry_price_low, entry_price_high, exit_price_partial, exit_price_full,
+                        invalidation_price, option_stop_pct, created_at
                  FROM decision_snapshots`;
     const params: unknown[] = [];
 
@@ -70,6 +72,53 @@ router.get('/snapshots', requireAuth, async (req: Request, res: Response) => {
   } catch (err) {
     logger.error('Failed to fetch UDC snapshots', err);
     res.status(500).json({ error: 'Failed to fetch snapshots' });
+  }
+});
+
+const TRADE_LEVEL_FIELDS = [
+  'entry_price_low',
+  'entry_price_high',
+  'exit_price_partial',
+  'exit_price_full',
+  'invalidation_price',
+  'option_stop_pct',
+] as const;
+
+router.patch('/snapshots/:id/trade-levels', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const body = req.body as Record<string, unknown>;
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+
+    for (const field of TRADE_LEVEL_FIELDS) {
+      if (field in body) {
+        const val = body[field];
+        params.push(val === null || val === '' ? null : Number(val));
+        sets.push(`${field} = $${params.length}`);
+      }
+    }
+
+    if (sets.length === 0) {
+      return res.status(400).json({ error: 'No valid fields provided' });
+    }
+
+    params.push(id);
+    const result = await db.query(
+      `UPDATE decision_snapshots SET ${sets.join(', ')} WHERE id = $${params.length}
+       RETURNING id, entry_price_low, entry_price_high, exit_price_partial, exit_price_full, invalidation_price, option_stop_pct`,
+      params,
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Snapshot not found' });
+    }
+
+    return res.json(result.rows[0]);
+  } catch (err) {
+    logger.error('Failed to update trade levels', err);
+    return res.status(500).json({ error: 'Failed to update trade levels' });
   }
 });
 
