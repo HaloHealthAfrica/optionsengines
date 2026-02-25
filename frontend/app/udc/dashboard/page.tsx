@@ -29,6 +29,7 @@ import {
   TrendingUp,
   XCircle,
   Zap,
+  Pencil,
 } from 'lucide-react';
 
 interface OptionLeg {
@@ -62,6 +63,18 @@ interface TradeIntent {
 interface ParsedStrategy {
   intent: TradeIntent;
   confidence: number;
+}
+
+interface TradeLevels {
+  entryLow: string;
+  entryHigh: string;
+  exitLow: string;
+  exitHigh: string;
+  invalidation: string;
+  entryNote: string;
+  exitNote: string;
+  invalidationNote: string;
+  optionStopPct: string;
 }
 
 interface Snapshot {
@@ -131,6 +144,43 @@ function parseStrategy(json: Record<string, unknown> | null): ParsedStrategy | n
       confidence: (intent.confidence as number) ?? 0,
     },
     confidence: (json.confidence as number) ?? 0,
+  };
+}
+
+function deriveTradeLevels(strategy: ParsedStrategy | null, plan: ParsedOrderPlan | null): TradeLevels {
+  const inv = strategy?.intent.invalidation ?? 0;
+  const strike = plan?.legs?.[0]?.strike ?? 0;
+  const isBull = strategy?.intent.direction !== 'BEAR';
+  const symbol = plan?.symbol ?? strategy?.intent.symbol ?? '';
+
+  const entryLow = strike > 0 ? strike + 1 : 0;
+  const entryHigh = entryLow > 0 ? entryLow + 1 : 0;
+
+  const riskDistance = entryLow > 0 && inv > 0 ? Math.abs(entryLow - inv) : 5;
+  const exitBase = isBull
+    ? Math.round(entryLow + riskDistance * 2)
+    : Math.round(entryLow - riskDistance * 2);
+  const exitLow = isBull ? exitBase : exitBase - 1;
+  const exitHigh = isBull ? exitBase + 1 : exitBase;
+
+  return {
+    entryLow: entryLow > 0 ? entryLow.toString() : '',
+    entryHigh: entryHigh > 0 ? entryHigh.toString() : '',
+    exitLow: exitLow > 0 ? exitLow.toString() : '',
+    exitHigh: exitHigh > 0 ? exitHigh.toString() : '',
+    invalidation: inv > 0 ? inv.toString() : '',
+    entryNote: strategy?.intent.strategy === 'ORB'
+      ? 'Wait for confirmed breakout above ORH'
+      : 'Wait for confirmed entry signal',
+    exitNote:
+      exitLow > 0
+        ? `Partial exit at $${formatStrike(Math.min(exitLow, exitHigh))}, full exit at $${formatStrike(Math.max(exitLow, exitHigh))}`
+        : 'Set target levels',
+    invalidationNote:
+      inv > 0
+        ? `Exit if ${symbol || 'price'} closes 5-min candle below this level`
+        : 'Set invalidation level',
+    optionStopPct: '50',
   };
 }
 
@@ -280,6 +330,7 @@ export default function UDCDashboardPage() {
   const [switching, setSwitching] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [tradeLevelsMap, setTradeLevelsMap] = useState<Record<string, TradeLevels>>({});
 
   useEffect(() => {
     const saved = window.localStorage.getItem('oa-theme');
@@ -635,6 +686,24 @@ export default function UDCDashboardPage() {
                 const direction = inferDirection(plan?.legs ?? [], strategy);
                 const firstLeg = plan?.legs[0];
                 const dte = firstLeg ? daysUntilExpiry(firstLeg.expiry) : null;
+
+                const levels = tradeLevelsMap[snap.id] ?? deriveTradeLevels(strategy, plan);
+                const updateLevel = (field: keyof TradeLevels, value: string) => {
+                  setTradeLevelsMap(prev => ({
+                    ...prev,
+                    [snap.id]: { ...(prev[snap.id] ?? deriveTradeLevels(strategy, plan)), [field]: value },
+                  }));
+                };
+                const eLow = parseFloat(levels.entryLow) || 0;
+                const eHigh = parseFloat(levels.entryHigh) || 0;
+                const entryMid = eHigh > 0 ? (eLow + eHigh) / 2 : eLow;
+                const xLow = parseFloat(levels.exitLow) || 0;
+                const xHigh = parseFloat(levels.exitHigh) || 0;
+                const exitMid = xHigh > 0 ? (xLow + xHigh) / 2 : xLow;
+                const invPrice = parseFloat(levels.invalidation) || 0;
+                const reward = Math.abs(exitMid - entryMid);
+                const risk = Math.abs(entryMid - invPrice);
+                const rrRatio = risk > 0 && reward > 0 ? (reward / risk).toFixed(1) : '—';
 
                 return (
                   <div key={snap.id}>
@@ -1016,6 +1085,151 @@ export default function UDCDashboardPage() {
                             )}
                           </div>
                         </div>
+
+                        {(strategy || plan) && (entryMid > 0 || invPrice > 0) && (
+                          <div className="mt-5">
+                            <div className="mb-3 flex items-center gap-2">
+                              <h4 className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Trade Levels</h4>
+                              <Pencil size={10} className="text-slate-300 dark:text-slate-600" />
+                            </div>
+
+                            <div className="grid gap-3 sm:grid-cols-3">
+                              {/* Entry Card */}
+                              <div className="rounded-xl border border-blue-200/70 bg-blue-50/30 p-3 dark:border-blue-500/20 dark:bg-blue-500/5">
+                                <div className="flex items-center gap-1.5">
+                                  <Target size={12} className="text-blue-500 dark:text-blue-400" />
+                                  <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-500 dark:text-blue-400">
+                                    Entry Price
+                                  </span>
+                                </div>
+                                <div className="mt-1.5 flex items-baseline gap-1">
+                                  <span className="text-sm text-blue-400 dark:text-blue-500">$</span>
+                                  <input
+                                    type="text"
+                                    value={levels.entryLow}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => updateLevel('entryLow', e.target.value)}
+                                    className="w-14 bg-transparent text-sm font-bold text-blue-700 outline-none transition focus:ring-1 focus:ring-blue-400/50 rounded px-0.5 dark:text-blue-300"
+                                  />
+                                  <span className="text-sm text-blue-300 dark:text-blue-600">–</span>
+                                  <span className="text-sm text-blue-400 dark:text-blue-500">$</span>
+                                  <input
+                                    type="text"
+                                    value={levels.entryHigh}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => updateLevel('entryHigh', e.target.value)}
+                                    className="w-14 bg-transparent text-sm font-bold text-blue-700 outline-none transition focus:ring-1 focus:ring-blue-400/50 rounded px-0.5 dark:text-blue-300"
+                                  />
+                                </div>
+                                <input
+                                  type="text"
+                                  value={levels.entryNote}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => updateLevel('entryNote', e.target.value)}
+                                  className="mt-1.5 w-full bg-transparent text-[10px] text-blue-500/70 outline-none transition focus:ring-1 focus:ring-blue-400/50 rounded px-0.5 dark:text-blue-400/60"
+                                />
+                              </div>
+
+                              {/* Exit Card */}
+                              <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/30 p-3 dark:border-emerald-500/20 dark:bg-emerald-500/5">
+                                <div className="flex items-center gap-1.5">
+                                  <TrendingUp size={12} className="text-emerald-500 dark:text-emerald-400" />
+                                  <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-500 dark:text-emerald-400">
+                                    Exit Price
+                                  </span>
+                                </div>
+                                <div className="mt-1.5 flex items-baseline gap-1">
+                                  <span className="text-sm text-emerald-400 dark:text-emerald-500">$</span>
+                                  <input
+                                    type="text"
+                                    value={levels.exitLow}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => updateLevel('exitLow', e.target.value)}
+                                    className="w-14 bg-transparent text-sm font-bold text-emerald-700 outline-none transition focus:ring-1 focus:ring-emerald-400/50 rounded px-0.5 dark:text-emerald-300"
+                                  />
+                                  <span className="text-sm text-emerald-300 dark:text-emerald-600">–</span>
+                                  <span className="text-sm text-emerald-400 dark:text-emerald-500">$</span>
+                                  <input
+                                    type="text"
+                                    value={levels.exitHigh}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => updateLevel('exitHigh', e.target.value)}
+                                    className="w-14 bg-transparent text-sm font-bold text-emerald-700 outline-none transition focus:ring-1 focus:ring-emerald-400/50 rounded px-0.5 dark:text-emerald-300"
+                                  />
+                                </div>
+                                <input
+                                  type="text"
+                                  value={levels.exitNote}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => updateLevel('exitNote', e.target.value)}
+                                  className="mt-1.5 w-full bg-transparent text-[10px] text-emerald-500/70 outline-none transition focus:ring-1 focus:ring-emerald-400/50 rounded px-0.5 dark:text-emerald-400/60"
+                                />
+                              </div>
+
+                              {/* Invalidation Card */}
+                              <div className="rounded-xl border border-rose-200/70 bg-rose-50/30 p-3 dark:border-rose-500/20 dark:bg-rose-500/5">
+                                <div className="flex items-center gap-1.5">
+                                  <XCircle size={12} className="text-rose-500 dark:text-rose-400" />
+                                  <span className="text-[10px] font-semibold uppercase tracking-wider text-rose-500 dark:text-rose-400">
+                                    Invalidation Price
+                                  </span>
+                                </div>
+                                <div className="mt-1.5 flex items-baseline gap-1">
+                                  <span className="text-sm text-rose-400 dark:text-rose-500">$</span>
+                                  <input
+                                    type="text"
+                                    value={levels.invalidation}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => updateLevel('invalidation', e.target.value)}
+                                    className="w-16 bg-transparent text-sm font-bold text-rose-700 outline-none transition focus:ring-1 focus:ring-rose-400/50 rounded px-0.5 dark:text-rose-300"
+                                  />
+                                </div>
+                                <input
+                                  type="text"
+                                  value={levels.invalidationNote}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => updateLevel('invalidationNote', e.target.value)}
+                                  className="mt-1.5 w-full bg-transparent text-[10px] text-rose-500/70 outline-none transition focus:ring-1 focus:ring-rose-400/50 rounded px-0.5 dark:text-rose-400/60"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Bottom Row: Option Stop + Risk/Reward */}
+                            <div className="mt-3 grid grid-cols-2 gap-3">
+                              <div className="flex items-center justify-between rounded-xl border border-amber-200/70 bg-amber-50/30 px-4 py-2.5 dark:border-amber-500/20 dark:bg-amber-500/5">
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-500 dark:text-amber-400">
+                                  Option Stop
+                                </span>
+                                <div className="flex items-baseline gap-1">
+                                  <span className="text-xs text-amber-400 dark:text-amber-500">−</span>
+                                  <input
+                                    type="text"
+                                    value={levels.optionStopPct}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => updateLevel('optionStopPct', e.target.value)}
+                                    className="w-10 bg-transparent text-right text-sm font-bold text-amber-700 outline-none transition focus:ring-1 focus:ring-amber-400/50 rounded px-0.5 dark:text-amber-300"
+                                  />
+                                  <span className="text-xs font-medium text-amber-500 dark:text-amber-400">% of premium</span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between rounded-xl border border-slate-200/70 bg-white px-4 py-2.5 dark:border-slate-700/50 dark:bg-slate-900/50">
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                                  Risk / Reward
+                                </span>
+                                <span className={`text-sm font-bold ${
+                                  rrRatio !== '—' && parseFloat(rrRatio) >= 2
+                                    ? 'text-emerald-600 dark:text-emerald-400'
+                                    : rrRatio !== '—' && parseFloat(rrRatio) >= 1
+                                      ? 'text-amber-600 dark:text-amber-400'
+                                      : 'text-slate-500 dark:text-slate-400'
+                                }`}>
+                                  {rrRatio === '—' ? '—' : `1 : ${rrRatio}`}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
