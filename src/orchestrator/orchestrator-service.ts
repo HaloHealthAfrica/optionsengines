@@ -1114,10 +1114,19 @@ export class OrchestratorService {
       }
     }
 
+    const entryRaw = Number(rawPayload?.entry ?? rawPayload?.entry_price ?? 0) || null;
+    const targetRaw = Number(rawPayload?.target ?? rawPayload?.target_price ?? 0) || null;
+    const stopRaw = Number(rawPayload?.stop ?? rawPayload?.stop_loss ?? rawPayload?.stop_price ?? 0) || null;
+    const stratInv = udcResult.decision?.intent?.invalidation ?? 0;
+    const snapshotInvalidation = (stratInv > 0 ? stratInv : null) ?? stopRaw;
+
     try {
       await db.query(
-        `INSERT INTO decision_snapshots (signal_id, decision_id, status, reason, order_plan_json, strategy_json, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+        `INSERT INTO decision_snapshots
+         (signal_id, decision_id, status, reason, order_plan_json, strategy_json,
+          entry_price_low, entry_price_high, exit_price_partial, exit_price_full,
+          invalidation_price, option_stop_pct, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())`,
         [
           signal.signal_id,
           udcResult.decisionId ?? null,
@@ -1125,6 +1134,12 @@ export class OrchestratorService {
           udcResult.reason ?? null,
           udcResult.plan ? JSON.stringify(udcResult.plan) : null,
           udcResult.decision ? JSON.stringify(udcResult.decision) : null,
+          entryRaw,
+          entryRaw != null && targetRaw != null ? entryRaw + 1 : null,
+          targetRaw,
+          targetRaw,
+          snapshotInvalidation,
+          50,
         ],
       );
     } catch (insertErr: any) {
