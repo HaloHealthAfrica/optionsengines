@@ -15,6 +15,22 @@ function resolveHorizon(timeframe: string): string {
   return intraday.includes(timeframe) ? 'INTRADAY' : 'SWING';
 }
 
+const FALLBACK_INVALIDATION_PCT: Record<string, number> = {
+  INTRADAY: 0.012,
+  SWING: 0.020,
+};
+
+function deriveInvalidationFromSnapshot(
+  price: number,
+  direction: string,
+  horizon: string,
+): number {
+  if (!price || price <= 0) return 0;
+  const pct = FALLBACK_INVALIDATION_PCT[horizon] ?? 0.012;
+  const isBull = direction === 'BULL';
+  return Math.round(price * (isBull ? 1 - pct : 1 + pct) * 100) / 100;
+}
+
 /**
  * Unified Decision Core — deterministic, fail-closed entry function.
  *
@@ -66,7 +82,16 @@ export async function runUDC(
   const decisionId = buildDecisionId(signal.id, strategy, horizon, setupType);
 
   if (routed.intent.invalidation === 0) {
-    return { status: 'BLOCKED', reason: 'Invalidation level missing', decisionId };
+    const fallback = deriveInvalidationFromSnapshot(
+      snapshot.price,
+      routed.intent.direction,
+      horizon,
+    );
+    if (fallback > 0) {
+      routed.intent.invalidation = fallback;
+    } else {
+      return { status: 'BLOCKED', reason: 'Invalidation level missing', decisionId };
+    }
   }
 
   const gov = portfolioGovernor(routed.intent, portfolio);
