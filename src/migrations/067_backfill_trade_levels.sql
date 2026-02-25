@@ -37,7 +37,7 @@ SET
     (s.raw_payload->>'stop_price')::numeric
   )
 FROM signals s
-WHERE s.signal_id = ds.signal_id
+WHERE s.signal_id = ds.signal_id::uuid
   AND ds.entry_price_low IS NULL
   AND (
     (s.raw_payload->>'entry') IS NOT NULL
