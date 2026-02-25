@@ -6,7 +6,7 @@ export async function GET() {
   response.headers.set('Cache-Control', 'no-store');
   response.headers.set(
     'Set-Cookie',
-    `csrf_token=${token}; HttpOnly=false; Path=/; SameSite=Strict;${
+    `csrf_token=${token}; Path=/; SameSite=Strict;${
       process.env.NODE_ENV === 'production' ? ' Secure;' : ''
     }`
   );

@@ -1,9 +1,12 @@
+import { NextResponse } from 'next/server';
 import { backendLogin } from '@/lib/backend-api';
 import { signToken, validateCredentials } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60; // Allow Fly.io cold start (~30–60s)
+export const maxDuration = 60;
+
+const COOKIE_MAX_AGE = 60 * 60 * 24;
 
 function validateCsrfToken(request) {
   const cookieHeader = request.headers.get('cookie');
@@ -18,6 +21,16 @@ function validateCsrfToken(request) {
   return Boolean(cookieToken && headerToken && cookieToken === headerToken);
 }
 
+function authResponse(body, token) {
+  const secure = process.env.NODE_ENV === 'production' ? ' Secure;' : '';
+  return NextResponse.json(body, {
+    headers: {
+      'Cache-Control': 'no-store',
+      'Set-Cookie': `auth_token=${token}; HttpOnly; Path=/; Max-Age=${COOKIE_MAX_AGE}; SameSite=Strict;${secure}`,
+    },
+  });
+}
+
 export async function POST(request) {
   try {
     const rate = rateLimit({
@@ -27,61 +40,42 @@ export async function POST(request) {
     });
 
     if (!rate.allowed) {
-      return Response.json(
+      return NextResponse.json(
         { error: 'Too many login attempts. Please try again later.' },
         { status: 429 }
       );
     }
 
     if (!validateCsrfToken(request)) {
-      return Response.json({ error: 'Invalid CSRF token' }, { status: 403 });
+      return NextResponse.json({ error: 'Invalid CSRF token' }, { status: 403 });
     }
 
     const { email, password } = await request.json();
     if (!email || !password) {
-      return Response.json({ error: 'Email and password are required' }, { status: 400 });
+      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
 
-    // Try to authenticate with backend first
+    // Try backend authentication first, fall back to local demo credentials
     try {
       console.log('[Login] Attempting backend authentication');
       const result = await backendLogin(email, password);
-      
-      if (result.success && result.token) {
+
+      if (result?.success && result.token) {
         console.log('[Login] Backend authentication successful');
-        const response = Response.json({ success: true, mode: 'backend' });
-        response.headers.set('Cache-Control', 'no-store');
-        response.headers.set(
-          'Set-Cookie',
-          `auth_token=${result.token}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24}; SameSite=Strict;${
-            process.env.NODE_ENV === 'production' ? ' Secure;' : ''
-          }`
-        );
-        return response;
+        return authResponse({ success: true, mode: 'backend' }, result.token);
       }
     } catch (backendError) {
-      console.warn('[Login] Backend authentication failed, falling back to local auth:', backendError.message);
-      
-      // Fallback to local authentication if backend is unavailable
-      if (!validateCredentials(email, password)) {
-        return Response.json({ error: 'Invalid credentials' }, { status: 401 });
-      }
-
-      console.log('[Login] Local authentication successful (fallback mode)');
-      const token = await signToken({ email, role: 'admin' });
-
-      const response = Response.json({ success: true, mode: 'local' });
-      response.headers.set('Cache-Control', 'no-store');
-      response.headers.set(
-        'Set-Cookie',
-        `auth_token=${token}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24}; SameSite=Strict;${
-          process.env.NODE_ENV === 'production' ? ' Secure;' : ''
-        }`
-      );
-      return response;
+      console.warn('[Login] Backend auth unavailable, trying local fallback:', backendError.message);
     }
 
-    return Response.json({ error: 'Invalid credentials' }, { status: 401 });
+    // Local / demo credential fallback
+    if (validateCredentials(email, password)) {
+      console.log('[Login] Local authentication successful (fallback mode)');
+      const token = await signToken({ email, role: 'admin' });
+      return authResponse({ success: true, mode: 'local' }, token);
+    }
+
+    return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
   } catch (error) {
     console.error('[Login] Error:', error);
     const message = error?.message || 'Login failed. Please try again.';
@@ -89,6 +83,6 @@ export async function POST(request) {
     const hint = message.includes('Backend fetch failed')
       ? 'Backend unreachable. Check NEXT_PUBLIC_API_URL and backend uptime.'
       : undefined;
-    return Response.json({ error: message, hint }, { status });
+    return NextResponse.json({ error: message, hint }, { status });
   }
 }

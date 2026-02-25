@@ -48,10 +48,17 @@ export default function LoginForm({ redirectTo = '/' } = {}) {
       });
 
       if (!response.ok) {
-        const payload = await response.json();
-        const message = payload.error || (mode === 'register' ? 'Registration failed' : 'Login failed');
-        const hint = payload.hint ? ` ${payload.hint}` : '';
-        throw new Error(`${message}${hint}`);
+        let message = mode === 'register' ? 'Registration failed' : 'Login failed';
+        try {
+          const payload = await response.json();
+          if (payload.error) message = payload.error;
+          if (payload.hint) message += ` ${payload.hint}`;
+        } catch {
+          message = response.status === 403
+            ? 'Session expired. Please refresh and try again.'
+            : `${message} (${response.status}). Please try again.`;
+        }
+        throw new Error(message);
       }
 
       router.push(redirectTo);
